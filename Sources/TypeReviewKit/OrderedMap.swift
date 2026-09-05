@@ -17,7 +17,7 @@ import Foundation
 ///
 /// Insertion order here means first appearance, which is what the original
 /// produces.
-public struct OrderedMap<Value> {
+public struct OrderedMap<Value: Sendable & Equatable>: Sendable, Equatable {
     private(set) public var keys: [String] = []
     private var storage: [String: Value] = [:]
 

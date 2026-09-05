@@ -26,6 +26,8 @@ every way this port can go wrong is silent:
 | `x ** y` | repeated multiplication: `0.3*0.3*0.3` = 0.027 | `Math.pow` gives 0.026999999999999996 |
 | Hashed containers | `Set`/`Dictionary` order changes per launch | `Map` preserves insertion order |
 | Sort stability | `sorted` is documented as *not* stable | `Array.sort` is stable since ES2019 |
+| Object key order | `Dictionary` has none; `JSONEncoder` guarantees none | insertion order, but integer-like keys hoist ascending |
+| Number printing | `Double(1.7e12).description` is `"1.7e+12"` | `JSON.stringify` gives `1700000000000` |
 | String indexing | `Character` is a grapheme cluster | positions are UTF-16 code units |
 
 None of those fail a review, and the first one passes every test the original
@@ -91,6 +93,24 @@ depending on an implementation detail Apple has reserved the right to change,
 where the symptom would be users being told to drill different bigrams than the
 website shows.
 
-Next: the corpus generators, the profile codec. Then the AppKit surface — where the earlier WKWebView shell's
+### Byte identity
+
+`serializeProfileString` reproduces the website's bytes exactly — the test
+compares against a 4,858-byte reference profile and points at the first
+diverging offset when it fails. That is a product requirement, not a purity
+exercise: a user exports from the site and imports here, and the receiving side
+validates with a check that rejects the entire profile over one unexpected key.
+
+Two things make it exact. `JSONWriter` keeps object keys ordered and applies
+JavaScript's own rule that integer-like keys hoist ahead of the rest in
+ascending order — with numbers enabled, a passage produces bigrams like `"12"`.
+And whole numbers print without a fractional part, since a timestamp rendered
+as `1.7e+12` is a different file.
+
+Verified by moving `adaptive` to the end of the settings object, which is what
+the site's own validator does on load: the test fails at offset 60 and prints
+both sides.
+
+Next: `Session` (the run orchestrator), then the AppKit surface. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.

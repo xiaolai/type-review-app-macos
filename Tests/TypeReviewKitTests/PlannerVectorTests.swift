@@ -231,3 +231,53 @@ final class PlannerVectorTests: XCTestCase {
         XCTAssertTrue(checkedATie, "no tied confidences in the vectors — the ordering is untested")
     }
 }
+
+// MARK: - Generators
+
+extension PlannerVectorTests {
+    struct GeneratorVectors: Decodable {
+        struct Pseudo: Decodable {
+            let seed: UInt32
+            let text: String
+        }
+        struct Plain: Decodable {
+            let seed: UInt32
+            let text: String
+            let withPunctuation: String
+        }
+        let pseudoWords: [Pseudo]
+        let plainWords: [Plain]
+    }
+
+    /// The generators are where an RNG divergence becomes visible as words.
+    /// They also pin the *order* of draws: moving one `rng()` call changes
+    /// every word after it while the code still reads correctly.
+    func testGeneratedTextMatchesCharacterForCharacter() throws {
+        let vectors = try load("generators", as: GeneratorVectors.self)
+
+        for testCase in vectors.pseudoWords {
+            var rng = Mulberry32(seed: testCase.seed)
+            let passage = try generatePseudoWords(
+                filter: Filter(allowed: ["a", "s", "d", "f", "j", "k", "l"], focus: "f"),
+                options: PseudoWordOptions(wordCount: 12),
+                rng: &rng)
+            XCTAssertEqual(passage.text, testCase.text, "pseudo-words for seed \(testCase.seed)")
+        }
+
+        for testCase in vectors.plainWords {
+            var plain = Mulberry32(seed: testCase.seed)
+            let passage = try generatePlainWords(
+                options: PlainWordsOptions(wordCount: 12), rng: &plain)
+            XCTAssertEqual(passage.text, testCase.text, "plain words for seed \(testCase.seed)")
+
+            var punctuated = Mulberry32(seed: testCase.seed)
+            let decorated = try generatePlainWords(
+                options: PlainWordsOptions(
+                    wordCount: 12, includeNumbers: true, includePunctuation: true),
+                rng: &punctuated)
+            XCTAssertEqual(
+                decorated.text, testCase.withPunctuation,
+                "punctuated words for seed \(testCase.seed)")
+        }
+    }
+}

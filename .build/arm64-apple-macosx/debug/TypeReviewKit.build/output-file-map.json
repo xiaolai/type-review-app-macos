@@ -2,6 +2,20 @@
   "": {
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/primary.swiftdeps"
   },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift": {
+    "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Corpus.d",
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Corpus.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Corpus~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Corpus.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Corpus.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Generators.swift": {
+    "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Generators.d",
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Generators.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Generators~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Generators.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Generators.dia"
+  },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Histogram.swift": {
     "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Histogram.d",
     "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Histogram.swift.o",
@@ -15,6 +29,13 @@
     "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSMath~partial.swiftmodule",
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSMath.swiftdeps",
     "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSMath.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/JSONWriter.swift": {
+    "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSONWriter.d",
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSONWriter.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSONWriter~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSONWriter.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/JSONWriter.dia"
   },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/KeyStats.swift": {
     "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/KeyStats.d",
@@ -43,6 +64,13 @@
     "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/OrderedMap~partial.swiftmodule",
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/OrderedMap.swiftdeps",
     "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/OrderedMap.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Profile.swift": {
+    "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Profile.d",
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Profile.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Profile~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Profile.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Profile.dia"
   },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/RNG.swift": {
     "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/RNG.d",

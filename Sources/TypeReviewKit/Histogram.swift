@@ -34,8 +34,16 @@ public func histogramFromSteps(_ steps: [Step]) -> Histogram {
     var histogram = Histogram()
     guard steps.count >= 2 else { return histogram }
 
-    // Accumulators kept in the same insertion order as the output.
-    var accumulator = OrderedMap<(hit: Int, miss: Int, timeSum: Double, timeCount: Int)>()
+    /// Per-bigram accumulator. A named struct rather than a tuple so it can
+    /// live in the ordered map, which requires its values to be comparable.
+    struct Accumulator: Sendable, Equatable {
+        var hit = 0
+        var miss = 0
+        var timeSum: Double = 0
+        var timeCount = 0
+    }
+    // Kept in the same insertion order as the output.
+    var accumulator = OrderedMap<Accumulator>()
 
     for index in 1..<steps.count {
         let previous = steps[index - 1]
@@ -47,7 +55,7 @@ public func histogramFromSteps(_ steps: [Step]) -> Histogram {
         guard current.position == previous.position + 1 else { continue }
         let bigram = previous.expected + current.expected
 
-        var entry = accumulator[bigram] ?? (0, 0, 0, 0)
+        var entry = accumulator[bigram] ?? Accumulator()
         entry.hit += 1
         if current.typo {
             entry.miss += 1
