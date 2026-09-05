@@ -1,0 +1,43 @@
+{
+  "": {
+    "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/TypeReviewKitTests.d",
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/TypeReviewKitTests.o",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/primary.swiftdeps"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/DeserializeVectorTests.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DeserializeVectorTests.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DeserializeVectorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DeserializeVectorTests.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DeserializeVectorTests.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/GoldenVectorTests.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/GoldenVectorTests.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/GoldenVectorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/GoldenVectorTests.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/GoldenVectorTests.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/PlannerVectorTests.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/PlannerVectorTests.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/PlannerVectorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/PlannerVectorTests.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/PlannerVectorTests.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/ProfileCodecTests.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/ProfileCodecTests.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/ProfileCodecTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/ProfileCodecTests.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/ProfileCodecTests.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/SessionVectorTests.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SessionVectorTests.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SessionVectorTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SessionVectorTests.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SessionVectorTests.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DerivedSources/resource_bundle_accessor.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/resource_bundle_accessor.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/resource_bundle_accessor~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/resource_bundle_accessor.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/resource_bundle_accessor.dia"
+  }
+}

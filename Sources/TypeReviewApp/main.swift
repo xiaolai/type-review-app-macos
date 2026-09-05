@@ -1,7 +1,9 @@
-import TypeReviewKit
+import AppKit
 
-// Placeholder entry point. The app target exists so `swift build` covers the
-// eventual AppKit surface; today the work is in TypeReviewKit, where the
-// engine is being ported module by module against golden vectors.
-var rng = Mulberry32(seed: 42)
-print("TypeReview — kit online, first draw \(rng.next())")
+// Explicit setup rather than @main: the executable target is a plain SPM
+// product, and the Makefile assembles the bundle around it.
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.regular)
+app.run()

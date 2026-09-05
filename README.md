@@ -139,6 +139,33 @@ surrogate because a JS string may hold one, while Foundation refuses the text
 outright because a Swift String may not. Both verdicts are `corrupt`; they
 differ only in how far the payload gets first.
 
-Next: the AppKit surface. Then the AppKit surface — where the earlier WKWebView shell's
+## The app
+
+```sh
+make run        # build the bundle and launch it
+make selftest   # drive a full run through the real input path
+make test       # the Kit against the vectors
+```
+
+`TypingView` is CoreText, not `NSTextView`, for two reasons.
+
+**Input goes through `NSTextInputClient`.** Reading `NSEvent.characters` in
+`keyDown` is the tempting shortcut and it is the one silent data-corruption bug
+available here: during CJK composition every keystroke reports its
+pre-composition character, so the profile would fill with letters the user
+never typed. Going through the input context means marked text is drawn as
+marked text, only committed characters reach the engine, and the candidate
+window is anchored under the caret. The web version can only *drop*
+composition keystrokes — this is the difference between protecting CJK users
+and serving them.
+
+**Layout does not depend on typing status.** Colour is applied per glyph run at
+draw time, so the `CTFrame` is built once per passage and reused for every
+keystroke, and the caret is placed by asking a specific line for its offset —
+which is what keeps it one line tall at a wrap boundary, where a space belongs
+to two line fragments at once.
+
+Next: results and statistics screens, the Settings window, then signing and
+distribution. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.
