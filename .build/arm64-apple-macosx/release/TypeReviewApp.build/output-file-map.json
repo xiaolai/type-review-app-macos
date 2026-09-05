@@ -28,6 +28,12 @@
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.swiftdeps",
     "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.dia"
   },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SettingsWindowController.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/SettingsWindowController.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/SettingsWindowController~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/SettingsWindowController.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/SettingsWindowController.dia"
+  },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift": {
     "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.swift.o",
     "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController~partial.swiftmodule",

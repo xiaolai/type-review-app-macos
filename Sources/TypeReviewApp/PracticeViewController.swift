@@ -142,6 +142,42 @@ final class PracticeViewController: NSViewController {
     /// Every recorded run, for the statistics window.
     var history: [RunResult] { session?.profile.results ?? [] }
 
+    var currentSettings: ProfileSettings { session?.profile.settings ?? .default }
+
+    /// Applies settings from the Settings window. Returns false when the
+    /// engine refuses them.
+    ///
+    /// Mid-run changes are staged rather than applied: `updateSettings` starts
+    /// a new run, which would throw away a paragraph the user is halfway
+    /// through. Before the first keystroke a restart is what they expect —
+    /// the new word count should be visible immediately.
+    @discardableResult
+    func applySettings(_ next: ProfileSettings) -> Bool {
+        guard let session, let validated = validateSettings(encodeForValidation(next)) else {
+            return false
+        }
+        if session.keystrokes == 0 {
+            try? session.updateSettings(validated)
+            refresh(resetPassage: true)
+        } else {
+            session.stageSettings(validated)
+        }
+        try? store?.save(session.profile)
+        return true
+    }
+
+    /// Round-trips through the serializer so the settings take the same path
+    /// into the validator that a stored profile does. Anything the validator
+    /// would reject on load is therefore rejected here, at the moment the user
+    /// can see which control caused it.
+    private func encodeForValidation(_ settings: ProfileSettings) -> Any? {
+        let json = JSONWriter.stringify(serializeProfile(Profile(settings: settings)))
+        guard let data = json.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["settings"]
+    }
+
     var currentPassage: String {
         (try? session?.snapshot().typing.expected) ?? ""
     }

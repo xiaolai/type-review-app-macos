@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Built on demand: a main-actor default value cannot be initialised from
     // AppDelegate's nonisolated init.
     private var stats: StatsViewController?
+    private var settings: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let practice = PracticeViewController()
@@ -47,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             withTitle: "About TYPE",
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
+        let settingsItem = appMenu.addItem(
+            withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide TYPE", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(
@@ -85,6 +90,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newText(_ sender: Any?) {
         practice?.startFreshRun()
+    }
+
+    @objc private func showSettings(_ sender: Any?) {
+        let controller = settings ?? SettingsWindowController()
+        settings = controller
+        controller.read = { [weak self] in self?.practice?.currentSettings ?? .default }
+        controller.write = { [weak self] next in self?.practice?.applySettings(next) ?? false }
+        controller.present()
     }
 
     /// Statistics get their own window rather than a route. A separate window

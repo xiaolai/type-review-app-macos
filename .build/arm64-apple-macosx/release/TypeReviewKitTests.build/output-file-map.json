@@ -40,6 +40,12 @@
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SessionVectorTests.swiftdeps",
     "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SessionVectorTests.dia"
   },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/SettingsSchemaTests.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SettingsSchemaTests.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SettingsSchemaTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SettingsSchemaTests.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/SettingsSchemaTests.dia"
+  },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DerivedSources/resource_bundle_accessor.swift": {
     "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/resource_bundle_accessor.swift.o",
     "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/resource_bundle_accessor~partial.swiftmodule",

@@ -1,0 +1,102 @@
+{
+  "defaults": {
+    "mode": "benchmark",
+    "targetWpm": 50,
+    "adaptive": {
+      "minAlphabetSize": 6,
+      "alphabetExpansion": 0
+    },
+    "wordCount": 30,
+    "testMode": "words",
+    "testDurationSec": 30,
+    "stopOnError": false,
+    "noBackspace": false,
+    "passageLength": "any",
+    "includeNumbers": false,
+    "includePunctuation": false
+  },
+  "uiBounds": {
+    "targetWpm": {
+      "lo": 10,
+      "hi": 250,
+      "integer": false
+    },
+    "wordCount": {
+      "lo": 5,
+      "hi": 200,
+      "integer": true
+    },
+    "testDurationSec": {
+      "lo": 10,
+      "hi": 300,
+      "integer": true
+    },
+    "minAlphabetSize": {
+      "lo": 1,
+      "hi": 26,
+      "integer": true
+    },
+    "alphabetExpansion": {
+      "lo": 0,
+      "hi": 1,
+      "integer": false
+    }
+  },
+  "engineBounds": {
+    "targetWpm": {
+      "lo": 1,
+      "hi": 500,
+      "integer": false
+    },
+    "wordCount": {
+      "lo": 1,
+      "hi": 1000,
+      "integer": true
+    },
+    "testDurationSec": {
+      "lo": 5,
+      "hi": 600,
+      "integer": true
+    },
+    "minAlphabetSize": {
+      "lo": 1,
+      "hi": 64,
+      "integer": true
+    },
+    "alphabetExpansion": {
+      "lo": 0,
+      "hi": 1,
+      "integer": false
+    }
+  },
+  "domains": {
+    "mode": [
+      "adaptive",
+      "benchmark"
+    ],
+    "testMode": [
+      "words",
+      "time"
+    ],
+    "passageLength": [
+      "any",
+      "short",
+      "medium",
+      "long"
+    ]
+  },
+  "presets": {
+    "wordCount": [
+      10,
+      25,
+      30,
+      50
+    ],
+    "testDurationSec": [
+      15,
+      30,
+      60,
+      120
+    ]
+  }
+}

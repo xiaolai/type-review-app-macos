@@ -179,6 +179,31 @@ time of day is within an hour of midnight, which is why the vector needed
 anchors just after midnight spanning a spring-forward before it could see the
 difference.
 
-Next: the Settings window, then signing and distribution. Then the AppKit surface — where the earlier WKWebView shell's
+The Settings window (⌘,) is hand-rolled AppKit — SwiftUI's `Settings` is a
+`Scene` and cannot exist in an `NSApplication.shared.run()` host. Every write
+goes through the engine's `validateSettings`, by round-tripping through the
+serializer first, so a control cannot put a value into the profile that the
+loader would later refuse; and a change made mid-run is *staged* rather than
+applied, because restarting would throw away the paragraph the user is halfway
+through.
+
+No control emits a value merely because it displayed one. An imported profile
+may legally hold a 600-second duration, which the picker has no preset for, so
+it shows as `Custom (600)` — clamping on display would rewrite data the user
+never touched, and the next unrelated edit would persist the rewrite.
+
+The Appearance and Sound panes the website has are deliberately absent: this
+app follows the system appearance rather than shipping four hand-built themes,
+and no audio is ported yet.
+
+## Drift between the two implementations
+
+Everything shared is pinned by a vector, including the settings surface itself
+— defaults, both bound tables, option domains and the presets each picker
+offers. That is the only thing standing between two independent
+implementations and a slow divergence nobody notices until a profile fails to
+load on one side.
+
+Next: signing, notarization and distribution. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.
