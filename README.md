@@ -28,6 +28,8 @@ every way this port can go wrong is silent:
 | Sort stability | `sorted` is documented as *not* stable | `Array.sort` is stable since ES2019 |
 | Object key order | `Dictionary` has none; `JSONEncoder` guarantees none | insertion order, but integer-like keys hoist ascending |
 | Number printing | `Double(1.7e12).description` is `"1.7e+12"` | `JSON.stringify` gives `1700000000000` |
+| JSON booleans | `NSNumber` reports `true` as a number | `typeof` tells them apart |
+| Lone surrogates | Foundation refuses the JSON text | `JSON.parse` accepts it |
 | String indexing | `Character` is a grapheme cluster | positions are UTF-16 code units |
 
 None of those fail a review, and the first one passes every test the original
@@ -126,6 +128,17 @@ So each defence here has been checked by planting the bug it guards against.
 Where that could not be done, the README says so rather than implying
 coverage.
 
-Next: `deserializeProfile` and the validators, then the AppKit surface. Then the AppKit surface — where the earlier WKWebView shell's
+`deserializeProfile` and the validators are checked against 34 cases covering
+the rejection surface — unknown keys at four levels, out-of-range and
+wrong-typed fields, a version from the future, the v1 migration, and an
+over-cap histogram, which degrades to an empty histogram rather than
+discarding the profile.
+
+One documented divergence: JavaScript's `JSON.parse` accepts an unpaired
+surrogate because a JS string may hold one, while Foundation refuses the text
+outright because a Swift String may not. Both verdicts are `corrupt`; they
+differ only in how far the payload gets first.
+
+Next: the AppKit surface. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.
