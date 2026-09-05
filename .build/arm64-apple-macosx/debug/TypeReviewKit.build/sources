@@ -1,5 +1,6 @@
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Aggregations.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift
+/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/CorpusSources.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Deserialize.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Generators.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Histogram.swift
@@ -11,6 +12,8 @@
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/OrderedMap.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Profile.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/RNG.swift
+/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Sanitize.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Session.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/SettingsSchema.swift
 /Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/TextInput.swift
+/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/DerivedSources/resource_bundle_accessor.swift

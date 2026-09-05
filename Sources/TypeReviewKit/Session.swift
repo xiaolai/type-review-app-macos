@@ -63,8 +63,12 @@ public final class Session {
     public private(set) var profile: Profile
     private let now: () -> Double
     private var rng: Mulberry32
-    private let adaptiveSource: ((Filter, Int, PassageLength) throws -> Passage)?
-    private let benchmarkSource: ((Int, ProfileSettings) throws -> Passage)?
+    /// Text sources. They take the session's RNG by reference, because the
+    /// corpus picker draws from the same stream as the generators — a source
+    /// with its own generator would make runs reproducible individually and
+    /// not in sequence.
+    private let adaptiveSource: ((Filter, Int, PassageLength, inout Mulberry32) throws -> Passage)?
+    private let benchmarkSource: ((Int, ProfileSettings, inout Mulberry32) throws -> Passage)?
     private let onResult: ((RunResult, Profile) -> Void)?
 
     private var textInput: TextInput?
@@ -88,8 +92,8 @@ public final class Session {
         profile: Profile,
         now: @escaping () -> Double = { Date().timeIntervalSince1970 * 1000 },
         rng: Mulberry32 = Mulberry32(seed: UInt32.random(in: 0...UInt32.max)),
-        adaptiveSource: ((Filter, Int, PassageLength) throws -> Passage)? = nil,
-        benchmarkSource: ((Int, ProfileSettings) throws -> Passage)? = nil,
+        adaptiveSource: ((Filter, Int, PassageLength, inout Mulberry32) throws -> Passage)? = nil,
+        benchmarkSource: ((Int, ProfileSettings, inout Mulberry32) throws -> Passage)? = nil,
         onResult: ((RunResult, Profile) -> Void)? = nil
     ) throws {
         self.profile = profile
@@ -112,7 +116,9 @@ public final class Session {
             let plan = buildPlan()
             self.plan = plan
             let filter = Filter(allowed: plan.included, focus: plan.focus)
-            passage = try adaptiveSource.map { try $0(filter, Int(settings.wordCount), settings.passageLength) }
+            passage = try adaptiveSource.map {
+                try $0(filter, Int(settings.wordCount), settings.passageLength, &rng)
+            }
                 // The default source ignores passageLength: pseudo-words honour
                 // the word count directly, and the bucket only matters to
                 // adapters pulling from a real corpus.
@@ -125,7 +131,7 @@ public final class Session {
             let words =
                 settings.testMode == .time
                 ? timeModeWordBudget(settings.testDurationSec) : Int(settings.wordCount)
-            passage = try benchmarkSource.map { try $0(words, settings) }
+            passage = try benchmarkSource.map { try $0(words, settings, &rng) }
                 ?? generatePlainWords(
                     options: PlainWordsOptions(
                         wordCount: words, includeNumbers: settings.includeNumbers,

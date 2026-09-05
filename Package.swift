@@ -13,7 +13,13 @@ let package = Package(
         // profile codec. Pure Swift, no AppKit — the same separation the
         // TypeScript original enforces, and for the same reason: it is the
         // part that must be exhaustively testable.
-        .target(name: "TypeReviewKit"),
+        .target(
+            name: "TypeReviewKit",
+            // The bundled corpus travels with the Kit: quotes and code
+            // snippets are domain data, not app chrome, and the same bytes
+            // ship in the website.
+            resources: [.copy("Resources")]
+        ),
         .executableTarget(name: "TypeReviewApp", dependencies: ["TypeReviewKit"]),
         .testTarget(
             name: "TypeReviewKitTests",

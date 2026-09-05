@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stats: StatsViewController?
     private var settings: SettingsWindowController?
     private var keyboardMenuItem: NSMenuItem?
+    private var sourceMenuItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let practice = PracticeViewController()
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = makeMenu()
         practice.setKeyboardVisible(
             UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true)
+        markSourceMenu()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -74,6 +76,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyboardItem.state = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
             ? .on : .off
         keyboardMenuItem = keyboardItem
+
+        viewMenu.addItem(.separator())
+        let sourceItem = NSMenuItem(title: "Source", action: nil, keyEquivalent: "")
+        let sourceMenu = NSMenu(title: "Source")
+        for (index, channel) in CorpusChannel.allCases.enumerated() {
+            let item = sourceMenu.addItem(
+                withTitle: channel.label, action: #selector(chooseSource(_:)),
+                keyEquivalent: String(index + 4))
+            item.target = self
+            item.representedObject = channel.rawValue
+        }
+        sourceItem.submenu = sourceMenu
+        viewMenu.addItem(sourceItem)
+        sourceMenuItems = sourceMenu.items
         viewItem.submenu = viewMenu
         root.addItem(viewItem)
 
@@ -99,6 +115,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newText(_ sender: Any?) {
         practice?.startFreshRun()
+    }
+
+    @objc private func chooseSource(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+            let channel = CorpusChannel(rawValue: raw)
+        else { return }
+        practice?.channel = channel
+        markSourceMenu()
+    }
+
+    /// A checkmark on the active source, so the menu says which corpus the
+    /// text is coming from rather than only offering to change it.
+    private func markSourceMenu() {
+        let active = practice?.channel.rawValue
+        for item in sourceMenuItems {
+            item.state = (item.representedObject as? String) == active ? .on : .off
+        }
     }
 
     @objc private func toggleKeyboard(_ sender: Any?) {
@@ -151,6 +184,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 before = 0
             }
 
+            // A missing resource bundle looks exactly like an empty corpus to
+            // the picker, so assert the data is actually there rather than
+            // letting the app quietly serve generated words forever.
+            guard BundledCorpus.quotes.entries.count > 100,
+                !BundledCorpus.code.entries.isEmpty
+            else {
+                print(
+                    "SELFTEST FAIL: corpus not bundled — "
+                        + "\(BundledCorpus.quotes.entries.count) quotes, "
+                        + "\(BundledCorpus.code.entries.count) code entries")
+                exit(1)
+            }
             guard let view = practice.view.subviews.compactMap({ $0 as? TypingView }).first else {
                 print("SELFTEST FAIL: no typing surface")
                 exit(1)

@@ -11,6 +11,9 @@ final class PracticeViewController: NSViewController {
     private let hintLabel = NSTextField(labelWithString: "⇥ new text · ⏎ next run")
     private let resultsView = ResultsView()
     private let keyboardView = KeyboardView()
+    /// The adapter reports its pick from a `@Sendable` closure, so the value
+    /// lands in a reference box rather than being captured mutably.
+    private let entryBox = EntryBox()
     private var keyboardHeight: NSLayoutConstraint?
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
@@ -20,6 +23,18 @@ final class PracticeViewController: NSViewController {
     private var session: Session?
     private var store: ProfileFileStore?
     private var pendingSaveError: String?
+    private var currentEntry: CorpusEntry?
+    /// Which corpus runs draw from. Remembered across launches.
+    var channel: CorpusChannel {
+        get {
+            CorpusChannel(rawValue: UserDefaults.standard.string(forKey: "CorpusChannel") ?? "")
+                ?? .auto
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: "CorpusChannel")
+            startFreshRun()
+        }
+    }
 
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
@@ -117,11 +132,26 @@ final class PracticeViewController: NSViewController {
             case .evicted:
                 profile = Profile()
             }
-            session = try Session(profile: profile)
+            session = try Session(
+                profile: profile,
+                adaptiveSource: { [unowned self] filter, wordCount, _, rng in
+                    try adapter().adaptiveSource(filter: filter, wordCount: wordCount, rng: &rng)
+                },
+                benchmarkSource: { [unowned self] wordCount, settings, rng in
+                    try adapter().benchmarkSource(
+                        wordCount: wordCount, settings: settings, rng: &rng)
+                })
             refresh(resetPassage: true)
         } catch {
             hintLabel.stringValue = "could not start: \(error.localizedDescription)"
         }
+    }
+
+    /// Rebuilt per pick so a channel change takes effect on the next run
+    /// without rebuilding the session.
+    private func adapter() -> CorpusAdapter {
+        let box = entryBox
+        return CorpusAdapter(channel: channel) { entry in box.value = entry }
     }
 
     private func type(_ character: String) {
@@ -133,6 +163,14 @@ final class PracticeViewController: NSViewController {
         } catch {
             hintLabel.stringValue = "input failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Credits the passage's source when there is one to credit.
+    private func attribution() -> String {
+        guard let entry = entryBox.value, let attribution = entry.attribution else { return "" }
+        let parts = [attribution.title, attribution.author].compactMap { $0 }
+        let name = parts.isEmpty ? entry.id : parts.joined(separator: " — ")
+        return "\(name) · \(attribution.license)"
     }
 
     private func finish() {
@@ -220,7 +258,9 @@ final class PracticeViewController: NSViewController {
             typingView.isHidden = false
             resultsView.isHidden = true
             keyboardView.setPressed(nil)
-            hintLabel.stringValue = pendingSaveError ?? "⇥ new text · ⏎ next run"
+            let credit = attribution()
+            hintLabel.stringValue = pendingSaveError
+                ?? (credit.isEmpty ? "⇥ new text · ⏎ next run" : credit)
             view.window?.makeFirstResponder(typingView)
         } else {
             typingView.update(statuses: snapshot.typing.statuses, cursor: snapshot.typing.pos)

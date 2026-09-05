@@ -1,0 +1,167 @@
+{
+  "sanitize": [
+    {
+      "name": "collapses whitespace runs",
+      "input": "a  \t b\n\nc\nd",
+      "text": "a b\n\nc d",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "keeps paragraph breaks",
+      "input": "one\n\n\n\ntwo",
+      "text": "one\n\ntwo",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "preserves layout when asked",
+      "input": "def f():\n    return 1",
+      "preserveLayout": true,
+      "text": "def f():\n    return 1",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "drops control characters",
+      "input": "a\u0000b\u0007c",
+      "text": "abc",
+      "droppedChars": 3,
+      "truncated": false
+    },
+    {
+      "name": "drops surrogate halves",
+      "input": "ok 😀 done",
+      "text": "ok done",
+      "droppedChars": 2,
+      "truncated": false
+    },
+    {
+      "name": "normalises CRLF",
+      "input": "a\r\nb\rc",
+      "text": "a b c",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "truncates at a word boundary",
+      "input": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word ",
+      "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+      "droppedChars": 0,
+      "truncated": true
+    }
+  ],
+  "lengthScore": [
+    {
+      "entryLength": 100,
+      "wanted": 100,
+      "score": 1
+    },
+    {
+      "entryLength": 50,
+      "wanted": 100,
+      "score": 0
+    },
+    {
+      "entryLength": 49,
+      "wanted": 100,
+      "score": 0
+    },
+    {
+      "entryLength": 200,
+      "wanted": 100,
+      "score": 0.5
+    },
+    {
+      "entryLength": 300,
+      "wanted": 100,
+      "score": 0
+    },
+    {
+      "entryLength": 301,
+      "wanted": 100,
+      "score": 0
+    },
+    {
+      "entryLength": 150,
+      "wanted": 100,
+      "score": 0.75
+    },
+    {
+      "entryLength": 0,
+      "wanted": 100,
+      "score": 0
+    }
+  ],
+  "picks": [
+    {
+      "seed": 7,
+      "wantedChars": 80,
+      "id": "q-twain-vote",
+      "length": 57
+    },
+    {
+      "seed": 7,
+      "wantedChars": 200,
+      "id": "q-twain-truth",
+      "length": 108
+    },
+    {
+      "seed": 7,
+      "wantedChars": 400,
+      "id": "q-thoreau-deliberate",
+      "length": 101
+    },
+    {
+      "seed": 42,
+      "wantedChars": 80,
+      "id": "q-epictetus-misfortune",
+      "length": 106
+    },
+    {
+      "seed": 42,
+      "wantedChars": 200,
+      "id": "q-art-marcus-meditations",
+      "length": 215
+    },
+    {
+      "seed": 42,
+      "wantedChars": 400,
+      "id": "q-art-darwin-origin",
+      "length": 286
+    },
+    {
+      "seed": 99,
+      "wantedChars": 80,
+      "id": "q-feynman-know",
+      "length": 91
+    },
+    {
+      "seed": 99,
+      "wantedChars": 200,
+      "id": "q-pike-rule3",
+      "length": 66
+    },
+    {
+      "seed": 99,
+      "wantedChars": 400,
+      "id": "q-art-twain-river",
+      "length": 250
+    }
+  ],
+  "quoteCount": 189,
+  "firstQuotes": [
+    {
+      "id": "q-twain-travel",
+      "text": "Travel is fatal to prejudice, bigotry, and narrow-mindedness, and many of our people need it sorely on these accounts."
+    },
+    {
+      "id": "q-twain-rumours",
+      "text": "The reports of my death are greatly exaggerated."
+    },
+    {
+      "id": "q-twain-vote",
+      "text": "If voting made any difference they wouldn't let us do it."
+    }
+  ]
+}

@@ -219,6 +219,21 @@ useful question is "which keys are behind target". Error rate overrides the
 speed ramp, because speed and accuracy are different problems and one colour
 ramp cannot say both.
 
+## The corpus
+
+The 189 curated quotes and the code snippets ship inside the Kit as resources —
+domain data, not app chrome, and the same bytes the website serves. `⌘4`–`⌘7`
+switch source: Auto, Quotes, Code, Generated.
+
+Both corpus sources draw from the *session's* RNG rather than one of their own.
+That is what keeps a seeded session reproducible in sequence rather than only
+run by run, and it is why the picker's single draw is pinned by vector: one
+extra draw shifts every later passage.
+
+The generators remain the fallback and always will be. A six-letter lesson has
+no real sentence available, and a timed run needs more text than any quote
+holds — so "no passage" is never an outcome the app can reach.
+
 ## Drift between the two implementations
 
 Everything shared is pinned by a vector, including the settings surface itself
