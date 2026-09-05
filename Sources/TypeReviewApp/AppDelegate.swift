@@ -4,6 +4,10 @@ import TypeReviewKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var practice: PracticeViewController?
+    private var statsWindow: NSWindow?
+    // Built on demand: a main-actor default value cannot be initialised from
+    // AppDelegate's nonisolated init.
+    private var stats: StatsViewController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let practice = PracticeViewController()
@@ -51,6 +55,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appItem.submenu = appMenu
         root.addItem(appItem)
 
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        let statsItem = viewMenu.addItem(
+            withTitle: "Statistics", action: #selector(showStats(_:)), keyEquivalent: "2")
+        statsItem.target = self
+        viewItem.submenu = viewMenu
+        root.addItem(viewItem)
+
         let practiceItem = NSMenuItem()
         let practiceMenu = NSMenu(title: "Practice")
         let newText = practiceMenu.addItem(
@@ -73,6 +85,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newText(_ sender: Any?) {
         practice?.startFreshRun()
+    }
+
+    /// Statistics get their own window rather than a route. A separate window
+    /// is the Mac answer to "show me this alongside" — it can sit next to the
+    /// practice window instead of replacing it.
+    @objc private func showStats(_ sender: Any?) {
+        let controller = stats ?? StatsViewController()
+        stats = controller
+        controller.present(results: practice?.history ?? [])
+        if statsWindow == nil {
+            let window = NSWindow(contentViewController: controller)
+            window.title = "Statistics"
+            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            window.setContentSize(NSSize(width: 560, height: 480))
+            window.setFrameAutosaveName("TypeReviewStats")
+            window.center()
+            statsWindow = window
+        }
+        statsWindow?.makeKeyAndOrderFront(nil)
     }
 
     /// Drives a full run through the real UI and reports what reached disk.

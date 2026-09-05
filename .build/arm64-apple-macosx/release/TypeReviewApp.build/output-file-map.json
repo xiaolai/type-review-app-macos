@@ -22,6 +22,18 @@
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ProfileFileStore.swiftdeps",
     "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ProfileFileStore.dia"
   },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.dia"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.dia"
+  },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift": {
     "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/Theme.swift.o",
     "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/Theme~partial.swiftmodule",

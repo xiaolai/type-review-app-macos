@@ -4,6 +4,12 @@
     "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/TypeReviewKit.o",
     "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/primary.swiftdeps"
   },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Aggregations.swift": {
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.dia"
+  },
   "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift": {
     "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Corpus.swift.o",
     "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Corpus~partial.swiftmodule",

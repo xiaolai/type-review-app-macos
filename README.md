@@ -165,7 +165,20 @@ keystroke, and the caret is placed by asking a specific line for its offset —
 which is what keeps it one line tall at a wrap boundary, where a space belongs
 to two line fragments at once.
 
-Next: results and statistics screens, the Settings window, then signing and
-distribution. Then the AppKit surface — where the earlier WKWebView shell's
+Results replace the passage in place when a run finishes — after a run the
+number you want is where your eyes already are, and Enter starts the next one
+without anything moving. Statistics get their own window (⌘2) rather than a
+route, which is the Mac answer to "show me this alongside".
+
+Day-level statistics are computed in local calendar days, and that is the one
+part of the engine whose answer depends on where the machine is. The vectors
+are therefore generated under two timezones — one with daylight saving, one
+without — and each records the zone it came from. Subtracting 86,400,000 ms
+instead of a calendar day gives the wrong date twice a year, but only when the
+time of day is within an hour of midnight, which is why the vector needed
+anchors just after midnight spanning a spring-forward before it could see the
+difference.
+
+Next: the Settings window, then signing and distribution. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.

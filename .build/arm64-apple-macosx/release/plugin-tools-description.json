@@ -53,6 +53,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift"
         },
         {
@@ -83,6 +91,8 @@
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/AppDelegate.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/PracticeViewController.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ProfileFileStore.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/Theme.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/TypingView.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/main.swift.o"
@@ -149,6 +159,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/Theme.swift.o"
         },
         {
@@ -169,6 +187,8 @@
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/AppDelegate.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/PracticeViewController.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ProfileFileStore.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/TypingView.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/main.swift"
@@ -181,6 +201,10 @@
       "fileList" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/sources",
       "importPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/Modules",
       "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Aggregations.swift"
+        },
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift"
@@ -250,6 +274,7 @@
       "moduleName" : "TypeReviewKit",
       "moduleOutputPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/Modules/TypeReviewKit.swiftmodule",
       "objects" : [
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Corpus.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Deserialize.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Generators.swift.o",
@@ -315,6 +340,10 @@
       "outputs" : [
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Corpus.swift.o"
         },
         {
@@ -376,6 +405,7 @@
       ],
       "prepareForIndexing" : false,
       "sources" : [
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Aggregations.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Deserialize.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Generators.swift",
@@ -399,6 +429,10 @@
       "fileList" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/sources",
       "importPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/Modules",
       "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/AggregationVectorTests.swift"
+        },
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/DeserializeVectorTests.swift"
@@ -444,6 +478,7 @@
       "moduleName" : "TypeReviewKitTests",
       "moduleOutputPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/Modules/TypeReviewKitTests.swiftmodule",
       "objects" : [
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/AggregationVectorTests.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DeserializeVectorTests.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/GoldenVectorTests.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/PlannerVectorTests.swift.o",
@@ -503,6 +538,10 @@
       "outputs" : [
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/AggregationVectorTests.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/DeserializeVectorTests.swift.o"
         },
         {
@@ -532,6 +571,7 @@
       ],
       "prepareForIndexing" : false,
       "sources" : [
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/AggregationVectorTests.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/DeserializeVectorTests.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/GoldenVectorTests.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/PlannerVectorTests.swift",
@@ -650,6 +690,8 @@
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/AppDelegate.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/PracticeViewController.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ProfileFileStore.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/TypingView.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/main.swift",
@@ -709,6 +751,7 @@
       "-package-name",
       "type_review_app_macos",
       "-c",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Aggregations.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Deserialize.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Generators.swift",
@@ -779,6 +822,7 @@
       "-package-name",
       "type_review_app_macos",
       "-c",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/AggregationVectorTests.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/DeserializeVectorTests.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/GoldenVectorTests.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/PlannerVectorTests.swift",
@@ -953,6 +997,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift"
         },
         {
@@ -987,6 +1039,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/ResultsView.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/StatsViewController.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/Theme.swift.o"
         },
         {
@@ -996,6 +1056,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewApp.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.swift.o"
         },
         {
           "kind" : "file",
@@ -1065,6 +1129,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Aggregations.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Corpus.swift"
         },
         {
@@ -1131,6 +1199,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/AggregationVectorTests.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/DeserializeVectorTests.swift"
         },
         {
@@ -1176,6 +1248,10 @@
         {
           "kind" : "virtual",
           "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/Aggregations.swift.o"
         },
         {
           "kind" : "file",
@@ -1232,6 +1308,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKit.build/TextInput.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/release/TypeReviewKitTests.build/AggregationVectorTests.swift.o"
         },
         {
           "kind" : "file",

@@ -9,7 +9,7 @@ final class PracticeViewController: NSViewController {
     private let accuracyLabel = NSTextField(labelWithString: "100%")
     private let modeLabel = NSTextField(labelWithString: "benchmark")
     private let hintLabel = NSTextField(labelWithString: "⇥ new text · ⏎ next run")
-    private let resultLabel = NSTextField(labelWithString: "")
+    private let resultsView = ResultsView()
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
@@ -29,15 +29,16 @@ final class PracticeViewController: NSViewController {
         }
         hintLabel.font = NSFont.systemFont(ofSize: 11)
         hintLabel.textColor = Theme.secondaryText
-        resultLabel.font = Theme.statFont
-        resultLabel.textColor = Theme.secondaryText
-
         let header = NSStackView(views: [wpmLabel, accuracyLabel, modeLabel])
         header.spacing = 18
-        let footer = NSStackView(views: [hintLabel, resultLabel])
+        let footer = NSStackView(views: [hintLabel])
         footer.spacing = 18
+        // Results occupy the same space as the passage rather than a separate
+        // screen: after a run the number you want is where your eyes already
+        // are, and Enter starts the next one without moving anything.
+        resultsView.isHidden = true
 
-        for subview in [header, typingView, footer] {
+        for subview in [header, typingView, resultsView, footer] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -51,6 +52,11 @@ final class PracticeViewController: NSViewController {
             typingView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
             typingView.bottomAnchor.constraint(
                 lessThanOrEqualTo: footer.topAnchor, constant: -24),
+
+            resultsView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 32),
+            resultsView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
+            resultsView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            resultsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
 
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
@@ -94,7 +100,7 @@ final class PracticeViewController: NSViewController {
             session = try Session(profile: profile)
             refresh(resetPassage: true)
         } catch {
-            resultLabel.stringValue = "could not start: \(error.localizedDescription)"
+            hintLabel.stringValue = "could not start: \(error.localizedDescription)"
         }
     }
 
@@ -105,15 +111,16 @@ final class PracticeViewController: NSViewController {
             refresh()
             if feedback == .completed { finish() }
         } catch {
-            resultLabel.stringValue = "input failed: \(error.localizedDescription)"
+            hintLabel.stringValue = "input failed: \(error.localizedDescription)"
         }
     }
 
     private func finish() {
         guard let session, let store, let result = session.profile.results.last else { return }
-        resultLabel.stringValue = String(
-            format: "%.0f wpm · %.0f%% · consistency %.0f — ⏎ for the next run",
-            result.metrics.netWpm, result.metrics.accuracy, result.metrics.consistency)
+        resultsView.show(result: result, history: session.profile.results)
+        typingView.isHidden = true
+        resultsView.isHidden = false
+        hintLabel.stringValue = "⏎ next run · ⇥ new text"
         do {
             try store.save(session.profile)
             pendingSaveError = nil
@@ -121,7 +128,7 @@ final class PracticeViewController: NSViewController {
             // Surfaced rather than swallowed: a failed save is the one error
             // in this app that costs the user something.
             pendingSaveError = "could not save: \(error.localizedDescription)"
-            resultLabel.stringValue = pendingSaveError!
+            hintLabel.stringValue = pendingSaveError!
         }
     }
 
@@ -131,6 +138,9 @@ final class PracticeViewController: NSViewController {
     /// reached disk, so a save failure is distinguishable from a run that
     /// never completed.
     var runCount: Int { session?.profile.results.count ?? -1 }
+
+    /// Every recorded run, for the statistics window.
+    var history: [RunResult] { session?.profile.results ?? [] }
 
     var currentPassage: String {
         (try? session?.snapshot().typing.expected) ?? ""
@@ -147,7 +157,10 @@ final class PracticeViewController: NSViewController {
             typingView.setPassage(
                 snapshot.typing.expected, statuses: snapshot.typing.statuses,
                 cursor: snapshot.typing.pos)
-            resultLabel.stringValue = pendingSaveError ?? ""
+            typingView.isHidden = false
+            resultsView.isHidden = true
+            hintLabel.stringValue = pendingSaveError ?? "⇥ new text · ⏎ next run"
+            view.window?.makeFirstResponder(typingView)
         } else {
             typingView.update(statuses: snapshot.typing.statuses, cursor: snapshot.typing.pos)
         }
