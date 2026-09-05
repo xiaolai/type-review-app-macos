@@ -28,6 +28,10 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     var onBackspace: (() -> Void)?
     var onRestart: (() -> Void)?
     var onConfirm: (() -> Void)?
+    /// The physical key being held, by virtual key code. Position, not
+    /// character — which is what makes the highlight correct under Dvorak,
+    /// where the key labelled S types "o".
+    var onKeyPressed: ((UInt16?) -> Void)?
 
     private var expected: String = ""
     private var statuses: [CharStatus] = []
@@ -205,7 +209,13 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Input
 
+    override func keyUp(with event: NSEvent) {
+        onKeyPressed?(nil)
+        super.keyUp(with: event)
+    }
+
     override func keyDown(with event: NSEvent) {
+        onKeyPressed?(event.keyCode)
         // Modified keys are never typing: they belong to the menu bar, and
         // consuming them here would break every shortcut in the app.
         if event.modifierFlags.intersection([.command, .control]).isEmpty {

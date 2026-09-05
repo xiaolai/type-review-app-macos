@@ -45,6 +45,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardGeometry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardView.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/PracticeViewController.swift"
         },
         {
@@ -62,6 +70,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SystemKeyboard.swift"
         },
         {
           "kind" : "file",
@@ -93,11 +105,14 @@
       "moduleOutputPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/Modules/TypeReviewApp.swiftmodule",
       "objects" : [
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/AppDelegate.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/KeyboardGeometry.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/KeyboardView.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/PracticeViewController.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/ProfileFileStore.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/ResultsView.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/SettingsWindowController.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/StatsViewController.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/SystemKeyboard.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/Theme.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/TypingView.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/main.swift.o"
@@ -159,6 +174,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/KeyboardGeometry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/KeyboardView.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/PracticeViewController.swift.o"
         },
         {
@@ -176,6 +199,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/StatsViewController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/SystemKeyboard.swift.o"
         },
         {
           "kind" : "file",
@@ -197,11 +224,14 @@
       "prepareForIndexing" : false,
       "sources" : [
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/AppDelegate.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardGeometry.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardView.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/PracticeViewController.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ProfileFileStore.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SettingsWindowController.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SystemKeyboard.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/TypingView.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/main.swift"
@@ -726,11 +756,14 @@
       "type_review_app_macos",
       "-c",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/AppDelegate.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardGeometry.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardView.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/PracticeViewController.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ProfileFileStore.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/ResultsView.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SettingsWindowController.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SystemKeyboard.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/Theme.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/TypingView.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/main.swift",
@@ -1052,6 +1085,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardGeometry.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/KeyboardView.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/PracticeViewController.swift"
         },
         {
@@ -1069,6 +1110,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/StatsViewController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/SystemKeyboard.swift"
         },
         {
           "kind" : "file",
@@ -1098,6 +1143,14 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/KeyboardGeometry.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/KeyboardView.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/PracticeViewController.swift.o"
         },
         {
@@ -1115,6 +1168,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/StatsViewController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/SystemKeyboard.swift.o"
         },
         {
           "kind" : "file",

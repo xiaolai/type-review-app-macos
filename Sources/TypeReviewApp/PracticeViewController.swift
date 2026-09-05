@@ -10,6 +10,8 @@ final class PracticeViewController: NSViewController {
     private let modeLabel = NSTextField(labelWithString: "benchmark")
     private let hintLabel = NSTextField(labelWithString: "⇥ new text · ⏎ next run")
     private let resultsView = ResultsView()
+    private let keyboardView = KeyboardView()
+    private var keyboardHeight: NSLayoutConstraint?
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
@@ -38,7 +40,7 @@ final class PracticeViewController: NSViewController {
         // are, and Enter starts the next one without moving anything.
         resultsView.isHidden = true
 
-        for subview in [header, typingView, resultsView, footer] {
+        for subview in [header, typingView, resultsView, keyboardView, footer] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -51,17 +53,34 @@ final class PracticeViewController: NSViewController {
             typingView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
             typingView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
             typingView.bottomAnchor.constraint(
-                lessThanOrEqualTo: footer.topAnchor, constant: -24),
+                lessThanOrEqualTo: keyboardView.topAnchor, constant: -24),
 
             resultsView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 32),
             resultsView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
             resultsView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
             resultsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
 
+            keyboardView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
+            keyboardView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            keyboardView.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -16),
+
+
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
             footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
         ])
+        // Sized from the geometry rather than a guessed constant, so the
+        // bottom row is never clipped and an ISO or JIS keyboard — which has
+        // an extra key per row, making every key narrower and the whole
+        // keyboard shorter — still fits exactly.
+        keyboardHeight = keyboardView.heightAnchor.constraint(equalToConstant: 200)
+        keyboardHeight?.isActive = true
         view = root
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let width = view.bounds.width - 64
+        keyboardHeight?.constant = keyboardView.height(forWidth: width)
     }
 
     override func viewDidLoad() {
@@ -69,6 +88,7 @@ final class PracticeViewController: NSViewController {
         typingView.onCharacter = { [weak self] character in self?.type(character) }
         typingView.onBackspace = { [weak self] in try? self?.session?.backspace(); self?.refresh() }
         typingView.onRestart = { [weak self] in self?.startFreshRun() }
+        typingView.onKeyPressed = { [weak self] code in self?.keyboardView.setPressed(code) }
         typingView.onConfirm = { [weak self] in self?.startFreshRun() }
         start()
     }
@@ -144,6 +164,10 @@ final class PracticeViewController: NSViewController {
 
     var currentSettings: ProfileSettings { session?.profile.settings ?? .default }
 
+    func setKeyboardVisible(_ visible: Bool) {
+        keyboardView.isHidden = !visible
+    }
+
     /// Applies settings from the Settings window. Returns false when the
     /// engine refuses them.
     ///
@@ -195,11 +219,22 @@ final class PracticeViewController: NSViewController {
                 cursor: snapshot.typing.pos)
             typingView.isHidden = false
             resultsView.isHidden = true
+            keyboardView.setPressed(nil)
             hintLabel.stringValue = pendingSaveError ?? "⇥ new text · ⏎ next run"
             view.window?.makeFirstResponder(typingView)
         } else {
             typingView.update(statuses: snapshot.typing.statuses, cursor: snapshot.typing.pos)
         }
+        // The keyboard highlights the character the passage wants next, and
+        // tints every key by how that key is actually going.
+        let next = snapshot.typing.pos < snapshot.typing.expected.utf16.count
+            ? String(
+                utf16CodeUnits: [Array(snapshot.typing.expected.utf16)[snapshot.typing.pos]],
+                count: 1)
+            : nil
+        keyboardView.update(
+            stats: aggregatePerKey(session.profile.results), expected: next?.lowercased(),
+            targetWpm: session.profile.settings.targetWpm)
         wpmLabel.stringValue = String(format: "%.0f wpm", snapshot.liveMetrics.netWpm)
         accuracyLabel.stringValue = String(format: "%.0f%%", snapshot.liveMetrics.accuracy)
         modeLabel.stringValue = snapshot.mode.rawValue

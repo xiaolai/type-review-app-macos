@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // AppDelegate's nonisolated init.
     private var stats: StatsViewController?
     private var settings: SettingsWindowController?
+    private var keyboardMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let practice = PracticeViewController()
@@ -16,14 +17,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let window = NSWindow(contentViewController: practice)
         window.title = "TYPE"
-        window.setContentSize(NSSize(width: 900, height: 520))
+        window.setContentSize(NSSize(width: 900, height: 640))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setFrameAutosaveName("TypeReviewMain")
-        window.minSize = NSSize(width: 640, height: 400)
+        window.minSize = NSSize(width: 720, height: 560)
         if window.frame.origin == .zero { window.center() }
         self.window = window
 
         NSApp.mainMenu = makeMenu()
+        practice.setKeyboardVisible(
+            UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -65,6 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let statsItem = viewMenu.addItem(
             withTitle: "Statistics", action: #selector(showStats(_:)), keyEquivalent: "2")
         statsItem.target = self
+        let keyboardItem = viewMenu.addItem(
+            withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "k")
+        keyboardItem.target = self
+        keyboardItem.state = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
+            ? .on : .off
+        keyboardMenuItem = keyboardItem
         viewItem.submenu = viewMenu
         root.addItem(viewItem)
 
@@ -90,6 +99,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newText(_ sender: Any?) {
         practice?.startFreshRun()
+    }
+
+    @objc private func toggleKeyboard(_ sender: Any?) {
+        let visible = keyboardMenuItem?.state != .on
+        keyboardMenuItem?.state = visible ? .on : .off
+        UserDefaults.standard.set(visible, forKey: "ShowKeyboard")
+        practice?.setKeyboardVisible(visible)
     }
 
     @objc private func showSettings(_ sender: Any?) {

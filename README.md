@@ -196,6 +196,29 @@ The Appearance and Sound panes the website has are deliberately absent: this
 app follows the system appearance rather than shipping four hand-built themes,
 and no audio is ported yet.
 
+## The on-screen keyboard
+
+The clearest case for having gone native. The website cannot ask which
+keyboard is attached, so it sniffs `navigator.userAgent` for "Mac", picks one
+of two hand-drawn pictures, and hard-codes QWERTY, Colemak and Dvorak character
+tables by hand — 485 lines with no ISO row and no JIS row, meaning European and
+Japanese typists are shown a keyboard they do not own.
+
+Here the system answers. `KeyboardGeometry` holds *positions* only, about a
+fifth the size and covering three shapes instead of two; every label comes from
+`UCKeyTranslate` at draw time, and the shape from `KBGetLayoutType`. Switching
+to Dvorak in System Settings relabels the view, and nothing in this code knows
+what Dvorak is. That is also why the website's "keyboard layout" and "keymap"
+settings do not appear in this app's Settings window: the system already knows,
+so it stops asking.
+
+Keys are tinted by confidence against the user's target speed rather than
+relative to their own slowest key. A relative scale paints the whole keyboard
+warm the moment timings cluster, and answers "which key is worst" when the
+useful question is "which keys are behind target". Error rate overrides the
+speed ramp, because speed and accuracy are different problems and one colour
+ramp cannot say both.
+
 ## Drift between the two implementations
 
 Everything shared is pinned by a vector, including the settings surface itself
