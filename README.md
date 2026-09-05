@@ -25,6 +25,7 @@ every way this port can go wrong is silent:
 | `Math.round` | `.toNearestOrAwayFromZero` sends −2.5 to −3 | ties break toward +∞, so −2.5 is −2 |
 | `x ** y` | repeated multiplication: `0.3*0.3*0.3` = 0.027 | `Math.pow` gives 0.026999999999999996 |
 | Hashed containers | `Set`/`Dictionary` order changes per launch | `Map` preserves insertion order |
+| Sort stability | `sorted` is documented as *not* stable | `Array.sort` is stable since ES2019 |
 | String indexing | `Character` is a grapheme cluster | positions are UTF-16 code units |
 
 None of those fail a review, and the first one passes every test the original
@@ -70,8 +71,26 @@ Ported and verified against the vectors:
 - `TextInput` — the typing loop, step log, pause capping, stop-on-error and
   confidence modes, newline skipping
 - `binBySecond`, `computeRunMetrics`, `computeConsistency`, `computeWpmStdDev`
+- `histogramFromSteps`, `EmaFilter`, `buildBigramStatsMap`, `deriveKeyStats`,
+  `Target`, `planLesson`
 
-Next: the bigram histogram, the adaptive planner, the corpus generators, the
-profile codec. Then the AppKit surface — where the earlier WKWebView shell's
+### Two defences, one proven and one not
+
+`OrderedMap` exists because `deriveKeyStats` accumulates hit-weighted floating
+point sums while traversing the bigram map. Substituting a `Dictionary` and
+running the suite three times produced **8, 8 and then 4 failures** — not merely
+different from the website, but different between launches of the same binary.
+The ordered traversal removes that, and the vectors prove it.
+
+The stable tie-break in the weak-bigram ranking is *not* provable here today. A
+scenario with 48 bigrams at identical confidence still passes with a plain
+`sorted(by:)`, because Swift's stdlib sort is a timsort variant that happens to
+be stable — while the documentation explicitly declines to guarantee it. The
+explicit index tie-break stays: it costs nothing, and the alternative is
+depending on an implementation detail Apple has reserved the right to change,
+where the symptom would be users being told to drill different bigrams than the
+website shows.
+
+Next: the corpus generators, the profile codec. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.
