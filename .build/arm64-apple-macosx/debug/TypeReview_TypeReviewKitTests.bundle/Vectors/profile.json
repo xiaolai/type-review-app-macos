@@ -1,0 +1,461 @@
+{
+  "note": "one completed benchmark run; `json` is the exact serialized form",
+  "json": "{\"version\":2,\"settings\":{\"mode\":\"benchmark\",\"targetWpm\":50,\"adaptive\":{\"minAlphabetSize\":6,\"alphabetExpansion\":0},\"wordCount\":30,\"testMode\":\"words\",\"testDurationSec\":30,\"stopOnError\":false,\"noBackspace\":false,\"passageLength\":\"any\",\"includeNumbers\":false,\"includePunctuation\":false},\"results\":[{\"index\":0,\"mode\":\"benchmark\",\"timestamp\":1700000000000,\"passageId\":\"plain:first and no have want know take this will them from for w\",\"text\":\"first and no have want know take this will them from for work know give still what two all after good find some be still their small because make work\",\"metrics\":{\"netWpm\":92.93,\"rawWpm\":92.93,\"accuracy\":100,\"consistency\":85.09,\"wpmStdDev\":13.4,\"wpmSeries\":[96,96,96,84,96,96,84,96,96,84,96,96,84,96,96,96,84,96,96,36],\"correctChars\":150,\"incorrectChars\":0,\"durationMs\":19370},\"histogram\":{\"fi\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"ir\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"rs\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"st\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"t \":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\" a\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"an\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"nd\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"d \":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\" n\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"no\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"o \":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\" h\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ha\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"av\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ve\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"e \":{\"hitCount\":7,\"missCount\":0,\"timeToType\":130},\" w\":{\"hitCount\":5,\"missCount\":0,\"timeToType\":130},\"wa\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"nt\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\" k\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"kn\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"ow\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"w \":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\" t\":{\"hitCount\":5,\"missCount\":0,\"timeToType\":130},\"ta\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ak\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"ke\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"th\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"hi\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"is\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"s \":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"wi\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"il\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"ll\":{\"hitCount\":5,\"missCount\":0,\"timeToType\":130},\"l \":{\"hitCount\":5,\"missCount\":0,\"timeToType\":130},\"he\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"em\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"m \":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\" f\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"fr\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ro\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"om\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"fo\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"or\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"r \":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"wo\":{\"hitCount\":3,\"missCount\":0,\"timeToType\":130},\"rk\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"k \":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\" g\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"gi\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"iv\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\" s\":{\"hitCount\":4,\"missCount\":0,\"timeToType\":130},\"ti\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"wh\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"at\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"tw\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"al\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"af\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ft\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"te\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"er\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"go\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"oo\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"od\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"in\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"so\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"me\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\" b\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"be\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"ei\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"sm\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ma\":{\"hitCount\":2,\"missCount\":0,\"timeToType\":130},\"ec\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"ca\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"au\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"us\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\"se\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130},\" m\":{\"hitCount\":1,\"missCount\":0,\"timeToType\":130}}}]}",
+  "pretty": {
+    "version": 2,
+    "settings": {
+      "mode": "benchmark",
+      "targetWpm": 50,
+      "adaptive": {
+        "minAlphabetSize": 6,
+        "alphabetExpansion": 0
+      },
+      "wordCount": 30,
+      "testMode": "words",
+      "testDurationSec": 30,
+      "stopOnError": false,
+      "noBackspace": false,
+      "passageLength": "any",
+      "includeNumbers": false,
+      "includePunctuation": false
+    },
+    "results": [
+      {
+        "index": 0,
+        "mode": "benchmark",
+        "timestamp": 1700000000000,
+        "passageId": "plain:first and no have want know take this will them from for w",
+        "text": "first and no have want know take this will them from for work know give still what two all after good find some be still their small because make work",
+        "metrics": {
+          "netWpm": 92.93,
+          "rawWpm": 92.93,
+          "accuracy": 100,
+          "consistency": 85.09,
+          "wpmStdDev": 13.4,
+          "wpmSeries": [
+            96,
+            96,
+            96,
+            84,
+            96,
+            96,
+            84,
+            96,
+            96,
+            84,
+            96,
+            96,
+            84,
+            96,
+            96,
+            96,
+            84,
+            96,
+            96,
+            36
+          ],
+          "correctChars": 150,
+          "incorrectChars": 0,
+          "durationMs": 19370
+        },
+        "histogram": {
+          "fi": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ir": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "rs": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "st": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "t ": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " a": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "an": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "nd": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "d ": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " n": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "no": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "o ": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " h": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ha": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "av": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ve": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "e ": {
+            "hitCount": 7,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " w": {
+            "hitCount": 5,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "wa": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "nt": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " k": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "kn": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ow": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "w ": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " t": {
+            "hitCount": 5,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ta": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ak": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ke": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "th": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "hi": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "is": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "s ": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "wi": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "il": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ll": {
+            "hitCount": 5,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "l ": {
+            "hitCount": 5,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "he": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "em": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "m ": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " f": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "fr": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ro": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "om": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "fo": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "or": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "r ": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "wo": {
+            "hitCount": 3,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "rk": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "k ": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " g": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "gi": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "iv": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " s": {
+            "hitCount": 4,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ti": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "wh": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "at": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "tw": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "al": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "af": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ft": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "te": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "er": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "go": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "oo": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "od": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "in": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "so": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "me": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " b": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "be": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ei": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "sm": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ma": {
+            "hitCount": 2,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ec": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "ca": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "au": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "us": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          "se": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          },
+          " m": {
+            "hitCount": 1,
+            "missCount": 0,
+            "timeToType": 130
+          }
+        }
+      }
+    ]
+  }
+}

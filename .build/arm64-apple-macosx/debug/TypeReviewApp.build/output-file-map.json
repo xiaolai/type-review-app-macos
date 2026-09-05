@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/primary.swiftdeps"
+  },
+  "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewApp/main.swift": {
+    "dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/main.d",
+    "object": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/main.swift.o",
+    "swiftmodule": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/main.swiftdeps",
+    "diagnostics": "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp.build/main.dia"
+  }
+}

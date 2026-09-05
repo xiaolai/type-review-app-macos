@@ -1,0 +1,33 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewApp'
+relocations:
+  - { offset: 0x8A1DE, size: 0x8, addend: 0x0, symName: _TypeReviewApp_main, symObjAddr: 0x0, symBinAddr: 0x100000B10, symSize: 0x1E0 }
+  - { offset: 0x8A202, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewApp3rng0aB3Kit10Mulberry32Vvp', symObjAddr: 0x122C, symBinAddr: 0x100008020, symSize: 0x0 }
+  - { offset: 0x8A210, size: 0x8, addend: 0x0, symName: _TypeReviewApp_main, symObjAddr: 0x0, symBinAddr: 0x100000B10, symSize: 0x1E0 }
+  - { offset: 0x8A22E, size: 0x8, addend: 0x0, symName: '_$ss26DefaultStringInterpolationVWOh', symObjAddr: 0x1E0, symBinAddr: 0x100000CF0, symSize: 0x28 }
+  - { offset: 0x8A242, size: 0x8, addend: 0x0, symName: '_$sSa12_endMutationyyF', symObjAddr: 0x2A0, symBinAddr: 0x100000DB0, symSize: 0xC }
+  - { offset: 0x8A27C, size: 0x8, addend: 0x0, symName: '_$ss27_finalizeUninitializedArrayySayxGABnlF', symObjAddr: 0x208, symBinAddr: 0x100000D18, symSize: 0x40 }
+  - { offset: 0x8A2A6, size: 0x8, addend: 0x0, symName: '_$ss5print_9separator10terminatoryypd_S2StFfA0_', symObjAddr: 0x248, symBinAddr: 0x100000D58, symSize: 0x2C }
+  - { offset: 0x8A2C2, size: 0x8, addend: 0x0, symName: '_$ss5print_9separator10terminatoryypd_S2StFfA1_', symObjAddr: 0x274, symBinAddr: 0x100000D84, symSize: 0x2C }
+  - { offset: 0x8A392, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit6JSMathO5roundyS2dFZ', symObjAddr: 0x0, symBinAddr: 0x100000DBC, symSize: 0x278 }
+  - { offset: 0x8A46F, size: 0x8, addend: 0x0, symName: ___swift_instantiateConcreteTypeFromMangledNameV2, symObjAddr: 0x6A0, symBinAddr: 0x10000145C, symSize: 0x80 }
+  - { offset: 0x8A483, size: 0x8, addend: 0x0, symName: '_$sSaySdGSayxGSlsWl', symObjAddr: 0x720, symBinAddr: 0x1000014DC, symSize: 0x74 }
+  - { offset: 0x8A497, size: 0x8, addend: 0x0, symName: ___swift_instantiateConcreteTypeFromMangledNameAbstractV2, symObjAddr: 0x794, symBinAddr: 0x100001550, symSize: 0x78 }
+  - { offset: 0x8A4AB, size: 0x8, addend: 0x0, symName: '_$ss16IndexingIteratorVySaySdGGWOh', symObjAddr: 0x80C, symBinAddr: 0x1000015C8, symSize: 0x28 }
+  - { offset: 0x8A4BF, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit6JSMathOMa', symObjAddr: 0x834, symBinAddr: 0x1000015F0, symSize: 0x14 }
+  - { offset: 0x8A4D3, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit5StatsOMa', symObjAddr: 0x848, symBinAddr: 0x100001604, symSize: 0x14 }
+  - { offset: 0x8A530, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit6JSMathO5roundyS2dFZ', symObjAddr: 0x0, symBinAddr: 0x100000DBC, symSize: 0x278 }
+  - { offset: 0x8A564, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit6JSMathO3powyS2d_SdtFZ', symObjAddr: 0x278, symBinAddr: 0x100001034, symSize: 0x2C }
+  - { offset: 0x8A5B3, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit5StatsO8roundTo2yS2dFZ', symObjAddr: 0x2A4, symBinAddr: 0x100001060, symSize: 0x3C }
+  - { offset: 0x8A5E7, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit5StatsO4meanySdSaySdGFZ', symObjAddr: 0x2E0, symBinAddr: 0x10000109C, symSize: 0x184 }
+  - { offset: 0x8A650, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit5StatsO6stdDevySdSaySdGFZ', symObjAddr: 0x464, symBinAddr: 0x100001220, symSize: 0x1B8 }
+  - { offset: 0x8A6EE, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit5StatsO6kogasayS2dFZ', symObjAddr: 0x61C, symBinAddr: 0x1000013D8, symSize: 0x84 }
+  - { offset: 0x8A7F0, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit10Mulberry32V5state33_BBCEF6CEE5F79CCF52E6FE1154E8CA8ELLs6UInt32Vvg', symObjAddr: 0x0, symBinAddr: 0x100001618, symSize: 0x4 }
+  - { offset: 0x8A873, size: 0x8, addend: 0x0, symName: '_$ss6UInt32VABSzsWl', symObjAddr: 0xE0, symBinAddr: 0x1000016F8, symSize: 0x64 }
+  - { offset: 0x8A887, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit10Mulberry32VMa', symObjAddr: 0x144, symBinAddr: 0x10000175C, symSize: 0x14 }
+  - { offset: 0x8A8B3, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit10Mulberry32V5state33_BBCEF6CEE5F79CCF52E6FE1154E8CA8ELLs6UInt32Vvg', symObjAddr: 0x0, symBinAddr: 0x100001618, symSize: 0x4 }
+  - { offset: 0x8A8D2, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit10Mulberry32V5state33_BBCEF6CEE5F79CCF52E6FE1154E8CA8ELLs6UInt32Vvs', symObjAddr: 0x4, symBinAddr: 0x10000161C, symSize: 0x8 }
+  - { offset: 0x8A8F1, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit10Mulberry32V4seedACs6UInt32V_tcfC', symObjAddr: 0xC, symBinAddr: 0x100001624, symSize: 0x1C }
+  - { offset: 0x8A924, size: 0x8, addend: 0x0, symName: '_$s13TypeReviewKit10Mulberry32V4nextSdyF', symObjAddr: 0x28, symBinAddr: 0x100001640, symSize: 0xB8 }
+...

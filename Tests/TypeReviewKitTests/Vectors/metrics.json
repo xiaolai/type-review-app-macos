@@ -1,0 +1,122 @@
+[
+  {
+    "text": "the quick brown fox",
+    "interval": 150,
+    "durationMs": 2850,
+    "metrics": {
+      "netWpm": 80,
+      "rawWpm": 80,
+      "accuracy": 100,
+      "consistency": 85.11,
+      "wpmStdDev": 11.3,
+      "wpmSeries": [
+        84,
+        84,
+        60
+      ],
+      "correctChars": 19,
+      "incorrectChars": 0,
+      "durationMs": 2850
+    },
+    "bins": [
+      {
+        "second": 1,
+        "chars": 7,
+        "errors": 0,
+        "rawWpm": 84
+      },
+      {
+        "second": 2,
+        "chars": 7,
+        "errors": 0,
+        "rawWpm": 84
+      },
+      {
+        "second": 3,
+        "chars": 5,
+        "errors": 0,
+        "rawWpm": 60
+      }
+    ]
+  },
+  {
+    "text": "Power concedes nothing without a demand.",
+    "interval": 120,
+    "durationMs": 4800,
+    "metrics": {
+      "netWpm": 100,
+      "rawWpm": 100,
+      "accuracy": 100,
+      "consistency": 86.31,
+      "wpmStdDev": 13.1,
+      "wpmSeries": [
+        108,
+        96,
+        96,
+        108,
+        72
+      ],
+      "correctChars": 40,
+      "incorrectChars": 0,
+      "durationMs": 4800
+    },
+    "bins": [
+      {
+        "second": 1,
+        "chars": 9,
+        "errors": 0,
+        "rawWpm": 108
+      },
+      {
+        "second": 2,
+        "chars": 8,
+        "errors": 0,
+        "rawWpm": 96
+      },
+      {
+        "second": 3,
+        "chars": 8,
+        "errors": 0,
+        "rawWpm": 96
+      },
+      {
+        "second": 4,
+        "chars": 9,
+        "errors": 0,
+        "rawWpm": 108
+      },
+      {
+        "second": 5,
+        "chars": 6,
+        "errors": 0,
+        "rawWpm": 72
+      }
+    ]
+  },
+  {
+    "text": "a",
+    "interval": 200,
+    "durationMs": 200,
+    "metrics": {
+      "netWpm": 60,
+      "rawWpm": 60,
+      "accuracy": 100,
+      "consistency": 100,
+      "wpmStdDev": 0,
+      "wpmSeries": [
+        12
+      ],
+      "correctChars": 1,
+      "incorrectChars": 0,
+      "durationMs": 200
+    },
+    "bins": [
+      {
+        "second": 1,
+        "chars": 1,
+        "errors": 0,
+        "rawWpm": 12
+      }
+    ]
+  }
+]

@@ -1,0 +1,293 @@
+{
+  "note": "six consecutive adaptive runs, seeded rng, typed cleanly",
+  "runs": [
+    {
+      "run": 0,
+      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "included": [
+        "e",
+        "t",
+        "a",
+        "o",
+        "i",
+        "n"
+      ],
+      "focus": "e"
+    },
+    {
+      "run": 1,
+      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "included": [
+        "e",
+        "t",
+        "a",
+        "o",
+        "i",
+        "n"
+      ],
+      "focus": "e"
+    },
+    {
+      "run": 2,
+      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "included": [
+        "e",
+        "t",
+        "a",
+        "o",
+        "i",
+        "n"
+      ],
+      "focus": "e"
+    },
+    {
+      "run": 3,
+      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "included": [
+        "e",
+        "t",
+        "a",
+        "o",
+        "i",
+        "n"
+      ],
+      "focus": "e"
+    },
+    {
+      "run": 4,
+      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "included": [
+        "e",
+        "t",
+        "a",
+        "o",
+        "i",
+        "n"
+      ],
+      "focus": "e"
+    },
+    {
+      "run": 5,
+      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "included": [
+        "e",
+        "t",
+        "a",
+        "o",
+        "i",
+        "n"
+      ],
+      "focus": "e"
+    }
+  ],
+  "keyStats": [
+    {
+      "key": "a",
+      "letter": "a",
+      "hitCount": 21,
+      "missCount": 0,
+      "timeToType": 140,
+      "bestTimeToType": 140
+    },
+    {
+      "key": "b",
+      "letter": "b",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "c",
+      "letter": "c",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "d",
+      "letter": "d",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "e",
+      "letter": "e",
+      "hitCount": 35,
+      "missCount": 0,
+      "timeToType": 140,
+      "bestTimeToType": 140
+    },
+    {
+      "key": "f",
+      "letter": "f",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "g",
+      "letter": "g",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "h",
+      "letter": "h",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "i",
+      "letter": "i",
+      "hitCount": 22,
+      "missCount": 0,
+      "timeToType": 140,
+      "bestTimeToType": 140
+    },
+    {
+      "key": "j",
+      "letter": "j",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "k",
+      "letter": "k",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "l",
+      "letter": "l",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "m",
+      "letter": "m",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "n",
+      "letter": "n",
+      "hitCount": 20,
+      "missCount": 0,
+      "timeToType": 140,
+      "bestTimeToType": 140
+    },
+    {
+      "key": "o",
+      "letter": "o",
+      "hitCount": 22,
+      "missCount": 0,
+      "timeToType": 140,
+      "bestTimeToType": 140
+    },
+    {
+      "key": "p",
+      "letter": "p",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "q",
+      "letter": "q",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "r",
+      "letter": "r",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "s",
+      "letter": "s",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "t",
+      "letter": "t",
+      "hitCount": 22,
+      "missCount": 0,
+      "timeToType": 140,
+      "bestTimeToType": 140
+    },
+    {
+      "key": "u",
+      "letter": "u",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "v",
+      "letter": "v",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "w",
+      "letter": "w",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "x",
+      "letter": "x",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "y",
+      "letter": "y",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    },
+    {
+      "key": "z",
+      "letter": "z",
+      "hitCount": 0,
+      "missCount": 0,
+      "timeToType": null,
+      "bestTimeToType": null
+    }
+  ]
+}

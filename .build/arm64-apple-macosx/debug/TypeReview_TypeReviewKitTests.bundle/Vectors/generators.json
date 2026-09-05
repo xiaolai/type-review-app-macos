@@ -1,0 +1,24 @@
+{
+  "pseudoWords": [
+    {
+      "seed": 7,
+      "text": "af fsfk fsddfd fss kalff fkasd fd jfddaal dajlf lafjl jllfkff klfff"
+    },
+    {
+      "seed": 99,
+      "text": "kff fd fk kfsf klfs fjd dlskfj sjkfsf dkkfj kfkas kafa alksjk"
+    }
+  ],
+  "plainWords": [
+    {
+      "seed": 7,
+      "text": "be that here how your me just she them well an at",
+      "withPunctuation": "9 Your she an! From some or do, want? Come come and;"
+    },
+    {
+      "seed": 99,
+      "text": "will day some two the us be on go after about that",
+      "withPunctuation": "Day the 4 about; an; people want turn again two or down!"
+    }
+  ]
+}
