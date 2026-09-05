@@ -111,6 +111,21 @@ Verified by moving `adaptive` to the end of the settings object, which is what
 the site's own validator does on load: the test fails at offset 60 and prints
 both sides.
 
-Next: `Session` (the run orchestrator), then the AppKit surface. Then the AppKit surface — where the earlier WKWebView shell's
+### On vectors that do not bite
+
+Five times now, a vector has agreed with the port while failing to detect the
+bug it existed for. The six-run `Session` vector was the worst: it originally
+replayed one finished run six times because the emitter never called `start()`,
+then typed at a uniform cadence so every run's histogram was identical, then
+varied gently enough that every timing still cleared the mastery threshold and
+the unlock progression came out the same whichever order history was replayed
+in. Only alternating 110/460 ms — straddling the threshold — made a
+newest-first replay fail, and then it failed 38 assertions.
+
+So each defence here has been checked by planting the bug it guards against.
+Where that could not be done, the README says so rather than implying
+coverage.
+
+Next: `deserializeProfile` and the validators, then the AppKit surface. Then the AppKit surface — where the earlier WKWebView shell's
 signing, window, menu and settings work carries over as a design, if not as
 code.

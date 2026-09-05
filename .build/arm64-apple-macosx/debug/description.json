@@ -180,6 +180,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Session.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/TextInput.swift"
         },
         {
@@ -206,6 +210,7 @@
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/OrderedMap.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Profile.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/RNG.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Session.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/TextInput.swift.o"
       ],
       "otherArguments" : [
@@ -305,6 +310,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Session.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/TextInput.swift.o"
         },
         {
@@ -325,6 +334,7 @@
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/OrderedMap.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Profile.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/RNG.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Session.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/TextInput.swift"
       ],
       "tempsPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build",
@@ -346,6 +356,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/ProfileCodecTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/SessionVectorTests.swift"
         },
         {
           "kind" : "file",
@@ -375,6 +389,7 @@
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/GoldenVectorTests.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/PlannerVectorTests.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/ProfileCodecTests.swift.o",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/SessionVectorTests.swift.o",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/resource_bundle_accessor.swift.o"
       ],
       "otherArguments" : [
@@ -441,6 +456,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/SessionVectorTests.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/resource_bundle_accessor.swift.o"
         },
         {
@@ -453,6 +472,7 @@
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/GoldenVectorTests.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/PlannerVectorTests.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/ProfileCodecTests.swift",
+        "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/SessionVectorTests.swift",
         "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/DerivedSources/resource_bundle_accessor.swift"
       ],
       "tempsPath" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build",
@@ -636,6 +656,7 @@
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/OrderedMap.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Profile.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/RNG.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Session.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/TextInput.swift",
       "-I",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/Modules",
@@ -699,6 +720,7 @@
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/GoldenVectorTests.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/PlannerVectorTests.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/ProfileCodecTests.swift",
+      "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/SessionVectorTests.swift",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/DerivedSources/resource_bundle_accessor.swift",
       "-I",
       "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/Modules",
@@ -934,6 +956,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Session.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/TextInput.swift.o"
         }
       ],
@@ -992,6 +1018,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/Session.swift"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Sources/TypeReviewKit/TextInput.swift"
         }
       ],
@@ -1015,6 +1045,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/ProfileCodecTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/Tests/TypeReviewKitTests/SessionVectorTests.swift"
         },
         {
           "kind" : "file",
@@ -1090,6 +1124,10 @@
         },
         {
           "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/Session.swift.o"
+        },
+        {
+          "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKit.build/TextInput.swift.o"
         },
         {
@@ -1103,6 +1141,10 @@
         {
           "kind" : "file",
           "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/ProfileCodecTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/joker/github/xiaolai/myprojects/type-review-app-macos/.build/arm64-apple-macosx/debug/TypeReviewKitTests.build/SessionVectorTests.swift.o"
         },
         {
           "kind" : "file",

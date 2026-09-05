@@ -3,6 +3,7 @@
   "runs": [
     {
       "run": 0,
+      "interval": 110,
       "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
       "included": [
         "e",
@@ -16,78 +17,88 @@
     },
     {
       "run": 1,
-      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "interval": 460,
+      "text": "ososst assos inassse es nns ea toeoso ins tsiaees eoant sts soiitse eosestt nsnisi aaiaso isno eooiis osasen tnso os teoiao osa os inonsi nssiis ses sai ss nes siast",
       "included": [
         "e",
         "t",
         "a",
         "o",
         "i",
-        "n"
+        "n",
+        "s"
       ],
-      "focus": "e"
+      "focus": "s"
     },
     {
       "run": 2,
-      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "interval": 110,
+      "text": "osaite taeass sttaoto sa nson assnsii anesit aeiosea nnnoss asnoato annini ss nsasst ooaii ts san iese ssi taose iioaeas ts essosno taniao iatsna eessnsn eose iss issnsna sn tsia",
       "included": [
         "e",
         "t",
         "a",
         "o",
         "i",
-        "n"
+        "n",
+        "s"
       ],
-      "focus": "e"
+      "focus": "s"
     },
     {
       "run": 3,
-      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "interval": 460,
+      "text": "tio essseo sn sossa ssoo seiteo sin anonae es sa sn itoat noi sniisni snsiot sosaoet nsnes nasot ti snst tnssoi sseea eisi ia etsnns oinie stissoo osto osnsi otssons",
       "included": [
         "e",
         "t",
         "a",
         "o",
         "i",
-        "n"
+        "n",
+        "s"
       ],
-      "focus": "e"
+      "focus": "s"
     },
     {
       "run": 4,
-      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "interval": 110,
+      "text": "isoi eoost sne sootos tosss an est ns ntassa is stt oosnno ieoss ssees tsssteo oooin oaasoe taeoots sseo eisiesa tteen ssnt st tntias oot noesn aatsss oaani oienns ission",
       "included": [
         "e",
         "t",
         "a",
         "o",
         "i",
-        "n"
+        "n",
+        "s"
       ],
-      "focus": "e"
+      "focus": "s"
     },
     {
       "run": 5,
-      "text": "ee etoi otatot ete ienoe eieta ea ietaeen aeino neoon onnoieo inoea tteen eooie ioeen at ionoena nteaot tete etaaiaa ioiaet ti aantaa neaa onnaein ie teii tei intneo eiooti",
+      "interval": 460,
+      "text": "tsni etse soo sna asss ntsi itets teete stsoen taotna oetso tintis sianio atos tnnttoa eoaaneo so otstst sss aosei os aisoes asoisse stse itn es sne esnoet aoias sst",
       "included": [
         "e",
         "t",
         "a",
         "o",
         "i",
-        "n"
+        "n",
+        "s"
       ],
-      "focus": "e"
+      "focus": "s"
     }
   ],
   "keyStats": [
     {
       "key": "a",
       "letter": "a",
-      "hitCount": 21,
+      "hitCount": 93,
       "missCount": 0,
-      "timeToType": 140,
-      "bestTimeToType": 140
+      "timeToType": 231.4030322580645,
+      "bestTimeToType": 174.7274193548387
     },
     {
       "key": "b",
@@ -116,10 +127,10 @@
     {
       "key": "e",
       "letter": "e",
-      "hitCount": 35,
+      "hitCount": 111,
       "missCount": 0,
-      "timeToType": 140,
-      "bestTimeToType": 140
+      "timeToType": 222.03216216216217,
+      "bestTimeToType": 156.4837837837838
     },
     {
       "key": "f",
@@ -148,10 +159,10 @@
     {
       "key": "i",
       "letter": "i",
-      "hitCount": 22,
+      "hitCount": 99,
       "missCount": 0,
-      "timeToType": 140,
-      "bestTimeToType": 140
+      "timeToType": 245.41054545454543,
+      "bestTimeToType": 188.1772727272727
     },
     {
       "key": "j",
@@ -188,18 +199,18 @@
     {
       "key": "n",
       "letter": "n",
-      "hitCount": 20,
+      "hitCount": 103,
       "missCount": 0,
-      "timeToType": 140,
-      "bestTimeToType": 140
+      "timeToType": 248.1028640776699,
+      "bestTimeToType": 187.92427184466015
     },
     {
       "key": "o",
       "letter": "o",
-      "hitCount": 22,
+      "hitCount": 124,
       "missCount": 0,
-      "timeToType": 140,
-      "bestTimeToType": 140
+      "timeToType": 234.87635887096772,
+      "bestTimeToType": 165.4806451612903
     },
     {
       "key": "p",
@@ -228,18 +239,18 @@
     {
       "key": "s",
       "letter": "s",
-      "hitCount": 0,
+      "hitCount": 203,
       "missCount": 0,
-      "timeToType": null,
-      "bestTimeToType": null
+      "timeToType": 402.3608620689654,
+      "bestTimeToType": 396.6499999999999
     },
     {
       "key": "t",
       "letter": "t",
-      "hitCount": 22,
+      "hitCount": 102,
       "missCount": 0,
-      "timeToType": 140,
-      "bestTimeToType": 140
+      "timeToType": 239.97064705882352,
+      "bestTimeToType": 185.01323529411764
     },
     {
       "key": "u",
