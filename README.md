@@ -64,10 +64,14 @@ import a window.
 
 ## Status
 
-Ported and verified: `Mulberry32`, JavaScript rounding semantics, `mean`,
-`stdDev`, `kogasa`.
+Ported and verified against the vectors:
 
-Next: `TextInput` and the step log, run metrics and per-second binning, the
-bigram histogram, the adaptive planner, the corpus generators, the profile
-codec. Then the AppKit surface — where the earlier WKWebView shell's signing,
-window, menu and settings work carries over as a design, if not as code.
+- `Mulberry32`, JavaScript rounding semantics, `mean`, `stdDev`, `kogasa`
+- `TextInput` — the typing loop, step log, pause capping, stop-on-error and
+  confidence modes, newline skipping
+- `binBySecond`, `computeRunMetrics`, `computeConsistency`, `computeWpmStdDev`
+
+Next: the bigram histogram, the adaptive planner, the corpus generators, the
+profile codec. Then the AppKit surface — where the earlier WKWebView shell's
+signing, window, menu and settings work carries over as a design, if not as
+code.

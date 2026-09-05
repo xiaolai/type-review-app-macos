@@ -103,3 +103,144 @@ final class GoldenVectorTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Metrics and binning
+
+extension GoldenVectorTests {
+    struct MetricsVector: Decodable {
+        struct Metrics: Decodable {
+            let netWpm: Double
+            let rawWpm: Double
+            let accuracy: Double
+            let consistency: Double
+            let wpmStdDev: Double
+            let wpmSeries: [Double]
+            let correctChars: Int
+            let incorrectChars: Int
+            let durationMs: Double
+        }
+        let text: String
+        let interval: Double
+        let durationMs: Double
+        let metrics: Metrics
+        let bins: [SecondBin]
+    }
+
+    /// Reproduces the generator's clean run: one keystroke every `interval` ms,
+    /// no mistakes.
+    private func cleanSteps(_ text: String, interval: Double) -> [Step] {
+        Array(text.utf16).enumerated().map { index, unit in
+            let character = String(utf16CodeUnits: [unit], count: 1)
+            return Step(
+                position: index, timeStamp: Double(index + 1) * interval, typed: character,
+                expected: character, timeToType: index == 0 ? 0 : interval, typo: false)
+        }
+    }
+
+    func testRunMetricsMatchTheTypeScriptEngine() throws {
+        let cases = try vector("metrics", as: [MetricsVector].self)
+        XCTAssertFalse(cases.isEmpty)
+        for testCase in cases {
+            let steps = cleanSteps(testCase.text, interval: testCase.interval)
+            let statuses = Array(repeating: CharStatus.correct, count: steps.count)
+            let actual = computeRunMetrics(
+                steps: steps, statuses: statuses, durationMs: testCase.durationMs)
+            let expected = testCase.metrics
+
+            XCTAssertEqual(actual.netWpm, expected.netWpm, "netWpm for \(testCase.text)")
+            XCTAssertEqual(actual.rawWpm, expected.rawWpm, "rawWpm for \(testCase.text)")
+            XCTAssertEqual(actual.accuracy, expected.accuracy, "accuracy for \(testCase.text)")
+            XCTAssertEqual(
+                actual.consistency, expected.consistency, "consistency for \(testCase.text)")
+            XCTAssertEqual(actual.wpmStdDev, expected.wpmStdDev, "wpmStdDev for \(testCase.text)")
+            XCTAssertEqual(actual.wpmSeries, expected.wpmSeries, "wpmSeries for \(testCase.text)")
+            XCTAssertEqual(actual.correctChars, expected.correctChars)
+            XCTAssertEqual(actual.incorrectChars, expected.incorrectChars)
+        }
+    }
+
+    func testPerSecondBinsMatchIncludingThePartialFinalBucket() throws {
+        let cases = try vector("metrics", as: [MetricsVector].self)
+        for testCase in cases {
+            let actual = binBySecond(cleanSteps(testCase.text, interval: testCase.interval))
+            XCTAssertEqual(actual, testCase.bins, "bins for \(testCase.text)")
+        }
+    }
+}
+
+// MARK: - TextInput
+
+final class TextInputTests: XCTestCase {
+    func testIndexesByUTF16CodeUnitNotByCharacter() throws {
+        // The trap this port most needs to avoid. "e" + combining acute is one
+        // Character and two code units; positions after it must count units,
+        // or every Step.position downstream shifts and the bigram keys written
+        // into a saved profile stop matching the website's.
+        let text = "e\u{301}fg"
+        XCTAssertEqual(text.count, 3, "3 grapheme clusters")
+        XCTAssertEqual(text.utf16.count, 4, "4 UTF-16 code units")
+
+        let input = try TextInput(expected: text)
+        var clock: Double = 0
+        for unit in Array(text.utf16) {
+            clock += 100
+            input.appendChar(String(utf16CodeUnits: [unit], count: 1), timeStamp: clock)
+        }
+        XCTAssertTrue(input.completed)
+        XCTAssertEqual(input.steps.map(\.position), [0, 1, 2, 3])
+    }
+
+    func testRefusesNonBMPTextRatherThanDesyncingTheCursor() {
+        XCTAssertThrowsError(try TextInput(expected: "hello 😀")) { error in
+            guard case TextInput.InputError.nonBMP = error else {
+                return XCTFail("expected a non-BMP rejection, got \(error)")
+            }
+        }
+        XCTAssertThrowsError(try TextInput(expected: ""))
+    }
+
+    func testCapsLongPausesButKeepsTheRawIntervalInTheStepLog() throws {
+        let input = try TextInput(expected: "ab")
+        input.appendChar("a", timeStamp: 0)
+        input.appendChar("b", timeStamp: 60_000)
+
+        // A minute-long gap contributes only the cap to active time…
+        XCTAssertEqual(input.elapsedMs, pauseCapMs)
+        // …while the log keeps the real interval, which is what lets the
+        // per-key outlier filter tell a pause from a fast keystroke.
+        XCTAssertEqual(input.steps.last?.timeToType, 60_000)
+    }
+
+    func testStepsAreAppendOnlyAcrossBackspace() throws {
+        let input = try TextInput(expected: "ab")
+        input.appendChar("x", timeStamp: 100)
+        input.backspace()
+        input.appendChar("a", timeStamp: 200)
+
+        XCTAssertEqual(input.steps.count, 3 - 1, "backspace records nothing but removes nothing")
+        XCTAssertEqual(input.steps.map(\.typo), [true, false])
+        XCTAssertEqual(input.pos, 1)
+    }
+
+    func testStopOnErrorHoldsTheCursorAndConfidenceModeIgnoresBackspace() throws {
+        let strict = try TextInput(expected: "ab", stopOnError: true)
+        strict.appendChar("x", timeStamp: 100)
+        XCTAssertEqual(strict.pos, 0, "a mistyped key does not advance")
+
+        let confident = try TextInput(expected: "ab", noBackspace: true)
+        confident.appendChar("a", timeStamp: 100)
+        confident.backspace()
+        XCTAssertEqual(confident.pos, 1, "backspace is ignored")
+    }
+
+    func testSkipsNewlinesWithoutLoggingThem() throws {
+        let input = try TextInput(expected: "a\n\nb")
+        XCTAssertEqual(input.pos, 0)
+        input.appendChar("a", timeStamp: 100)
+        // Cursor steps over both newlines to the next typeable character.
+        XCTAssertEqual(input.pos, 3)
+        input.appendChar("b", timeStamp: 200)
+        XCTAssertTrue(input.completed)
+        XCTAssertEqual(input.steps.count, 2, "paragraph breaks are not keystrokes")
+    }
+}
