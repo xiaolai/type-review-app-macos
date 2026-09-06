@@ -20,10 +20,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private let tabs = NSTabViewController()
     private var controls: [String: NSControl] = [:]
-    private var rows: [String: NSGridRow] = [:]
+    /// Every row a setting owns — its control row and, when it has one, the
+    /// caption beneath. Hiding a setting has to hide both, or a stray line of
+    /// grey text is left explaining a control that is not there.
+    private var rows: [String: [NSGridRow]] = [:]
     /// Retains the closure-backed targets for the app-preference controls.
     private var proxies: [ActionProxy] = []
+    /// Each pane and its grid, so a pane can be re-measured when a row is
+    /// hidden.
+    private var panes: [(controller: NSViewController, grid: NSGridView)] = []
     private static let lastPaneKey = "SettingsLastPane"
+    private static let paneWidth: CGFloat = 500
+    private static let paneMargin: CGFloat = 22
+    private static let captionWidth: CGFloat = 260
+    private static let pathWidth: CGFloat = 330
 
     init() {
         tabs.tabStyle = .toolbar
@@ -92,7 +102,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 title: "Restore Defaults", target: self, action: #selector(self.restoreDefaults(_:)))
             restore.bezelStyle = .rounded
             let row = grid.addRow(with: [NSGridCell.emptyContentView, restore])
-            row.topPadding = 8
+            // Set off from the settings it resets, so it reads as an action on
+            // the pane rather than as one more row of it.
+            row.topPadding = 18
         }
 
         // Its own pane, and deliberately not mixed in with Practice: nothing
@@ -116,7 +128,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 hint: "How long the keyboard takes to slide out and back.")
         }
 
-        addPane(title: "Data", symbol: "externaldrive") { grid in
+        addPane(title: "Data", symbol: "internaldrive") { grid in
             let path = NSTextField(
                 labelWithString: (try? ProfileFileStore.standard().fileURL.path) ?? "")
             path.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
@@ -128,8 +140,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             // A file the user can point at is the difference between "we keep
             // your data safe" and showing them where it is. No web build can
             // offer this.
-            grid.addRow(with: [NSTextField(labelWithString: "Profile:"), path])
-            grid.addRow(with: [NSGridCell.emptyContentView, reveal])
+            // Wider than a caption: middle-truncated to 260 points this read as
+            // `/Users/joker/Library_type.app/profile.json`, which looks less
+            // like an abbreviated path than a wrong one.
+            path.preferredMaxLayoutWidth = Self.pathWidth
+            path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            path.widthAnchor.constraint(equalToConstant: Self.pathWidth).isActive = true
+            path.toolTip = (try? ProfileFileStore.standard().fileURL.path) ?? ""
+            let pathRow = grid.addRow(with: [NSTextField(labelWithString: "Profile:"), path])
+            pathRow.yPlacement = .center
+            let revealRow = grid.addRow(with: [NSGridCell.emptyContentView, reveal])
+            revealRow.topPadding = 10
         }
     }
 
@@ -137,11 +158,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // NSGridView, not stacked rows: a settings pane reads as native largely
         // because its labels and controls line up, and a ragged column is the
         // first thing that looks wrong.
-        let grid = NSGridView(numberOfColumns: 3, rows: 0)
+        let grid = NSGridView(numberOfColumns: 2, rows: 0)
         grid.translatesAutoresizingMaskIntoConstraints = false
-        grid.rowSpacing = 12
+        grid.rowSpacing = 6
         grid.columnSpacing = 10
         grid.column(at: 0).xPlacement = .trailing
+        // Leading, not fill. Filling makes every control as wide as the widest
+        // one in the pane, which is how a target-speed field ended up 330
+        // points across.
+        grid.column(at: 1).xPlacement = .leading
         populate(grid)
 
         let root = NSView()
@@ -150,18 +175,36 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         root.translatesAutoresizingMaskIntoConstraints = true
         root.addSubview(grid)
         NSLayoutConstraint.activate([
-            grid.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
-            grid.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            grid.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
-            grid.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -20),
+            // Centred rather than pinned left: the labels are right-aligned
+            // and the controls left-aligned, so the block has a natural axis,
+            // and hanging it off the left edge leaves the whole right side of
+            // the window empty.
+            grid.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            grid.topAnchor.constraint(equalTo: root.topAnchor, constant: Self.paneMargin),
+            // `lessThanOrEqualTo`, not `equalTo`. Pinned to both edges the
+            // grid stretches to whatever height the pane was given — and the
+            // pane is measured with every row visible, before `refresh()`
+            // hides the ones that do not apply. The slack then has to go
+            // somewhere, and NSGridView puts it inside a row: a 67-point band
+            // of white in the middle of the pane that moved around as the
+            // rows changed.
+            grid.bottomAnchor.constraint(
+                lessThanOrEqualTo: root.bottomAnchor, constant: -Self.paneMargin),
+            grid.leadingAnchor.constraint(
+                greaterThanOrEqualTo: root.leadingAnchor, constant: Self.paneMargin),
         ])
+        // One width for every pane, so switching tabs changes the height and
+        // nothing else. A window that also changes width on each click reads
+        // as three windows.
         let size = grid.fittingSize
-        root.frame = NSRect(x: 0, y: 0, width: max(560, size.width + 40), height: size.height + 40)
+        root.frame = NSRect(
+            x: 0, y: 0, width: Self.paneWidth, height: size.height + 2 * Self.paneMargin)
 
         let controller = NSViewController()
         controller.view = root
         controller.title = title
         controller.preferredContentSize = root.frame.size
+        panes.append((controller, grid))
         let item = NSTabViewItem(viewController: controller)
         item.label = title
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
@@ -241,21 +284,41 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return popup
     }
 
-    private func addRow(_ grid: NSGridView, _ label: String, _ control: NSControl, hint: String? = nil) {
-        let hintView: NSView
-        if let hint {
-            let field = NSTextField(labelWithString: hint)
-            field.font = .preferredFont(forTextStyle: .caption1)
-            field.textColor = Theme.secondaryText
-            hintView = field
-        } else {
-            hintView = NSGridCell.emptyContentView
-        }
-        let row = grid.addRow(with: [
-            NSTextField(labelWithString: "\(label):"), control, hintView,
-        ])
+    /// One setting: a right-aligned label, its control, and an optional
+    /// caption on the line below.
+    ///
+    /// Below, not beside. A third column of help text is what made this window
+    /// stop looking like a Mac: it pushed the window wide enough to hold the
+    /// longest sentence, left a ragged column of grey against a lot of white,
+    /// and set the caption at the same size as the label it was subordinate
+    /// to. Every settings window Apple ships puts it under the control, small
+    /// and grey.
+    private func addRow(
+        _ grid: NSGridView, _ label: String, _ control: NSControl, hint: String? = nil
+    ) {
+        let name = NSTextField(labelWithString: "\(label):")
+        let row = grid.addRow(with: [name, control])
         row.yPlacement = .center
-        if let key = control.identifier?.rawValue { rows[key] = row }
+        row.topPadding = 4
+        var owned = [row]
+
+        if let hint {
+            let caption = NSTextField(labelWithString: hint)
+            caption.font = .preferredFont(forTextStyle: .caption1)
+            caption.textColor = Theme.secondaryText
+            // One line, and no `preferredMaxLayoutWidth`. Setting it makes the
+            // field's intrinsic *height* two lines while the grid still lays
+            // it out wide enough for one — so it draws one line and reserves
+            // two, and the pane grows a band of white under every caption.
+            // Captions here are short enough to fit; the pane is sized to
+            // hold them.
+            caption.lineBreakMode = .byTruncatingTail
+            let captionRow = grid.addRow(with: [NSGridCell.emptyContentView, caption])
+            captionRow.topPadding = 1
+            captionRow.bottomPadding = 4
+            owned.append(captionRow)
+        }
+        if let key = control.identifier?.rawValue { rows[key] = owned }
     }
 
     // MARK: - Controls
@@ -313,12 +376,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         field.target = self
         field.action = #selector(changed(_:))
         field.identifier = .init(key)
-        field.frame.size.width = 70
+        // A constraint, not `frame.size`. Inside an autolayout grid the frame
+        // is overwritten on the next pass, which is why this field grew to the
+        // width of the widest control in the pane.
+        field.widthAnchor.constraint(equalToConstant: 72).isActive = true
         controls[key] = field
         return field
     }
 
     // MARK: - State
+
+    /// Re-measures each pane after rows have been shown or hidden, so the
+    /// window is exactly as tall as what it holds. Without it a pane keeps the
+    /// height it was built with and the difference shows as empty space.
+    private func resizePanes() {
+        for pane in panes {
+            pane.controller.preferredContentSize = NSSize(
+                width: Self.paneWidth,
+                height: pane.grid.fittingSize.height + 2 * Self.paneMargin)
+        }
+    }
 
     /// Renders the live settings. Never emits: a value outside a control's
     /// range is shown as its own item rather than clamped, because clamping on
@@ -342,8 +419,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         // The duration row only means something in time mode, and the word
         // count only in word mode.
-        rows["testDurationSec"]?.isHidden = settings.testMode != .time
-        rows["wordCount"]?.isHidden = settings.testMode != .words
+        for row in rows["testDurationSec"] ?? [] { row.isHidden = settings.testMode != .time }
+        for row in rows["wordCount"] ?? [] { row.isHidden = settings.testMode != .words }
+        resizePanes()
     }
 
     /// Selects a preset, or adds a `Custom (600)` item for a value that has

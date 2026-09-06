@@ -196,6 +196,29 @@ The Appearance and Sound panes the website has are deliberately absent: this
 app follows the system appearance rather than shipping four hand-built themes,
 and no audio is ported yet.
 
+## The Settings window
+
+Four things were making it look like a form rather than a Mac settings pane,
+and each has a rule behind it worth keeping:
+
+- **Help text goes under the control, small and grey — never in a third
+  column.** A column of it forces the window wide enough to hold the longest
+  sentence, leaves a ragged grey edge against a lot of white, and sets the
+  caption at the same size as the label it is subordinate to.
+- **Controls are leading-aligned in their column, not filled.** Filling makes
+  every control as wide as the widest one in the pane, which is how a
+  two-digit target-speed field ended up 330 points across. Text fields carry a
+  width *constraint*; setting `frame.size.width` inside an autolayout grid is
+  overwritten on the next pass.
+- **Every pane is the same width.** A window that changes width on each
+  toolbar click reads as three windows.
+- **The grid is not pinned to the pane's bottom.** Pinned to both edges it
+  stretches to whatever height the pane was built with — and panes are
+  measured with every row visible, before the ones that do not apply are
+  hidden. NSGridView puts the slack *inside a row*: a 67-point band of white
+  in the middle of the pane that moved as the settings changed. The panes are
+  re-measured when rows are hidden, so the window is as tall as what it holds.
+
 ## The icon set
 
 `keyboard.macwindow` for the app, `keyboard.badge.ellipsis` for the menu bar.
