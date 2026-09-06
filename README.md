@@ -237,6 +237,18 @@ and each has a rule behind it worth keeping:
   in the middle of the pane that moved as the settings changed. The panes are
   re-measured when rows are hidden, so the window is as tall as what it holds.
 
+### Steppers wrap unless you tell them not to
+
+`NSStepper.valueWraps` defaults to **true**. One click up from 140 characters
+per line went to 30 and took the window's shape with it; one click down from
+the minimum went to the maximum. Every stepper here sets it false.
+
+Numbers are a field and a stepper together, in both panes. The profile's
+target speed had only the field, which made the same kind of value look like
+two different kinds depending on which pane it was in — and the stepper has to
+be moved by `refresh` alongside the field it mirrors, or its next click jumps
+the value back to whatever it was built with.
+
 ## The icon set
 
 `keyboard.macwindow` for the app, `keyboard.badge.ellipsis` for the menu bar.

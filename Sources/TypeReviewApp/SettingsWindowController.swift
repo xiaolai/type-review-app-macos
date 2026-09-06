@@ -26,6 +26,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var rows: [String: [NSGridRow]] = [:]
     /// Retains the closure-backed targets for the app-preference controls.
     private var proxies: [ActionProxy] = []
+    /// Steppers that mirror a profile field, so `refresh` can move them with
+    /// the value they show.
+    private var steppers: [String: NSStepper] = [:]
     /// Each pane and its grid, so a pane can be re-measured when a row is
     /// hidden.
     private var panes: [(controller: NSViewController, grid: NSGridView)] = []
@@ -233,6 +236,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         stepper.minValue = Double(preference.range.lowerBound)
         stepper.maxValue = Double(preference.range.upperBound)
         stepper.increment = 1
+        // NSStepper wraps by default. One click up from 140 characters per
+        // line went to 30 and took the window with it, which is not a thing
+        // any stepper on this system does.
+        stepper.valueWraps = false
         stepper.integerValue = preference.value
         let commit = { [weak field, weak stepper] (value: Int) in
             preference.value = value
@@ -243,9 +250,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
         bind(field) { commit(field.integerValue) }
         bind(stepper) { commit(stepper.integerValue) }
-        let row = NSStackView(views: [field, stepper])
-        row.spacing = 4
-        return StackControl(row)
+        return StackControl(numberRow(field, stepper))
     }
 
     /// A popup of whole percentages. An out-of-list stored value — one typed
@@ -363,13 +368,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return control
     }
 
+    /// A bounded number from the profile: field plus stepper, like every other
+    /// number in this window. It had only the field, which made the same kind
+    /// of value look like two different kinds depending on which pane it was
+    /// in.
     private func stepperField(_ key: String) -> NSControl {
+        let bounds = SettingsSchema.UIBounds.targetWpm
         let field = NSTextField(string: "")
         field.alignment = .right
         field.formatter = {
             let formatter = NumberFormatter()
-            formatter.minimum = NSNumber(value: SettingsSchema.UIBounds.targetWpm.lo)
-            formatter.maximum = NSNumber(value: SettingsSchema.UIBounds.targetWpm.hi)
+            formatter.minimum = NSNumber(value: bounds.lo)
+            formatter.maximum = NSNumber(value: bounds.hi)
             formatter.allowsFloats = false
             return formatter
         }()
@@ -381,7 +391,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // width of the widest control in the pane.
         field.widthAnchor.constraint(equalToConstant: 72).isActive = true
         controls[key] = field
-        return field
+
+        let stepper = NSStepper()
+        stepper.minValue = bounds.lo
+        stepper.maxValue = bounds.hi
+        stepper.increment = 1
+        stepper.valueWraps = false
+        steppers[key] = stepper
+        bind(stepper) { [weak self] in
+            field.integerValue = stepper.integerValue
+            self?.changed(field)
+        }
+        return StackControl(numberRow(field, stepper))
+    }
+
+    /// A number field with its stepper beside it, spaced the way AppKit spaces
+    /// them elsewhere.
+    private func numberRow(_ field: NSTextField, _ stepper: NSStepper) -> NSStackView {
+        let row = NSStackView(views: [field, stepper])
+        row.spacing = 3
+        row.alignment = .centerY
+        return row
     }
 
     // MARK: - State
@@ -407,6 +437,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         (controls["testMode"] as? NSSegmentedControl)?.selectedSegment =
             SettingsSchema.testModes.firstIndex(of: settings.testMode) ?? 0
         controls["targetWpm"]?.stringValue = String(Int(settings.targetWpm))
+        // And the stepper beside it, or it keeps whatever it was built with
+        // and the next click jumps the value back there.
+        steppers["targetWpm"]?.integerValue = Int(settings.targetWpm)
         select(controls["wordCount"], settings.wordCount, SettingsSchema.wordCountPresets)
         select(controls["testDurationSec"], settings.testDurationSec, SettingsSchema.durationPresets)
         (controls["passageLength"] as? NSPopUpButton)?.selectItem(
