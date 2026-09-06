@@ -22,6 +22,9 @@ final class PracticeViewController: NSViewController {
     var clock: () -> Double = { Date().timeIntervalSince1970 * 1000 }
     private var session: Session?
     private var store: ProfileFileStore?
+    /// The user's library. Held here because the corpus adapter needs it on
+    /// every pick, and read live so an addition applies to the next run.
+    let library = (try? LibraryStore.standard()) ?? LibraryStore(directory: FileManager.default.temporaryDirectory)
     private var pendingSaveError: String?
     private var currentEntry: CorpusEntry?
     /// Which corpus runs draw from. Remembered across launches.
@@ -151,7 +154,9 @@ final class PracticeViewController: NSViewController {
     /// without rebuilding the session.
     private func adapter() -> CorpusAdapter {
         let box = entryBox
-        return CorpusAdapter(channel: channel) { entry in box.value = entry }
+        return CorpusAdapter(channel: channel, library: library.passages) { entry in
+            box.value = entry
+        }
     }
 
     private func type(_ character: String) {

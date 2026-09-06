@@ -1,0 +1,67 @@
+[
+  {
+    "name": "fenced code blocks go entirely",
+    "input": "before\n\n```js\nconst x = 1;\n```\n\nafter",
+    "output": "before\n\nafter"
+  },
+  {
+    "name": "tilde fences too",
+    "input": "a\n~~~\ncode\n~~~\nb",
+    "output": "a\n\nb"
+  },
+  {
+    "name": "images are dropped, not turned into their alt text",
+    "input": "see ![a photo](p.png) here",
+    "output": "see here"
+  },
+  {
+    "name": "links keep their text",
+    "input": "read [the paper](https://x.test) now",
+    "output": "read the paper now"
+  },
+  {
+    "name": "an image inside a link",
+    "input": "[![alt](i.png)](https://x.test)",
+    "output": ""
+  },
+  {
+    "name": "headings keep their text",
+    "input": "# Title\n\n## Subtitle\n\nbody",
+    "output": "Title\n\nSubtitle\n\nbody"
+  },
+  {
+    "name": "blockquotes",
+    "input": "> quoted line\n> and another",
+    "output": "quoted line and another"
+  },
+  {
+    "name": "list markers",
+    "input": "- one\n* two\n+ three",
+    "output": "one two three"
+  },
+  {
+    "name": "emphasis markers",
+    "input": "**bold** and _italic_ and ~~struck~~",
+    "output": "bold and italic and struck"
+  },
+  {
+    "name": "inline code keeps its contents",
+    "input": "call `map()` on it",
+    "output": "call map() on it"
+  },
+  {
+    "name": "horizontal rules vanish",
+    "input": "a\n\n---\n\nb",
+    "output": "a\n\nb"
+  },
+  {
+    "name": "stray html",
+    "input": "a <em>b</em> <br/> c",
+    "output": "a b c"
+  },
+  {
+    "name": "a realistic document",
+    "input": "# Heading\n\nSome *text* with a [link](u).\n\n- item one\n- item two\n\n> a quote\n\n```\nignored\n```\n\nEnd.",
+    "output": "Heading\n\nSome text with a link.\n\nitem one item two\n\na quote\n\nEnd."
+  }
+]

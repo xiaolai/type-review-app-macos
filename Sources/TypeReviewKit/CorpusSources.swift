@@ -174,11 +174,12 @@ public enum BundledCorpus {
 
 /// Which corpus a run draws from.
 public enum CorpusChannel: String, Sendable, CaseIterable {
-    case auto, quotes, code, generated
+    case auto, quotes, code, user, generated
 
     public var label: String {
         switch self {
         case .auto: return "Auto"
+        case .user: return "Library"
         case .quotes: return "Quotes"
         case .code: return "Code"
         case .generated: return "Generated"
@@ -197,16 +198,27 @@ public struct CorpusAdapter {
     /// Fired whenever a real entry is chosen, so the UI can credit it.
     public var onEntryPicked: (@Sendable (CorpusEntry?) -> Void)?
 
-    public init(channel: CorpusChannel, onEntryPicked: (@Sendable (CorpusEntry?) -> Void)? = nil) {
+    /// The user's library, read at construction. The adapter is rebuilt for
+    /// every pick, so this is always the current list.
+    public let library: [UserPassage]
+
+    public init(
+        channel: CorpusChannel, library: [UserPassage] = [],
+        onEntryPicked: (@Sendable (CorpusEntry?) -> Void)? = nil
+    ) {
         self.channel = channel
+        self.library = library
         self.onEntryPicked = onEntryPicked
     }
 
-    private func sources() -> [StaticCorpusSource] {
+    /// The user's own uploads come first in `auto`: someone who took the
+    /// trouble to add a document wants to type that document.
+    private func sources() -> [any CorpusSource] {
         switch channel {
         case .quotes: return [BundledCorpus.quotes]
         case .code: return [BundledCorpus.code]
-        case .auto: return [BundledCorpus.quotes, BundledCorpus.code]
+        case .user: return [UserCorpusSource(passages: library)]
+        case .auto: return [UserCorpusSource(passages: library), BundledCorpus.quotes, BundledCorpus.code]
         case .generated: return []
         }
     }
@@ -218,8 +230,14 @@ public struct CorpusAdapter {
     public func adaptiveSource(
         filter: Filter, wordCount: Int, rng: inout Mulberry32
     ) throws -> Passage {
+        // An explicitly chosen channel ignores the alphabet filter. Otherwise
+        // a user in the early curriculum who picks "Code" or "Library" gets
+        // pseudo-words instead: every real passage uses letters their
+        // alphabet has not unlocked yet, so the channel silently never
+        // answers. Honouring the request beats honouring the curriculum.
         let context = CorpusContext(
-            filter: Set(filter.allowed), wantedChars: wantedChars(wordCount))
+            filter: channel == .auto ? Set(filter.allowed) : nil,
+            wantedChars: wantedChars(wordCount))
         for source in sources() {
             if let entry = source.pick(context, rng: &rng) {
                 onEntryPicked?(entry)

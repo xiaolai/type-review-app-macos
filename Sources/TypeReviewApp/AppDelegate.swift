@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // AppDelegate's nonisolated init.
     private var stats: StatsViewController?
     private var settings: SettingsWindowController?
+    private var libraryWindow: LibraryWindowController?
     private var keyboardMenuItem: NSMenuItem?
     private var sourceMenuItems: [NSMenuItem] = []
 
@@ -70,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let statsItem = viewMenu.addItem(
             withTitle: "Statistics", action: #selector(showStats(_:)), keyEquivalent: "2")
         statsItem.target = self
+        let libraryItem = viewMenu.addItem(
+            withTitle: "Library", action: #selector(showLibrary(_:)), keyEquivalent: "3")
+        libraryItem.target = self
         let keyboardItem = viewMenu.addItem(
             withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "k")
         keyboardItem.target = self
@@ -141,6 +145,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         practice?.setKeyboardVisible(visible)
     }
 
+    /// The Library gets its own window for the same reason Statistics does:
+    /// managing documents alongside the practice screen beats replacing it.
+    @objc private func showLibrary(_ sender: Any?) {
+        guard let practice else { return }
+        let controller = libraryWindow ?? LibraryWindowController(store: practice.library)
+        libraryWindow = controller
+        controller.present()
+    }
+
     @objc private func showSettings(_ sender: Any?) {
         let controller = settings ?? SettingsWindowController()
         settings = controller
@@ -196,6 +209,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         + "\(BundledCorpus.code.entries.count) code entries")
                 exit(1)
             }
+            // The library round-trip, through the real file store: add,
+            // reload from disk, confirm the corpus serves it, delete. The unit
+            // tests cover the parser and the picker; only this can tell
+            // whether the app is wired to them.
+            let library = practice.library
+            let libraryBefore = library.passages.count
+            do {
+                try library.add(title: "selftest", text: "the quick brown fox jumps over it")
+            } catch {
+                print("SELFTEST FAIL: library add: \(error)")
+                exit(1)
+            }
+            let reread = LibraryStore(directory: library.directory)
+            guard reread.passages.count == libraryBefore + 1,
+                let added = reread.passages.last,
+                added.title == "selftest"
+            else {
+                print("SELFTEST FAIL: library did not survive a reload from \(library.fileURL.path)")
+                exit(1)
+            }
+            var libraryRNG = Mulberry32(seed: 1)
+            let served = try? CorpusAdapter(channel: .user, library: reread.passages)
+                .adaptiveSource(
+                    filter: Filter(allowed: ["e", "t", "a"], focus: nil), wordCount: 7,
+                    rng: &libraryRNG)
+            guard served?.text == added.text else {
+                print("SELFTEST FAIL: Library channel served \(served?.text ?? "nothing")")
+                exit(1)
+            }
+            do { try library.delete(id: added.id) } catch {
+                print("SELFTEST FAIL: library delete: \(error)")
+                exit(1)
+            }
+
             guard let view = practice.view.subviews.compactMap({ $0 as? TypingView }).first else {
                 print("SELFTEST FAIL: no typing surface")
                 exit(1)

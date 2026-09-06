@@ -222,8 +222,8 @@ ramp cannot say both.
 ## The corpus
 
 The 189 curated quotes and the code snippets ship inside the Kit as resources —
-domain data, not app chrome, and the same bytes the website serves. `⌘4`–`⌘7`
-switch source: Auto, Quotes, Code, Generated.
+domain data, not app chrome, and the same bytes the website serves. `⌘4`–`⌘8`
+switch source: Auto, Quotes, Code, Library, Generated.
 
 Both corpus sources draw from the *session's* RNG rather than one of their own.
 That is what keeps a seeded session reproducible in sequence rather than only
@@ -233,6 +233,30 @@ extra draw shifts every later passage.
 The generators remain the fallback and always will be. A six-letter lesson has
 no real sentence available, and a timed run needs more text than any quote
 holds — so "no passage" is never an outcome the app can reach.
+
+## The library
+
+`⌘3` opens a window for the user's own documents. A `.txt` or `.md` file
+dropped on it — or chosen through the panel, or pasted — becomes practice
+text.
+
+The Markdown path is a stripper, not a parser, and **rule order is the whole
+subtlety**. Images have to be dropped before links, or `![alt](url)` becomes
+the word "alt": text the document never contained. Emphasis has to run after
+the per-line markers, or a list bullet is read as an italic. Every ordering
+mistake produces plausible English, which is exactly why it is pinned by
+vector rather than by hand-written expectations — a test written from the same
+misunderstanding as the code would agree with it. Swapping the image and link
+rules is caught by the vector on `see ![a photo](p.png) here`.
+
+Two deliberate departures from the website, both because the host is
+different. The library is a JSON file beside the profile rather than
+IndexedDB, so nothing evicts it and the user can back it up or read it. And
+choosing a source explicitly now drops the alphabet filter: someone early in
+the curriculum who picks Library or Code was silently served generated words,
+because every real passage uses letters their alphabet has not unlocked. In
+`auto` the curriculum still rules — an early learner should not be handed
+letters they have never been taught.
 
 ## Drift between the two implementations
 
