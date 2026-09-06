@@ -55,7 +55,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     private static let stats = NSToolbarItem.Identifier("stats")
 
     // Source and new-text lead, because they decide what you are about to type.
-    // The three windows sit at the trailing edge, away from the text.
+    // The three windows sit at the trailing edge, away from the text. The app's
+    // mark is not here — it is a title-bar accessory, so it sits bare rather
+    // than in a button's capsule. See `TitleMarkController`.
     private static let layout: [NSToolbarItem.Identifier] = [
         source, newText, .flexibleSpace, keyboard, library, stats,
     ]

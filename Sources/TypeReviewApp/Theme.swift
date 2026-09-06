@@ -65,8 +65,48 @@ enum Theme {
         symbol(name, size: SymbolSize.toolbar, weight: toolbarSymbolWeight)
     }
 
+    /// The app's mark in the title bar, with its colour baked in.
+    ///
+    /// `.medium` rather than the toolbar's `.thin`: this is the app saying
+    /// which app it is, and it stands where a word used to. A hairline mark
+    /// reads as one more control instead of as a name.
+    ///
+    /// `paletteColors` rather than the view's `contentTintColor` — see the
+    /// note in `TitleMark.MarkView` for why the obvious way does not hold.
+    @MainActor static func titleMark(tintedWith colour: NSColor) -> NSImage? {
+        NSImage(systemSymbolName: "keyboard.badge.eye", accessibilityDescription: "TYPE")?
+            .withSymbolConfiguration(
+                NSImage.SymbolConfiguration(
+                    pointSize: SymbolSize.title, weight: .medium
+                ).applying(NSImage.SymbolConfiguration(paletteColors: [colour])))
+    }
+
+    /// A hue resolved for one appearance.
+    ///
+    /// Hue is the only free part. Saturation and brightness are fixed per
+    /// appearance so every draw is one the mark can actually be read at — a
+    /// random RGB triple gives pale yellow on white, and near-black on dark,
+    /// about as often as it gives anything usable. The same hue at the same
+    /// brightness cannot work on both grounds, and this mark sits on
+    /// `textBackgroundColor`, which is white in one and near-black in the
+    /// other.
+    ///
+    /// Resolved rather than dynamic, because the colour is baked into the
+    /// image: a dynamic `NSColor` handed to `paletteColors` has no appearance
+    /// to resolve against at the moment the symbol is rendered.
+    static func tint(hue: CGFloat, for appearance: NSAppearance) -> NSColor {
+        let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return NSColor(
+            hue: hue,
+            saturation: dark ? 0.62 : 0.78,
+            brightness: dark ? 0.98 : 0.72,
+            alpha: 1)
+    }
+
     /// Sizes, named so the call sites read as intent rather than as numbers.
     enum SymbolSize {
+        /// The app's mark, standing where the window title used to.
+        static let title: CGFloat = 17
         /// Toolbar buttons, in both the practice and library windows.
         static let toolbar: CGFloat = 15
         /// The settings window's tab strip, which shows a label underneath.

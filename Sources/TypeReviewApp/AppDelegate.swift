@@ -55,6 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         window.toolbar = toolbarController.makeToolbar()
         window.toolbarStyle = .unified
+        // The mark replaces the word. `window.title` stays set — the Window
+        // menu and Mission Control read it — but the title bar draws the
+        // app's icon instead, in this launch's colour.
+        window.titleVisibility = .hidden
+        TitleMark.install(in: window)
         // No hairline under the title bar. The practice screen is a sheet of
         // text on a plain ground; a rule across the top divides it from
         // nothing.
@@ -221,6 +226,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
         }
+        // A new colour for the mark, but only when the window was actually
+        // away. "Open TYPE" on a window that is already up is a no-op, and
+        // re-rolling there would change the colour for nothing.
+        if window?.isVisible != true { TitleMark.reroll() }
         window?.makeKeyAndOrderFront(nil)
         // The drawer is a child window, so closing the main one took it off
         // screen while leaving it marked open. Without this it never comes
