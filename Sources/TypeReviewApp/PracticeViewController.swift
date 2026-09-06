@@ -366,8 +366,8 @@ final class PracticeViewController: NSViewController {
                 count: 1)
             : nil
         keyboard?.update(
-            stats: aggregatePerKey(session.profile.results), expected: next?.lowercased(),
-            targetWpm: session.profile.settings.targetWpm)
+            stats: aggregatePerKey(session.profile.results), plan: snapshot.plan,
+            expected: next?.lowercased(), targetWpm: session.profile.settings.targetWpm)
         wpmLabel.stringValue = String(format: "%.0f wpm", snapshot.liveMetrics.netWpm)
         accuracyLabel.stringValue = String(format: "%.0f%%", snapshot.liveMetrics.accuracy)
         applyMode(snapshot.mode)

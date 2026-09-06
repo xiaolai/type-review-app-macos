@@ -19,6 +19,11 @@ final class KeyboardView: NSView {
     private var stats: OrderedMap<PerKeyStat> = OrderedMap()
     private var pressed: UInt16?
     private var expected: String?
+    /// Letters the curriculum knows about but has not unlocked yet. Empty in
+    /// benchmark mode, where there is no lesson and so nothing is locked.
+    private var lockedLetters: Set<String> = []
+    /// The one letter this lesson drills hardest.
+    private var focusLetter: String?
     /// Milliseconds per character at the user's target speed. The heat scale
     /// is anchored to this rather than to their own slowest key: a relative
     /// scale paints the whole keyboard warm as soon as timings cluster, and
@@ -44,8 +49,15 @@ final class KeyboardView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func update(stats: OrderedMap<PerKeyStat>, expected: String?, targetWpm: Double) {
+    func update(
+        stats: OrderedMap<PerKeyStat>, plan: LessonPlan?, expected: String?, targetWpm: Double
+    ) {
         self.stats = stats
+        // Kept as the two things this view draws rather than as the whole
+        // plan: the locked set is a per-key lookup on every redraw, and a set
+        // answers it in constant time where `keys` would be a linear scan.
+        lockedLetters = Set(plan?.keys.lazy.filter { !$0.included }.map(\.letter) ?? [])
+        focusLetter = plan?.focus
         self.expected = expected
         targetMs = Target(targetSpeed: targetWpm).timePerChar
         needsDisplay = true
@@ -294,12 +306,32 @@ final class KeyboardView: NSView {
         if isPressed {
             glaze(face, Theme.caret, strength: 0.30)
         }
+        // The lesson layer, over the heat rather than instead of it. The heat
+        // answers "how is this key going"; this answers "is it one of the keys
+        // I am being asked to learn, and which one right now" — and both are
+        // worth knowing at once, which is why neither replaces the other.
+        if let focusLetter, character == focusLetter, !isPressed {
+            drawFocusRing(face, unit: unit)
+        }
 
         if key.role == .touchID {
             drawTouchID(in: faceRect, unit: unit)
             return
         }
-        drawLabels(key, character: character, in: faceRect, unit: unit)
+        // The other half of the lesson layer, marked subtractively: locked
+        // letters lose contrast instead of unlocked ones gaining ink. An
+        // alphabet grows one letter at a time, so for most of a run the
+        // unlocked set is small and highlighting it would light up the board.
+        //
+        // Three states, not two — a cap can be unlocked, locked, or outside
+        // the curriculum entirely, and only the middle one is dimmed. That is
+        // why the test is membership in the locked set rather than
+        // `key.types`: the first version dimmed every digit and every mark of
+        // punctuation, which claimed the lesson excluded a comma no lesson has
+        // ever offered.
+        drawLabels(
+            key, character: character, in: faceRect, unit: unit,
+            locked: character.map(lockedLetters.contains) ?? false)
     }
 
     /// Legend size as a fraction of the key.
@@ -323,16 +355,23 @@ final class KeyboardView: NSView {
     }
 
     private func drawLabels(
-        _ key: KeyboardGeometry.Key, character: String?, in rect: NSRect, unit: CGFloat
+        _ key: KeyboardGeometry.Key, character: String?, in rect: NSRect, unit: CGFloat,
+        locked: Bool = false
     ) {
         let label = key.label ?? character?.uppercased() ?? ""
         guard !label.isEmpty, label != " " else { return }
         let stat = character.flatMap { stats[$0] }
-        let color: NSColor =
+        var color: NSColor =
             switch key.role {
             case .letter: stat == nil ? Theme.secondaryText : Theme.correct
             default: Theme.secondaryText
             }
+        // Letters the lesson has not unlocked lose contrast. Marked on the
+        // legend rather than on the cap: the cap face is already
+        // `textBackgroundColor`, so glazing it with anything near that colour
+        // is a no-op — the first version of this washed white over white and
+        // changed nothing at all.
+        if locked { color = color.withAlphaComponent(0.28) }
 
         // The shifted glyph, from the system rather than a table — so a German
         // keyboard prints its own. Suppressed when it is merely the capital of
@@ -428,6 +467,20 @@ final class KeyboardView: NSView {
         circle.lineWidth = max(0.75, unit * 0.022)
         Theme.secondaryText.withAlphaComponent(0.3).setStroke()
         circle.stroke()
+    }
+
+    /// The one key this lesson is drilling hardest.
+    ///
+    /// A ring, not a wash. Every other state on this keyboard is a fill — heat,
+    /// the expected key, the pressed key — so a fourth fill would have to
+    /// compete with three others for the same pixels and would be read as a
+    /// shade of them. An outline occupies the edge instead, which nothing else
+    /// uses, and survives whatever colour the cap already carries.
+    private func drawFocusRing(_ face: NSBezierPath, unit: CGFloat) {
+        let ring = face.copy() as! NSBezierPath
+        ring.lineWidth = max(1.5, unit * 0.045)
+        Theme.correct.withAlphaComponent(0.55).setStroke()
+        ring.stroke()
     }
 
     /// A pane of tinted glass over the cap.
