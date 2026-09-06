@@ -1,5 +1,4 @@
 import Carbon.HIToolbox
-import Foundation
 
 /// Physical key positions.
 ///

@@ -78,13 +78,22 @@ final class KeyboardDrawer {
         // is the one thing it does not track, so a resize is observed. A
         // height change moves the parent's bottom edge too, which is why this
         // recomputes the whole frame rather than just the width.
+        // Every observer below is registered with `queue: .main`, so its block
+        // is delivered on the main thread — but the block itself is `@Sendable`
+        // and therefore nonisolated, which this class is not. `assumeIsolated`
+        // is the honest way to close that gap: it states the guarantee the
+        // registration already provides and traps if it is ever untrue, rather
+        // than hopping to a later runloop turn and reframing the drawer against
+        // a window position that has since moved.
         for name in [NSWindow.didResizeNotification, NSWindow.didMoveNotification] {
             observers.append(
                 NotificationCenter.default.addObserver(
                     forName: name, object: parent, queue: .main
                 ) { [weak self] _ in
-                    guard let self, self.isOpen else { return }
-                    self.reframe()
+                    MainActor.assumeIsolated {
+                        guard let self, self.isOpen else { return }
+                        self.reframe()
+                    }
                 })
         }
         // A drawer hanging below a full-screen window is off the display
@@ -92,13 +101,17 @@ final class KeyboardDrawer {
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: NSWindow.willEnterFullScreenNotification, object: parent, queue: .main
-            ) { [weak self] _ in self?.window.orderOut(nil) })
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.window.orderOut(nil) }
+            })
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: NSWindow.didExitFullScreenNotification, object: parent, queue: .main
             ) { [weak self] _ in
-                guard let self, self.isOpen else { return }
-                self.present()
+                MainActor.assumeIsolated {
+                    guard let self, self.isOpen else { return }
+                    self.present()
+                }
             })
     }
 
@@ -169,9 +182,14 @@ final class KeyboardDrawer {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(frame(open: open), display: true)
         } completionHandler: { [weak self] in
-            guard let self, !self.isOpen else { return }
-            parent.removeChildWindow(self.window)
-            self.window.orderOut(nil)
+            // AppKit runs this on the main thread; the closure is `@Sendable`
+            // and so cannot say that in the type system. Same reasoning as the
+            // observers in `attach(to:)`.
+            MainActor.assumeIsolated {
+                guard let self, !self.isOpen else { return }
+                parent.removeChildWindow(self.window)
+                self.window.orderOut(nil)
+            }
         }
     }
 

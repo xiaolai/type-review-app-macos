@@ -32,6 +32,14 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// character — which is what makes the highlight correct under Dvorak,
     /// where the key labelled S types "o".
     var onKeyPressed: ((UInt16?) -> Void)?
+    /// The physical key that was just pressed, for the sound layer.
+    ///
+    /// Reported from `keyDown` rather than from `insertText`, and that is the
+    /// point: the click has to land when the key goes down, not when the
+    /// input context decides a character is finished. During CJK composition
+    /// those are seconds apart, and a keyboard whose sound lags the key is
+    /// worse than one with no sound at all.
+    var onKeyStruck: ((UInt16) -> Void)?
 
     private var expected: String = ""
     private var statuses: [CharStatus] = []
@@ -223,6 +231,16 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
     override func keyDown(with event: NSEvent) {
         onKeyPressed?(event.keyCode)
+        // Not on auto-repeat. Holding a key down would otherwise fire the
+        // click at the system's repeat rate, which is both unlike a real
+        // keyboard — where a held key makes one sound — and, at ~30 Hz, a
+        // machine-gun burst through eight voices.
+        //
+        // Also not for shortcuts: ⌘S is not typing, and it is about to be
+        // handled by the menu bar rather than by this view.
+        if !event.isARepeat, event.modifierFlags.intersection([.command, .control]).isEmpty {
+            onKeyStruck?(event.keyCode)
+        }
         // Modified keys are never typing: they belong to the menu bar, and
         // consuming them here would break every shortcut in the app.
         if event.modifierFlags.intersection([.command, .control]).isEmpty {

@@ -17,6 +17,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// value nothing accepted.
     var read: () -> ProfileSettings = { .default }
     var write: (ProfileSettings) -> Bool = { _ in false }
+    /// Plays one keystroke at the current settings. A sound pack picked in
+    /// silence is a pack chosen blind — the whole point of the setting is
+    /// what it sounds like, so choosing one plays it.
+    var previewSound: () -> Void = {}
 
     private let tabs = NSTabViewController()
     private var controls: [String: NSControl] = [:]
@@ -56,6 +60,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.tabbingMode = .disallowed
         tabs.transitionOptions = [.crossfade, .allowUserInteraction]
         window.setFrameAutosaveName("TypeReviewSettings")
+        // The tab strip is already visually distinct from the pane below it, so
+        // the rule between them is a second boundary doing the first one's job.
+        // Both properties are required — see the note in `AppDelegate`.
+        window.titlebarSeparatorStyle = .none
+        window.titlebarAppearsTransparent = true
         super.init(window: window)
         window.delegate = self
         build()
@@ -66,8 +75,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func present() {
         refresh()
+        // Both ends checked. `UserDefaults.integer` happily returns whatever
+        // `defaults write` put there, including a negative number, and
+        // `selectedTabViewItemIndex` traps on one — the same reason every
+        // other read in this window is clamped rather than trusted.
         let last = UserDefaults.standard.integer(forKey: Self.lastPaneKey)
-        if last < tabs.tabViewItems.count { tabs.selectedTabViewItemIndex = last }
+        if last >= 0, last < tabs.tabViewItems.count { tabs.selectedTabViewItemIndex = last }
         showWindow(nil)
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
@@ -129,6 +142,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Drawer speed", self.drawerSpeedPopup(),
                 hint: "How long the keyboard takes to slide out and back.")
+        }
+
+        // Its own pane rather than a row in Practice, for the same reason
+        // Window is: nothing here is part of the profile. The website keeps
+        // sound in localStorage and gives it its own settings tab; this
+        // mirrors both decisions.
+        addPane(title: "Sound", symbol: "speaker.wave.2") { grid in
+            self.addRow(
+                grid, "Keyboard", self.soundPackPopup(),
+                hint: "Heard on every keystroke. Picking one plays it.")
+            self.addRow(grid, "Volume", self.volumeSlider())
+            self.addRow(
+                grid, "Shortcut", self.shortcutRecorder(),
+                hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
         }
 
         addPane(title: "Data", symbol: "internaldrive") { grid in
@@ -210,7 +237,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         panes.append((controller, grid))
         let item = NSTabViewItem(viewController: controller)
         item.label = title
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        item.image = Theme.symbol(
+            symbol, size: Theme.SymbolSize.settingsTab, description: title)
         tabs.addTabViewItem(item)
     }
 
@@ -287,6 +315,55 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             AppPreferences.drawerSeconds.value = choices[popup.indexOfSelectedItem].1
         }
         return popup
+    }
+
+    /// The sound packs, by label. Writes immediately rather than on close —
+    /// a preview that waited for the window to be dismissed would be useless.
+    private func soundPackPopup() -> NSControl {
+        let popup = NSPopUpButton()
+        let packs = KeySoundPack.all
+        popup.addItems(withTitles: packs.map(\.label))
+        popup.selectItem(at: packs.firstIndex(of: AppPreferences.soundPack.value) ?? 0)
+        bind(popup) { [weak self] in
+            let index = popup.indexOfSelectedItem
+            guard index >= 0, index < packs.count else { return }
+            AppPreferences.soundPack.value = packs[index]
+            self?.previewSound()
+        }
+        return popup
+    }
+
+    /// Volume as a slider, because it is a continuous quantity and nobody
+    /// thinks about it in numbers. Previews on release rather than on every
+    /// intermediate value — a click per pixel of drag is not a preview.
+    private func volumeSlider() -> NSControl {
+        let slider = NSSlider(
+            value: AppPreferences.soundVolume.value,
+            minValue: AppPreferences.soundVolume.range.lowerBound,
+            maxValue: AppPreferences.soundVolume.range.upperBound,
+            target: nil, action: nil)
+        slider.isContinuous = true
+        slider.widthAnchor.constraint(equalToConstant: 160).isActive = true
+        bind(slider) { [weak self] in
+            AppPreferences.soundVolume.value = slider.doubleValue
+            // `isContinuous` fires throughout the drag; only the mouse-up is
+            // worth hearing.
+            if NSApp.currentEvent?.type == .leftMouseUp { self?.previewSound() }
+        }
+        return slider
+    }
+
+    /// The global shortcut, as a recorder. Held so nothing else has to know
+    /// how it stores itself.
+    private func shortcutRecorder() -> NSControl {
+        let recorder = ShortcutRecorder(shortcut: AppPreferences.soundShortcut.value)
+        recorder.onChange = { shortcut in
+            // Writing the preference posts `didChange`, which is what makes
+            // the app re-register the hot key and relabel both menus. The
+            // recorder itself knows none of that.
+            AppPreferences.soundShortcut.value = shortcut
+        }
+        return recorder
     }
 
     /// One setting: a right-aligned label, its control, and an optional

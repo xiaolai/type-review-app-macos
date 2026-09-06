@@ -24,6 +24,11 @@ final class StatsViewController: NSViewController {
         table.usesAlternatingRowBackgroundColors = true
         table.rowSizeStyle = .default
         table.headerView = NSTableHeaderView()
+        // The same inset rows the Library uses. Left at `.automatic` this
+        // table drew full-bleed rows squared off against the window edge,
+        // which is the older list shape and made the two tables in one app
+        // look like they came from different decades.
+        table.style = .inset
         for (identifier, title, width) in [
             ("key", "Key", CGFloat(60)), ("hits", "Typed", 80), ("avg", "Avg ms", 90),
             ("err", "Errors", 90),

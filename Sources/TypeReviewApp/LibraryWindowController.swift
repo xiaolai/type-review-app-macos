@@ -13,8 +13,10 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     private let store: LibraryStore
     private let table = NSTableView()
     private let statusLabel = NSTextField(labelWithString: "")
-    private let removeButton = NSButton()
     private let emptyLabel = NSTextField(labelWithString: "")
+    /// Held so its enabled state can follow the selection, the way the Remove
+    /// button used to.
+    private var removeItem: NSToolbarItem?
 
     init(store: LibraryStore) {
         self.store = store
@@ -70,7 +72,11 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
+        // No bezel. A hard rectangular frame drawn around a list is the
+        // pre-Big Sur look; `.inset` table style already gives the rows their
+        // own inset shape, and Finder, Mail and Notes all let that sit
+        // directly on the window rather than inside a box.
+        scroll.borderType = .noBorder
 
         // What an empty table should say, in place of four blank rows.
         emptyLabel.stringValue = "Nothing here yet.\nAdd a .txt or .md file, or paste text."
@@ -79,25 +85,15 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         emptyLabel.font = .systemFont(ofSize: 13)
         emptyLabel.maximumNumberOfLines = 2
 
-        let addFile = NSButton(
-            title: "Add File…", target: self, action: #selector(addFile(_:)))
-        let paste = NSButton(
-            title: "Paste Text", target: self, action: #selector(pasteText(_:)))
-        removeButton.title = "Remove"
-        removeButton.bezelStyle = .rounded
-        removeButton.target = self
-        removeButton.action = #selector(removeSelected(_:))
-        removeButton.isEnabled = false
-        for button in [addFile, paste] { button.bezelStyle = .rounded }
-
         statusLabel.font = NSFont.systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
 
-        let buttons = NSStackView(views: [addFile, paste, removeButton, statusLabel])
-        buttons.spacing = 8
-        buttons.alignment = .centerY
-
-        for subview in [scroll, buttons, emptyLabel] {
+        // Add, Paste and Remove act on the whole library, so they belong in the
+        // window's toolbar rather than in a row of push buttons along the
+        // bottom. That row is the pre-Big Sur shape for this window, and moving
+        // it up is also what gives this window the same unified title bar as
+        // the practice window — one chrome for the app, not two.
+        for subview in [scroll, statusLabel, emptyLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(subview)
         }
@@ -105,21 +101,34 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             scroll.topAnchor.constraint(equalTo: content.topAnchor, constant: 16),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
-            buttons.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 12),
-            buttons.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
-            buttons.trailingAnchor.constraint(
+            statusLabel.topAnchor.constraint(equalTo: scroll.bottomAnchor, constant: 10),
+            statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            statusLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: content.trailingAnchor, constant: -16),
-            buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+            statusLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
 
             emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
         ])
         window?.contentView = content
+
+        let toolbar = NSToolbar(identifier: "TypeReviewLibrary")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        window?.toolbar = toolbar
+        window?.toolbarStyle = .unified
+        // The table already reads as its own surface; a rule above it draws a
+        // second edge where one is enough. Both properties are required — see
+        // the note in `AppDelegate`: `.none` alone leaves a 1pt line that
+        // belongs to the title bar's backdrop, not to the separator.
+        window?.titlebarSeparatorStyle = .none
+        window?.titlebarAppearsTransparent = true
     }
 
     private func reload() {
         table.reloadData()
-        removeButton.isEnabled = !table.selectedRowIndexes.isEmpty
+        removeItem?.isEnabled = !table.selectedRowIndexes.isEmpty
         let count = store.passages.count
         emptyLabel.isHidden = count > 0
         table.usesAlternatingRowBackgroundColors = count > 0
@@ -249,7 +258,7 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        removeButton.isEnabled = !table.selectedRowIndexes.isEmpty
+        removeItem?.isEnabled = !table.selectedRowIndexes.isEmpty
     }
 
     private static let dateFormatter: DateFormatter = {
@@ -294,5 +303,68 @@ private final class DropView: NSView {
         guard !dropped.isEmpty else { return false }
         onDrop?(dropped)
         return true
+    }
+}
+
+// MARK: - Toolbar
+
+extension LibraryWindowController: NSToolbarDelegate {
+    private static let addItem = NSToolbarItem.Identifier("add")
+    private static let pasteItem = NSToolbarItem.Identifier("paste")
+    private static let deleteItem = NSToolbarItem.Identifier("remove")
+
+    private static let layout: [NSToolbarItem.Identifier] = [
+        addItem, pasteItem, .flexibleSpace, deleteItem,
+    ]
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.layout
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.layout
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        switch identifier {
+        case Self.addItem:
+            return item(identifier, "Add File", "plus", "Add a .txt or .md file", #selector(addFile(_:)))
+        case Self.pasteItem:
+            return item(
+                identifier, "Paste Text", "doc.on.clipboard", "Add the clipboard as a passage",
+                #selector(pasteText(_:)))
+        case Self.deleteItem:
+            let remove = item(
+                identifier, "Remove", "trash", "Remove the selected passages",
+                #selector(removeSelected(_:)))
+            // Nothing is selected when the window is built, and a Remove that
+            // is always live invites deleting whatever happens to be first.
+            remove.isEnabled = false
+            removeItem = remove
+            return remove
+        default:
+            return nil
+        }
+    }
+
+    private func item(
+        _ identifier: NSToolbarItem.Identifier, _ label: String, _ symbol: String,
+        _ tip: String, _ action: Selector
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = label
+        item.paletteLabel = label
+        item.toolTip = tip
+        item.image = Theme.symbol(symbol, size: Theme.SymbolSize.toolbar)
+        item.target = self
+        item.action = action
+        item.isBordered = true
+        // Validation is driven by the table's selection in `reload()`, so the
+        // toolbar must not second-guess it on every runloop pass.
+        item.autovalidates = false
+        return item
     }
 }

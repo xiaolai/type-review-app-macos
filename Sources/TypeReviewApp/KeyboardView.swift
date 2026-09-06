@@ -146,9 +146,12 @@ final class KeyboardView: NSView {
         // trailing gap on each axis. Without this the right and bottom margins
         // are a full gap wider than the left and top — small, consistent, and
         // exactly the kind of asymmetry the eye reads as "not quite right"
-        // without being able to name it.
-        let caseWidth = unit * CGFloat(KeyboardGeometry.unitsPerRow) + 2 * padding - gap
-        let caseHeight = unit * CGFloat(rows.count) + 2 * padding - gap
+        // without being able to name it. `caseSize` is where that rule lives;
+        // repeating it here meant `unitWidth` could size against one formula
+        // while the case drew with another.
+        let shell = caseSize(unit: unit)
+        let caseWidth = shell.width
+        let caseHeight = shell.height
         // Centred rather than stretched: a keyboard is a fixed object, and one
         // that changes shape with the window stops looking like hardware.
         // Centred both ways. Horizontally because a keyboard is a fixed

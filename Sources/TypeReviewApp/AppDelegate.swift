@@ -5,7 +5,7 @@ import TypeReviewKit
 /// alternative under strict concurrency is annotating them one at a time and
 /// still having the compiler object to closures that capture `self`.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: NSWindow?
     private var practice: PracticeViewController?
     // Built in applicationDidFinishLaunching, for the same reason the stats
@@ -23,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var statusKeyboardItem: NSMenuItem?
     private var sourceMenuItems: [NSMenuItem] = []
+    private var toolbarController: MainToolbarController?
+    /// Every Sound submenu built — the menu bar's and the status item's. Both
+    /// carry the same checkmarks, so both have to be told when the pack
+    /// changes, including when it changes from the global shortcut while
+    /// neither menu is open.
+    private var soundMenus: [NSMenu] = []
+    private var soundHotKey: GlobalHotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let practice = PracticeViewController()
@@ -31,10 +38,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let window = NSWindow(contentViewController: practice)
         window.title = "TYPE"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // The toolbar, and the unified style, are what give this window the
+        // current Mac silhouette: one material band holding the title, the
+        // controls and the traffic lights, instead of the short opaque strip a
+        // toolbar-less window still gets. See `MainToolbarController`.
+        let toolbarController = MainToolbarController()
+        self.toolbarController = toolbarController
+        toolbarController.onNewText = { [weak self] in self?.practice?.startFreshRun() }
+        toolbarController.onToggleKeyboard = { [weak self] in self?.toggleKeyboard(nil) }
+        toolbarController.onShowLibrary = { [weak self] in self?.showLibrary(nil) }
+        toolbarController.onShowStats = { [weak self] in self?.showStats(nil) }
+        toolbarController.currentChannel = { [weak self] in self?.practice?.channel ?? .auto }
+        toolbarController.onChooseSource = { [weak self] channel in
+            self?.practice?.channel = channel
+            self?.markSourceMenu()
+        }
+        window.toolbar = toolbarController.makeToolbar()
+        window.toolbarStyle = .unified
         // No hairline under the title bar. The practice screen is a sheet of
         // text on a plain ground; a rule across the top divides it from
         // nothing.
+        //
+        // Both lines are needed, and `titlebarSeparatorStyle` alone is the
+        // trap. Setting it to `.none` genuinely takes effect — reading the
+        // property back at runtime returns `.none` — and a 1pt line at
+        // rgb(230,230,230) still draws at the toolbar's lower edge, because
+        // under a unified toolbar that edge belongs to the title bar's own
+        // backdrop rather than to the separator. Making the backdrop
+        // transparent is what removes it, and it also lets the toolbar sit on
+        // the same white as the text instead of on a slightly different one.
+        //
+        // Note this is *not* `.fullSizeContentView`: the content still begins
+        // below the title bar, so nothing scrolls under the toolbar and the
+        // font-derived window sizing in `PracticeWindowMetrics` is untouched.
         window.titlebarSeparatorStyle = .none
+        window.titlebarAppearsTransparent = true
+        window.delegate = self
         // Or closing the window deallocates it, and reopening from the menu
         // bar reaches a window that is no longer there. The default is true
         // for a programmatically created window.
@@ -69,9 +108,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self, let window = self.window else { return }
                 self.applyWindowSize(to: window)
                 self.drawer?.reframe()
+                // Sound is an app preference too, and it rides the same
+                // notification — so a pack or volume changed in Settings is
+                // live on the next keystroke rather than at the next launch.
+                self.practice?.applySoundPreferences()
+                self.markSoundMenus()
+                self.registerSoundShortcut()
             }
         }
 
+        registerSoundShortcut()
+
+        if CommandLine.arguments.contains("--soundcheck") { runSoundCheck() }
         if CommandLine.arguments.contains("--selftest") { runSelfTest() }
     }
 
@@ -92,10 +140,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // is a wide, short mark and the default configuration sizes by cap
         // height. `.large` at 13 points brings the ink to roughly 24 by 14,
         // matching the taller neighbours and a hair wider than the widest.
-        let image = NSImage(
-            systemSymbolName: "keyboard.badge.ellipsis", accessibilityDescription: "TYPE"
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 13, weight: .regular, scale: .large))
+        let image = Theme.symbol(
+            "keyboard.badge.ellipsis", size: Theme.SymbolSize.menuBar, scale: .large,
+            description: "TYPE")
         image?.isTemplate = true
         item.button?.image = image
         item.button?.toolTip = "TYPE"
@@ -112,6 +159,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let newText = menu.addItem(
             withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "")
         newText.target = self
+        // A submenu, because the packs are a list and a list of four does not
+        // belong inline in a menu this short. The toggle sits at its top with
+        // the shortcut printed beside it, which is also how someone discovers
+        // the shortcut exists.
+        let soundItem = menu.addItem(withTitle: "Sound", action: nil, keyEquivalent: "")
+        soundItem.submenu = makeSoundMenu()
         menu.addItem(.separator())
         for (title, action) in [
             ("Library", #selector(showLibrary(_:))),
@@ -135,7 +188,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusKeyboardItem?.state = visible ? .on : .off
     }
 
+    /// Closes every window and leaves TYPE running in the menu bar.
+    ///
+    /// What ⌘Q does here. `orderOut` rather than `close` on the main window:
+    /// it is `isReleasedWhenClosed = false` either way, but ordering out keeps
+    /// its delegate and frame intact so coming back is the same window rather
+    /// than a new one that has forgotten where it was.
+    @objc private func hideToMenuBar(_ sender: Any?) {
+        for window in NSApp.windows where window.isVisible && window.canBecomeMain {
+            window.orderOut(nil)
+        }
+        retreatToMenuBar()
+    }
+
+    /// Drops the Dock icon and the menu bar, leaving only the status item.
+    ///
+    /// `.accessory` is what makes this a menu-bar app rather than a windowed
+    /// one that happens to have an icon up there: no Dock tile, and no entry
+    /// in the ⌘-Tab switcher, which is right for something with no window on
+    /// screen. It is reversible — `showMainWindow` puts both back.
+    private func retreatToMenuBar() {
+        guard NSApp.activationPolicy() != .accessory else { return }
+        NSApp.setActivationPolicy(.accessory)
+    }
+
     @objc private func showMainWindow(_ sender: Any?) {
+        // Back to a normal app first. Ordering a window front while the policy
+        // is still `.accessory` gives a window with no menu bar and no Dock
+        // tile, which looks like the app half-launched.
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
         window?.makeKeyAndOrderFront(nil)
         // The drawer is a child window, so closing the main one took it off
         // screen while leaving it marked open. Without this it never comes
@@ -168,6 +251,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// there, and quits from there.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Closing the last window puts TYPE in the menu bar rather than leaving
+    /// a running app with no Dock icon to click and no window to look at.
+    ///
+    /// Checked on the next pass of the runloop because this fires *before* the
+    /// window goes away, so counting here would always find at least one.
+    /// Auxiliary windows do not count — the drawer is borderless and cannot
+    /// become main, which is exactly the test for "a window the user thinks
+    /// of as a window".
+    func windowWillClose(_ notification: Notification) {
+        let closing = notification.object as? NSWindow
+        DispatchQueue.main.async { [weak self] in
+            let remaining = NSApp.windows.contains {
+                $0 !== closing && $0.isVisible && $0.canBecomeMain
+            }
+            if !remaining { self?.retreatToMenuBar() }
+        }
+    }
+
     /// Clicking the Dock icon with no window open brings it back.
     func applicationShouldHandleReopen(
         _ sender: NSApplication, hasVisibleWindows flag: Bool
@@ -198,9 +299,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: "Hide TYPE", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        appMenu.addItem(
-            withTitle: "Quit TYPE", action: #selector(NSApplication.terminate(_:)),
+        // Not "Quit", and not `terminate`. TYPE lives in the menu bar, so ⌘Q
+        // puts it away rather than ending it — and the item says so, because
+        // a "Quit" that does not quit is worse than no item at all. The one
+        // place the app really ends is the status item's own Quit, which is
+        // where someone goes when they mean it.
+        let putAway = appMenu.addItem(
+            withTitle: "Close to Menu Bar", action: #selector(hideToMenuBar(_:)),
             keyEquivalent: "q")
+        putAway.target = self
         appItem.submenu = appMenu
         root.addItem(appItem)
 
@@ -230,6 +337,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sourceItem.submenu = sourceMenu
         viewMenu.addItem(sourceItem)
         sourceMenuItems = sourceMenu.items
+
+        let soundItem = NSMenuItem(title: "Sound", action: nil, keyEquivalent: "")
+        soundItem.submenu = makeSoundMenu()
+        viewMenu.addItem(soundItem)
         viewItem.submenu = viewMenu
         root.addItem(viewItem)
 
@@ -243,6 +354,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
+        // Close was missing, which is why ⌘W did nothing at all. `performClose`
+        // rather than a custom action, so it closes whichever window is in
+        // front — Settings and Library should close like windows, not put the
+        // whole app away.
+        windowMenu.addItem(
+            withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         windowMenu.addItem(
             withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
             keyEquivalent: "m")
@@ -272,6 +389,112 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for item in sourceMenuItems {
             item.state = (item.representedObject as? String) == active ? .on : .off
         }
+        // The toolbar's source menu carries the same checkmark, so it has to be
+        // told too — otherwise changing the source from the menu bar leaves the
+        // toolbar claiming the old one.
+        toolbarController?.refresh()
+    }
+
+    /// Claims the configured combination system-wide, replacing whatever was
+    /// claimed before.
+    ///
+    /// Called at launch and again whenever the preference changes, so a
+    /// shortcut edited in Settings is live immediately — the old registration
+    /// has to be released first or the previous combination keeps working
+    /// alongside the new one.
+    private func registerSoundShortcut() {
+        soundHotKey?.unregister()
+        soundHotKey = nil
+        guard let shortcut = AppPreferences.soundShortcut.value else {
+            markSoundMenus()
+            return
+        }
+        soundHotKey = GlobalHotKey(
+            keyCode: UInt32(shortcut.keyCode), modifiers: shortcut.modifiers.carbon
+        ) { [weak self] in
+            self?.toggleSound(nil)
+        }
+        if soundHotKey == nil {
+            // Another app already owns it. The menu item still works, so this
+            // is worth saying once rather than raising a dialog the user can
+            // do nothing about from here.
+            print("TYPE: \(shortcut.displayString) is taken by another app — menu only")
+        }
+        markSoundMenus()
+    }
+
+    /// The Sound submenu, built fresh for each menu that wants one.
+    ///
+    /// One builder rather than two hand-kept copies: the menu bar and the
+    /// status item offer exactly the same choices, and the last thing this
+    /// should grow is two lists that drift.
+    ///
+    /// The packs sit under the toggle rather than replacing it. Turning sound
+    /// off and picking a pack are different intentions — the toggle is the one
+    /// with a shortcut because it is the one wanted in a hurry, when someone
+    /// walks into the room.
+    private func makeSoundMenu() -> NSMenu {
+        let menu = NSMenu(title: "Sound")
+        // Not "Sound" — the submenu is already called that, and "Sound ▸
+        // Sound" reads like a mistake. A verb phrase with a checkmark, the
+        // same shape as "Show Keyboard" two items up.
+        let toggle = menu.addItem(
+            withTitle: "Play Sounds", action: #selector(toggleSound(_:)), keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(.separator())
+        for pack in KeySoundPack.all {
+            let item = menu.addItem(
+                withTitle: pack.label, action: #selector(chooseSoundPack(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = pack.name
+        }
+        soundMenus.append(menu)
+        markSoundMenus()
+        return menu
+    }
+
+    /// A checkmark on the active pack, and on the toggle when sound is on.
+    /// Called from everywhere the pack can change — the menus, the Settings
+    /// window, and the global shortcut — so the two menus never disagree with
+    /// each other or with what is actually audible.
+    private func markSoundMenus() {
+        let active = AppPreferences.soundPack.value
+        let shortcut = AppPreferences.soundShortcut.value
+        for menu in soundMenus {
+            for item in menu.items {
+                if let name = item.representedObject as? String {
+                    item.state = name == active.name ? .on : .off
+                } else if item.action == #selector(toggleSound(_:)) {
+                    item.state = AppPreferences.soundIsOn ? .on : .off
+                    // The menu advertises whatever is actually registered, so
+                    // it cannot end up printing a combination that no longer
+                    // does anything. Cleared means no shortcut shown.
+                    item.keyEquivalent = shortcut.map { $0.keyName.lowercased() } ?? ""
+                    item.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
+                }
+            }
+        }
+    }
+
+    /// Toggling is what the global shortcut does, so it has to work with no
+    /// window on screen and TYPE in the background.
+    @objc private func toggleSound(_ sender: Any?) {
+        AppPreferences.toggleSound()
+        markSoundMenus()
+        // Switching sound *on* silently would leave the user unsure it
+        // worked — the shortcut is usable from another app, where there is no
+        // window and no menu to look at. One click is the answer. Switching
+        // off needs no confirmation: the next keystroke is the confirmation.
+        if AppPreferences.soundIsOn { practice?.previewSound() }
+    }
+
+    @objc private func chooseSoundPack(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String,
+            let pack = KeySoundPack.named(name)
+        else { return }
+        AppPreferences.soundPack.value = pack
+        markSoundMenus()
+        if AppPreferences.soundIsOn { practice?.previewSound() }
     }
 
     @objc private func toggleKeyboard(_ sender: Any?) {
@@ -296,6 +519,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings = controller
         controller.read = { [weak self] in self?.practice?.currentSettings ?? .default }
         controller.write = { [weak self] next in self?.practice?.applySettings(next) ?? false }
+        controller.previewSound = { [weak self] in self?.practice?.previewSound() }
         controller.present()
     }
 
@@ -312,10 +536,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.setContentSize(NSSize(width: 560, height: 480))
             window.setFrameAutosaveName("TypeReviewStats")
+            // The same two lines the Settings and Library windows carry, and
+            // for the same reasons: without `.auxiliary` this displaces the
+            // practice window in Stage Manager, and `.automatic` tabbing lets
+            // it be absorbed into another window's tab bar. This window was
+            // simply missed when the other two were fixed.
+            window.collectionBehavior = [.auxiliary, .fullScreenNone]
+            window.tabbingMode = .disallowed
+            window.titlebarSeparatorStyle = .none
+            window.titlebarAppearsTransparent = true
             window.center()
             statsWindow = window
         }
         statsWindow?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Proves every pack can actually produce sound in the built app.
+    ///
+    /// The unit tests cover the synthesis arithmetic, and they would pass just
+    /// as happily if `typewriter.m4a` never made it into the bundle — the
+    /// sample pack would simply go quiet, which looks exactly like a pack the
+    /// user has not selected. This runs against the real app: real bundle,
+    /// real decode, real slicing.
+    private func runSoundCheck() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            let player = KeySoundPlayer()
+            var failures: [String] = []
+            for pack in KeySoundPack.all {
+                player.setPack(pack)
+                player.setVolume(1)
+                if case .silent = pack.kind {
+                    if player.renderedPeak(for: .standard) != nil {
+                        failures.append("\(pack.name): the off pack produced audio")
+                    }
+                    continue
+                }
+                for category in SoundCategory.allCases {
+                    guard let peak = player.renderedPeak(for: category) else {
+                        failures.append("\(pack.name)/\(category.rawValue): no buffer")
+                        continue
+                    }
+                    guard peak > 0.001 else {
+                        failures.append(
+                            "\(pack.name)/\(category.rawValue): silent (peak \(peak))")
+                        continue
+                    }
+                    print("SOUNDCHECK \(pack.name)/\(category.rawValue) peak \(peak)")
+                }
+            }
+            if failures.isEmpty {
+                print("SOUNDCHECK OK: every pack produces audio")
+                exit(0)
+            }
+            for failure in failures { print("SOUNDCHECK FAIL: \(failure)") }
+            exit(1)
+        }
     }
 
     /// Drives a full run through the real UI and reports what reached disk.
@@ -403,7 +678,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(1)
             }
 
-            // The header of live numbers must actually reach the screen.
+            // The status bar of live numbers must actually reach the screen.
             //
             // It did not, for the whole life of this app: laid out correctly,
             // in the hierarchy, not hidden, with the right text and colour —
@@ -412,12 +687,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // to its own bounds. Every property that can be asserted from the
             // view tree was true while the pixels were blank, so the only
             // check that can catch it is a look at the pixels.
-            let allLabels = practice.view.subviews
-                .compactMap { $0 as? NSStackView }
-                .flatMap(\.views)
-                .compactMap { $0 as? NSTextField }
+            //
+            // The search walks the whole tree rather than one fixed level of
+            // stack views. It used to assume the label was a direct child of a
+            // stack that was a direct child of the root, which stopped being
+            // true the moment the numbers moved into a status bar and gained a
+            // nesting level — and the failure would have been this check
+            // quietly not finding its subject.
+            @MainActor func textFields(in view: NSView) -> [NSTextField] {
+                view.subviews.flatMap { child -> [NSTextField] in
+                    (child as? NSTextField).map { [$0] } ?? textFields(in: child)
+                }
+            }
+            let allLabels = textFields(in: practice.view)
             guard let wpmLabel = allLabels.first(where: { $0.stringValue.hasSuffix("wpm") }) else {
-                print("SELFTEST FAIL: no wpm label in the header")
+                print("SELFTEST FAIL: no wpm label in the status bar")
                 exit(1)
             }
             let root = practice.view
