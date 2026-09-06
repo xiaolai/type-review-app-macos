@@ -56,6 +56,14 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         didSet { if showsWhitespace != oldValue { needsDisplay = true } }
     }
 
+    /// Bar and underline carets. Two points reads as a caret at this size; one
+    /// disappears against the text, three reads as a rule.
+    private static let caretThickness: CGFloat = 2
+    /// Air between the descender line and the underline caret. Without it the
+    /// tail of a `y` or a `g` lands exactly on the bar, which is the same
+    /// collision that moving it off the baseline was meant to fix.
+    private static let caretGap: CGFloat = 1
+
     private var framesetter: CTFramesetter?
     private var textFrame: CTFrame?
     private var layoutWidth: CGFloat = 0
@@ -246,7 +254,9 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         switch caretStyle {
         case .vertical:
             context.setFillColor(Theme.caret.cgColor)
-            context.fill(CGRect(x: x - 1, y: bottom, width: 2, height: height))
+            context.fill(
+                CGRect(
+                    x: x - 1, y: bottom, width: Self.caretThickness, height: height))
         case .block:
             // Translucent, and drawn under the glyph rather than over it. A
             // solid block would have to invert the character to keep it
@@ -255,12 +265,18 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
             context.setFillColor(Theme.caret.withAlphaComponent(0.3).cgColor)
             context.fill(CGRect(x: x, y: bottom, width: advance(on: line, at: cursor), height: height))
         case .horizontal:
-            // On the baseline, not the descender line: an underline that sits
-            // below `g` and `y` reads as a separate rule rather than as a
-            // caret under the letter.
+            // Below the descender, not on the baseline. Sitting on the
+            // baseline put the bar straight through the tail of `g`, `y` and
+            // `p` — the font descends 4.6 points at this size and the bar was
+            // 2 — so the caret and the letter it marks were drawn on top of
+            // each other. Clearing the descender costs a little of the
+            // "attached to this character" reading and buys a caret that can
+            // always be seen.
             context.setFillColor(Theme.caret.cgColor)
             context.fill(
-                CGRect(x: x, y: origin.y - 2, width: advance(on: line, at: cursor), height: 2))
+                CGRect(
+                    x: x, y: origin.y - descent - Self.caretGap - Self.caretThickness,
+                    width: advance(on: line, at: cursor), height: Self.caretThickness))
         }
     }
 
