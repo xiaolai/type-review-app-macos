@@ -125,10 +125,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The menu-bar item.
     ///
-    /// `keyboard.badge.ellipsis` as a template image, so macOS inverts it for
-    /// a dark menu bar and dims it when the bar is inactive — the two things a
-    /// hand-tinted image gets wrong. The badge is the point: it says this icon
-    /// leads somewhere rather than being a status light.
+    /// `keyboard.badge.eye` as a template image, so macOS inverts it for a
+    /// dark menu bar and dims it when the bar is inactive — the two things a
+    /// hand-tinted image gets wrong. The same mark as the app icon, because
+    /// there is no reason for an app to have two faces; the badge is the point
+    /// either way, saying this icon leads somewhere rather than being a status
+    /// light.
     ///
     /// The menu is the app's own verbs, not a second copy of the main menu:
     /// what someone reaches for when TYPE is not the front app.
@@ -136,12 +138,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         // Sized explicitly. Left at its default the symbol draws 19 by 11
         // points of ink, which is the shortest thing in the menu bar — its
-        // neighbours run 12 to 15.5 tall — because `keyboard.badge.ellipsis`
-        // is a wide, short mark and the default configuration sizes by cap
+        // neighbours run 12 to 15.5 tall — because `keyboard.badge.eye` is a
+        // wide, short mark and the default configuration sizes by cap
         // height. `.large` at 13 points brings the ink to roughly 24 by 14,
         // matching the taller neighbours and a hair wider than the widest.
         let image = Theme.symbol(
-            "keyboard.badge.ellipsis", size: Theme.SymbolSize.menuBar, scale: .large,
+            "keyboard.badge.eye", size: Theme.SymbolSize.menuBar, scale: .large,
             description: "TYPE")
         image?.isTemplate = true
         item.button?.image = image

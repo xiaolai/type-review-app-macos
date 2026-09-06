@@ -8,10 +8,10 @@ import AppKit
 /// rather than a trip through a drawing program.
 ///
 /// Two things make this an icon *set* rather than one picture scaled ten ways.
-/// The artwork simplifies below 64 points, where `keyboard.macwindow`'s window
-/// frame and its rows of small keys collapse into a grey smudge; and the
-/// symbol's optical weight rises as it shrinks, because a hairline that reads
-/// at 512 disappears at 16.
+/// The artwork simplifies as it shrinks, because `keyboard.badge.eye`'s badge
+/// and its rows of small keys collapse into a grey smudge well before 16
+/// points; and the symbol's optical weight rises as it shrinks, because a
+/// hairline that reads at 512 disappears at 16.
 enum IconArtwork {
     /// Apple's grid: on a 1024 canvas the rounded tile is 824 across.
     static let tileFraction: CGFloat = 824.0 / 1024.0
@@ -43,19 +43,26 @@ enum IconArtwork {
 
     /// Which symbol to draw, and how heavy, at a given rendered size.
     ///
-    /// `keyboard.macwindow` is the app's mark. Below 64 points its window
-    /// frame and key rows fall below a pixel apiece, so the plain `keyboard`
-    /// stands in — the same silhouette, minus the detail that has stopped
-    /// being detail. Weight climbs as size falls for the same reason.
+    /// `keyboard.badge.eye` is the app's mark — a keyboard being watched,
+    /// which is what this app does to your typing.
+    ///
+    /// It simplifies twice on the way down, and the thresholds come from
+    /// rendering the candidates side by side rather than from guessing. At 32
+    /// pixels the *filled* badge is still a distinguishable eye, so the eye —
+    /// which is the mark — survives there; the outlined variant at that size
+    /// is a grey smear. Only at 16 does the badge become a smudge that makes
+    /// the keyboard beside it harder to read, and there the plain keyboard
+    /// stands alone. Weight climbs as size falls for the same reason.
+    ///
     /// `width` is the share of the tile the glyph should span, measured on the
     /// *rendered* image rather than set as a point size. A symbol's point size
-    /// is its cap height, so sizing by it makes a wide mark like
-    /// `keyboard.macwindow` overflow and a narrow one look lost.
+    /// is its cap height, so sizing by it makes a wide mark overflow and a
+    /// narrow one look lost.
     static func symbol(forPixelSize size: CGFloat) -> (name: String, weight: NSFont.Weight, width: CGFloat) {
         switch size {
-        case ..<40: return ("keyboard.fill", .regular, 0.74)
-        case ..<80: return ("keyboard", .medium, 0.74)
-        default: return ("keyboard.macwindow", .regular, 0.74)
+        case ..<24: return ("keyboard.fill", .regular, 0.74)
+        case ..<80: return ("keyboard.badge.eye.fill", .regular, 0.78)
+        default: return ("keyboard.badge.eye", .regular, 0.78)
         }
     }
 
