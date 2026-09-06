@@ -17,7 +17,16 @@ final class PracticeViewController: NSViewController {
     private let resultsView = ResultsView()
     /// The on-screen keyboard. It lives in the drawer below the window, so
     /// this controller only drives it.
-    weak var keyboard: KeyboardView?
+    ///
+    /// Pushed to on assignment rather than only on the next keystroke. The
+    /// drawer is built after the window, and building the window is what loads
+    /// this view and starts the first run — so the run's own refresh happened
+    /// while this was still nil, and the keyboard came up blank: no heat, no
+    /// lesson, no next key, until the user typed a character and triggered the
+    /// second refresh. Catching up here means the wiring order stops mattering.
+    weak var keyboard: KeyboardView? {
+        didSet { refresh() }
+    }
     /// The adapter reports its pick from a `@Sendable` closure, so the value
     /// lands in a reference box rather than being captured mutably.
     private let entryBox = EntryBox()
