@@ -214,9 +214,10 @@ Three things make it a *set* rather than one picture scaled ten ways:
   frame and its rows of small keys fall under a pixel apiece there, so the
   plain `keyboard` stands in, and `keyboard.fill` below 40 — the same
   silhouette, minus the detail that has stopped being detail.
-- **The mark is fitted by rendered width, not point size.** A symbol's point
-  size is its cap height, so sizing by it makes a wide mark like
-  `keyboard.macwindow` overflow its tile and a narrow one look lost.
+- **The mark is fitted by rendered width, not point size** — 0.74 of the
+  tile. A symbol's point size is its cap height, so sizing by it makes a wide
+  mark like `keyboard.macwindow` overflow its tile and a narrow one look lost.
+  0.80 crowds the edges; 0.60 leaves the tile looking empty.
 - **The tile is silver, not graphite** — the colour of the keyboard case the
   app draws, and of the hardware it is a picture of. A light tile needs a dark
   hairline border where a dark one needs a light one: the first would dissolve

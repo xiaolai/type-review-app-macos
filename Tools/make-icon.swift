@@ -53,9 +53,9 @@ enum IconArtwork {
     /// `keyboard.macwindow` overflow and a narrow one look lost.
     static func symbol(forPixelSize size: CGFloat) -> (name: String, weight: NSFont.Weight, width: CGFloat) {
         switch size {
-        case ..<40: return ("keyboard.fill", .regular, 0.62)
-        case ..<80: return ("keyboard", .medium, 0.62)
-        default: return ("keyboard.macwindow", .regular, 0.60)
+        case ..<40: return ("keyboard.fill", .regular, 0.74)
+        case ..<80: return ("keyboard", .medium, 0.74)
+        default: return ("keyboard.macwindow", .regular, 0.74)
         }
     }
 
