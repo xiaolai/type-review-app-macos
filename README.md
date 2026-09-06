@@ -230,9 +230,12 @@ Legends are set in the **system sans** at about a quarter of the key, not in
 a monospaced face at a third. Both halves of that mattered. Monospace is the
 wrong shape for a keycap and, worse, SF Mono's `⇧` and `⌘` are thin stylised
 outlines rather than the solid glyphs macOS uses everywhere else — the
-modifier keys were where it looked most wrong. And the big keys print their
-word under the glyph the way Apple does — `⇧ shift`, `⇪ caps lock`, `↵ return`
-— because a lone Unicode arrow reads as clip art next to a row of letters.
+modifier keys were where it looked most wrong.
+
+The keys along the outer edges — `esc`, `fn`, `⇥`, `⇪`, `⇧`, `↵`, `⌫` — carry
+their legend alone, in the bottom corner nearest the edge of the keyboard, as
+Apple prints them. `⌃`, `⌥` and `⌘` keep their spelled word, since the glyph
+alone does not name them.
 
 Drawn the way Apple draws the object: white chiclet caps on a silver body,
 the function row and its Touch ID button, `!` printed above `1`, and

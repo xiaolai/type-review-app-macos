@@ -302,7 +302,11 @@ final class KeyboardView: NSView {
             (line.text as NSString).size(withAttributes: [.font: line.font])
         }
         let total = sizes.reduce(0) { $0 + $1.height } + spacing * CGFloat(lines.count - 1)
-        var lineY = rect.midY - total / 2
+        // The view is flipped, so maxY is the visual bottom of the cap.
+        var lineY =
+            key.vertical == .bottom
+            ? rect.maxY - glyphInset - total
+            : rect.midY - total / 2
         for (line, size) in zip(lines, sizes) {
             let lineX: CGFloat =
                 switch key.align {
