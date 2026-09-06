@@ -74,7 +74,8 @@ enum IconArtwork {
             x: (pixelSize - tileSide) / 2, y: (pixelSize - tileSide) / 2,
             width: tileSide, height: tileSide)
 
-        // Graphite, lit from the top, like every other dark tile in the Dock.
+        // Silver, lit from the top — the colour of the keyboard case the app
+        // draws, and of the hardware it is a picture of.
         let path = squircle(in: tile)
         // The shadow is part of the artwork on macOS, not something the Dock
         // adds. Skipped under 64 pixels, where it is a smudge on an already
@@ -92,27 +93,30 @@ enum IconArtwork {
         }
         NSGradient(
             colors: [
-                NSColor(calibratedWhite: 0.26, alpha: 1),
-                NSColor(calibratedWhite: 0.11, alpha: 1),
+                NSColor(calibratedWhite: 0.99, alpha: 1),
+                NSColor(calibratedWhite: 0.86, alpha: 1),
             ])?.draw(in: path, angle: -90)
 
-        // A hairline along the top edge: the highlight that keeps a dark tile
-        // from reading as a hole. Below 64 pixels it is thinner than a pixel
-        // and only muddies the edge, so it is left off.
+        // A hairline border. A dark tile needs a light edge to stop it reading
+        // as a hole; a light one needs a dark edge to stop it dissolving into
+        // a pale Dock background. Below 64 pixels it is thinner than a pixel
+        // and only muddies the outline, so it is left off.
         if pixelSize >= 64 {
             NSGraphicsContext.saveGraphicsState()
             path.setClip()
-            let highlight = squircle(in: tile.insetBy(dx: pixelSize * 0.004, dy: pixelSize * 0.004))
-            highlight.lineWidth = pixelSize * 0.006
-            NSColor(calibratedWhite: 1, alpha: 0.16).setStroke()
-            highlight.stroke()
+            let border = squircle(in: tile.insetBy(dx: pixelSize * 0.004, dy: pixelSize * 0.004))
+            border.lineWidth = pixelSize * 0.007
+            NSColor(calibratedWhite: 0, alpha: 0.14).setStroke()
+            border.stroke()
             NSGraphicsContext.restoreGraphicsState()
         }
 
         let choice = symbol(forPixelSize: pixelSize)
         let configuration = NSImage.SymbolConfiguration(
             pointSize: tileSide * 0.5, weight: choice.weight
-        ).applying(NSImage.SymbolConfiguration(paletteColors: [.white]))
+        ).applying(
+            NSImage.SymbolConfiguration(
+                paletteColors: [NSColor(calibratedWhite: 0.13, alpha: 1)]))
         if let symbol = NSImage(systemSymbolName: choice.name, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration)
         {

@@ -217,6 +217,10 @@ Three things make it a *set* rather than one picture scaled ten ways:
 - **The mark is fitted by rendered width, not point size.** A symbol's point
   size is its cap height, so sizing by it makes a wide mark like
   `keyboard.macwindow` overflow its tile and a narrow one look lost.
+- **The tile is silver, not graphite** — the colour of the keyboard case the
+  app draws, and of the hardware it is a picture of. A light tile needs a dark
+  hairline border where a dark one needs a light one: the first would dissolve
+  into a pale Dock background, the second would read as a hole.
 - **The tile is a superellipse, not a rounded rectangle.** macOS icon tiles
   use a continuous corner and `NSBezierPath` has none; `|x/a|^5 + |y/b|^5 = 1`
   is the shape, and sampling it is shorter than faking it with arcs. Apple's
