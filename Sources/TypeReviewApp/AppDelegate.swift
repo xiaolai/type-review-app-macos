@@ -1,6 +1,10 @@
 import AppKit
 import TypeReviewKit
 
+/// Main-actor isolated as a whole. Every method here touches AppKit, and the
+/// alternative under strict concurrency is annotating them one at a time and
+/// still having the compiler object to closures that capture `self`.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var practice: PracticeViewController?
@@ -15,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController?
     private var libraryWindow: LibraryWindowController?
     private var keyboardMenuItem: NSMenuItem?
+    private var preferencesObserver: NSObjectProtocol?
     private var sourceMenuItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -23,10 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let window = NSWindow(contentViewController: practice)
         window.title = "TYPE"
-        window.setContentSize(NSSize(width: 900, height: 640))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // No hairline under the title bar. The practice screen is a sheet of
+        // text on a plain ground; a rule across the top divides it from
+        // nothing.
+        window.titlebarSeparatorStyle = .none
         window.setFrameAutosaveName("TypeReviewMain")
-        window.minSize = NSSize(width: 720, height: 560)
+        applyWindowSize(to: window)
         if window.frame.origin == .zero { window.center() }
         self.window = window
 
@@ -44,7 +52,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyboardMenuItem?.state = showKeyboard ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
 
+        preferencesObserver = NotificationCenter.default.addObserver(
+            forName: AppPreferences.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window = self.window else { return }
+                self.applyWindowSize(to: window)
+                self.drawer?.reframe()
+            }
+        }
+
         if CommandLine.arguments.contains("--selftest") { runSelfTest() }
+    }
+
+    /// Sizes the window to hold exactly the requested lines and columns.
+    ///
+    /// The window is resizable and its frame is autosaved, so this sets the
+    /// content size rather than the frame — the user's chosen position is
+    /// theirs to keep. The minimum stops the passage being squeezed narrower
+    /// than it can usefully wrap.
+    private func applyWindowSize(to window: NSWindow) {
+        let size = PracticeWindowMetrics.contentSize(
+            columns: AppPreferences.columns.value, rows: AppPreferences.rows.value)
+        window.minSize = NSSize(
+            width: PracticeWindowMetrics.contentSize(columns: 30, rows: 4).width,
+            height: PracticeWindowMetrics.contentSize(columns: 30, rows: 4).height + 28)
+        window.setContentSize(size)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -147,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @MainActor @objc private func toggleKeyboard(_ sender: Any?) {
+    @objc private func toggleKeyboard(_ sender: Any?) {
         guard let drawer else { return }
         let visible = !drawer.isOpen
         drawer.setOpen(visible, animated: true)

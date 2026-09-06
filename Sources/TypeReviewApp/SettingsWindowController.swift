@@ -21,6 +21,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let tabs = NSTabViewController()
     private var controls: [String: NSControl] = [:]
     private var rows: [String: NSGridRow] = [:]
+    /// Retains the closure-backed targets for the app-preference controls.
+    private var proxies: [ActionProxy] = []
     private static let lastPaneKey = "SettingsLastPane"
 
     init() {
@@ -93,6 +95,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             row.topPadding = 8
         }
 
+        // Its own pane, and deliberately not mixed in with Practice: nothing
+        // here is part of the profile. These are properties of this window on
+        // this Mac, and they are stored and validated separately from the
+        // settings the website also has.
+        addPane(title: "Window", symbol: "macwindow") { grid in
+            self.addRow(
+                grid, "Characters per line", self.preferenceStepper(AppPreferences.columns),
+                hint: "The window is sized to fit exactly this many.")
+            self.addRow(
+                grid, "Lines of text", self.preferenceStepper(AppPreferences.rows))
+            self.addRow(
+                grid, "Keyboard drawer", self.drawerSpeedPopup(),
+                hint: "How long the keyboard takes to slide out and back.")
+        }
+
         addPane(title: "Data", symbol: "externaldrive") { grid in
             let path = NSTextField(
                 labelWithString: (try? ProfileFileStore.standard().fileURL.path) ?? "")
@@ -143,6 +160,62 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         item.label = title
         item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         tabs.addTabViewItem(item)
+    }
+
+    private func bind(_ control: NSControl, _ handler: @escaping () -> Void) {
+        let proxy = ActionProxy(handler)
+        proxies.append(proxy)
+        control.target = proxy
+        control.action = #selector(ActionProxy.fire)
+    }
+
+    /// A field and stepper bound to an app preference.
+    ///
+    /// Writes go straight through the preference, which clamps them — so a
+    /// control can no more put an out-of-range value into `UserDefaults` than
+    /// the profile controls can put one into the profile. Same rule, different
+    /// store.
+    private func preferenceStepper(_ preference: AppPreferences.Preference<Int>) -> NSControl {
+        let field = NSTextField(string: String(preference.value))
+        field.formatter = NumberFormatter()
+        field.alignment = .right
+        field.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        let stepper = NSStepper()
+        stepper.minValue = Double(preference.range.lowerBound)
+        stepper.maxValue = Double(preference.range.upperBound)
+        stepper.increment = 1
+        stepper.integerValue = preference.value
+        let commit = { [weak field, weak stepper] (value: Int) in
+            preference.value = value
+            // Read back rather than echo: the preference clamps, and a control
+            // showing a value nothing accepted is the bug this avoids.
+            field?.stringValue = String(preference.value)
+            stepper?.integerValue = preference.value
+        }
+        bind(field) { commit(field.integerValue) }
+        bind(stepper) { commit(stepper.integerValue) }
+        let row = NSStackView(views: [field, stepper])
+        row.spacing = 4
+        return StackControl(row)
+    }
+
+    /// Speeds by name rather than a number of seconds. Nobody knows what 0.26
+    /// looks like, and everybody knows what "off" means.
+    private func drawerSpeedPopup() -> NSControl {
+        let popup = NSPopUpButton()
+        let choices: [(String, Double)] = [
+            ("Off", 0), ("Fast", 0.15), ("Normal", 0.26), ("Slow", 0.5),
+        ]
+        popup.addItems(withTitles: choices.map(\.0))
+        let current = AppPreferences.drawerSeconds.value
+        let nearest = choices.enumerated().min {
+            abs($0.element.1 - current) < abs($1.element.1 - current)
+        }
+        popup.selectItem(at: nearest?.offset ?? 2)
+        bind(popup) {
+            AppPreferences.drawerSeconds.value = choices[popup.indexOfSelectedItem].1
+        }
+        return popup
     }
 
     private func addRow(_ grid: NSGridView, _ label: String, _ control: NSControl, hint: String? = nil) {
@@ -317,4 +390,35 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let url = try? ProfileFileStore.standard().fileURL else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+}
+
+/// Target/action as a closure.
+///
+/// AppKit wants a target object and a selector; these controls want a closure.
+/// The window controller keeps the proxies alive, which it can do because it
+/// outlives every control in it.
+final class ActionProxy: NSObject {
+    private let handler: () -> Void
+
+    init(_ handler: @escaping () -> Void) { self.handler = handler }
+
+    @objc func fire() { handler() }
+}
+
+/// A stack of controls where AppKit's grid wants a single `NSControl`.
+private final class StackControl: NSControl {
+    init(_ stack: NSStackView) {
+        super.init(frame: .zero)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
 }

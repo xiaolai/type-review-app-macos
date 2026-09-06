@@ -26,13 +26,9 @@ final class KeyboardView: NSView {
     /// are behind target".
     private var targetMs: Double = 240
 
-    /// One key's width, in points, at the largest size worth drawing.
-    ///
-    /// Without a ceiling the keyboard grows with the window and a 900-point
-    /// window renders 60-point keycaps — a diagram of a keyboard rather than a
-    /// picture of one. 33 points is the web's `--u: 22px` at its 1.5× cap,
-    /// which is where its proportions were tuned.
-    private static let maxUnit: CGFloat = 33
+    /// Bounds on one key's width, in points. The keyboard is sized by its
+    /// drawer, which is sized by the window; these only stop the extremes.
+    private static let maxUnit: CGFloat = 80
     private static let minUnit: CGFloat = 12
 
     override var isFlipped: Bool { true }
@@ -64,14 +60,13 @@ final class KeyboardView: NSView {
     /// constant works until the window is a different width, or the keyboard
     /// is an ISO or JIS one with an extra key per row — then the bottom row is
     /// quietly drawn outside the view.
-    /// The height the drawer opens to: this keyboard at full cap size.
-    ///
-    /// Deliberately independent of the current width. Cap size is capped, so a
-    /// wider window makes a wider case rather than a taller one — and a
-    /// width-dependent answer would be read once, early, at a width the window
-    /// has not reached yet.
-    var naturalHeight: CGFloat {
-        ceil(layout(forWidth: 4000, height: .greatestFiniteMagnitude).caseRect.height + 2)
+    /// The height this keyboard needs to draw a full keyboard at the given
+    /// width. The drawer asks before it has a height of its own, which is why
+    /// this takes a width rather than reading the view's own bounds — those
+    /// are zero until the drawer has been sized, and a height derived from
+    /// zero is a drawer that never opens.
+    func naturalHeight(forWidth width: CGFloat) -> CGFloat {
+        ceil(layout(forWidth: width, height: .greatestFiniteMagnitude).caseRect.height + 2)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -90,7 +85,11 @@ final class KeyboardView: NSView {
         -> CGFloat
     {
         let rows = CGFloat(KeyboardGeometry.rows(for: SystemKeyboard.shape).count)
-        let byWidth = width / (CGFloat(KeyboardGeometry.unitsPerRow) + 0.7)
+        // The case fills the width it is given. `unitsPerRow` keys plus the
+        // padding either side less the one trailing gap comes to 15.3 units,
+        // and dividing by that makes the case exactly as wide as the view —
+        // the drawer decides how wide that is.
+        let byWidth = width / (CGFloat(KeyboardGeometry.unitsPerRow) + 0.3)
         let byHeight = (height - 2) / (rows + 0.3)
         return floor(min(Self.maxUnit, max(Self.minUnit, min(byWidth, byHeight))))
     }

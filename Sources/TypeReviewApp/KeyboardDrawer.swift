@@ -21,11 +21,17 @@ final class KeyboardDrawer {
     // Kept alive, never removed: the drawer lives as long as the app does, so
     // there is no teardown to get wrong.
     private var observers: [NSObjectProtocol] = []
+    private var keyboardHeight: NSLayoutConstraint!
 
     private(set) var isOpen = false
 
-    /// Long enough to read as travel, short enough not to wait for.
-    private static let duration: TimeInterval = 0.26
+    /// How wide the drawer is relative to the window it hangs from. Not full
+    /// width: a drawer inset a little on each side reads as a separate object
+    /// rather than as the window's own bottom edge.
+    private static let widthFraction: CGFloat = 0.95
+    /// The air between the window's bottom edge and the drawer's top. Without
+    /// it the two shapes touch and merge into one.
+    private static let gap: CGFloat = 10
     /// A window cannot have zero height, so "shut" is one point tall and
     /// ordered out once it gets there.
     private static let shutHeight: CGFloat = 1
@@ -59,8 +65,11 @@ final class KeyboardDrawer {
             // first — a sheet coming out of a slot. Pinned to the top it would
             // sit still and unroll, which is a different effect.
             keyboard.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            keyboard.heightAnchor.constraint(equalToConstant: keyboard.naturalHeight),
         ])
+        // The keyboard's height follows the drawer's width, so the constraint
+        // is held rather than set once.
+        keyboardHeight = keyboard.heightAnchor.constraint(equalToConstant: 1)
+        keyboardHeight.isActive = true
         window.contentView = content
     }
 
@@ -76,7 +85,7 @@ final class KeyboardDrawer {
                     forName: name, object: parent, queue: .main
                 ) { [weak self] _ in
                     guard let self, self.isOpen else { return }
-                    self.window.setFrame(self.frame(open: true), display: true)
+                    self.reframe()
                 })
         }
         // A drawer hanging below a full-screen window is off the display
@@ -94,18 +103,34 @@ final class KeyboardDrawer {
             })
     }
 
+    /// The keyboard is sized from the drawer's width, so the drawer's width has
+    /// to be known before its height can be.
+    private var drawerWidth: CGFloat {
+        (parent?.frame.width ?? 0) * Self.widthFraction
+    }
+
     private func frame(open: Bool) -> NSRect {
         guard let parent else { return .zero }
-        let height = open ? keyboard.naturalHeight : Self.shutHeight
+        let width = drawerWidth
+        let height = open ? keyboard.naturalHeight(forWidth: width) : Self.shutHeight
         return NSRect(
-            x: parent.frame.minX, y: parent.frame.minY - height,
-            width: parent.frame.width, height: height)
+            x: parent.frame.midX - width / 2, y: parent.frame.minY - Self.gap - height,
+            width: width, height: height)
     }
 
     private func present() {
         guard let parent else { return }
-        window.setFrame(frame(open: true), display: true)
+        reframe()
         parent.addChildWindow(window, ordered: .above)
+    }
+
+    /// Re-lays the drawer against the window it hangs from. Called whenever
+    /// the parent moves or resizes, and after a preference changes the
+    /// window's shape.
+    func reframe() {
+        keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
+        guard isOpen else { return }
+        window.setFrame(frame(open: true), display: true)
     }
 
     func setOpen(_ open: Bool, animated: Bool) {
@@ -113,6 +138,7 @@ final class KeyboardDrawer {
         isOpen = open
 
         if open {
+            keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
             makeRoomBelow(parent)
             // Ordered in shut, then grown: appearing at full size and then
             // animating would show the finished state for one frame first.
@@ -120,7 +146,8 @@ final class KeyboardDrawer {
             parent.addChildWindow(window, ordered: .above)
         }
 
-        guard animated else {
+        let duration = AppPreferences.drawerSeconds.value
+        guard animated, duration > 0.01 else {
             if open {
                 window.setFrame(frame(open: true), display: true)
             } else {
@@ -131,7 +158,7 @@ final class KeyboardDrawer {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.duration
+            context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().setFrame(frame(open: open), display: true)
         } completionHandler: { [weak self] in
@@ -146,7 +173,8 @@ final class KeyboardDrawer {
     /// the user cannot see and has no way to discover.
     private func makeRoomBelow(_ parent: NSWindow) {
         guard let screen = parent.screen else { return }
-        let shortfall = screen.visibleFrame.minY - (parent.frame.minY - keyboard.naturalHeight)
+        let needed = Self.gap + keyboard.naturalHeight(forWidth: drawerWidth)
+        let shortfall = screen.visibleFrame.minY - (parent.frame.minY - needed)
         guard shortfall > 0 else { return }
         var moved = parent.frame
         moved.origin.y = min(

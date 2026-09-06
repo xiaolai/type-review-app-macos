@@ -276,23 +276,31 @@ renders the practice view into a bitmap, finds the label whose text ends in
 background. Restoring the dirty-rect fill reports `only 0 of its pixels differ
 from the background — it is covered`.
 
-## The keyboard drawer
+## The window, and the drawer under it
+
+The window is sized from the text it has to hold: 60 characters per line and
+10 lines, both settable, both measured from the typing font rather than
+guessed — so the numbers stay true if the font changes or a display renders it
+differently. No hairline under the title bar; the practice screen is a sheet
+of text on a plain ground, and a rule across the top divides it from nothing.
 
 `⌘K` slides the keyboard out from under the window and back. The main window
-never changes size — the keyboard appears *below* it, with no panel or
-background of its own, just the keyboard floating against whatever is behind.
+never changes size. The drawer is 95% of its width, centred, with ten points
+of air between them — inset and separated so it reads as its own object rather
+than as the window's bottom edge — and it has no background: the keyboard
+floats against whatever is behind the app.
 
-It is a separate borderless window with a clear background, attached to the
-main one with `addChildWindow`. That relationship is what makes it a drawer
-rather than a second window the user has to manage: it moves, orders,
-miniaturises and closes with its parent, for free. Width and the parent's
-bottom edge are the only things it does not track, so a resize is observed.
+It is a separate borderless window with a clear background, attached with
+`addChildWindow`. That relationship is what makes it a drawer rather than a
+second window to manage: it moves, orders, miniaturises and closes with its
+parent. Width and the parent's bottom edge are the only things it does not
+track, so a resize is observed.
 
 Details that each took a decision:
 
 - **No shadow.** macOS derives a window's shadow from its frame, not from what
-  it draws, so a transparent full-width window casts a rectangular shadow
-  around nothing. The keyboard's own case supplies the edge.
+  it draws, so a transparent window would cast a rectangular shadow around
+  nothing. The keyboard's own case supplies the edge.
 - **`ignoresMouseEvents`.** The keyboard is a picture, not a control. Without
   this the transparent area swallows clicks meant for what is behind it.
 - **Pinned to the bottom** of its content view, so as the window grows
@@ -300,8 +308,7 @@ Details that each took a decision:
   first — a sheet coming out of a slot. Pinned to the top it would sit still
   and unroll.
 - **The window is nudged up** if the drawer would open past the bottom of the
-  screen, which is what Apple's own drawers did. The alternative is a drawer
-  the user cannot see and has no way to discover.
+  screen, which is what Apple's own drawers did.
 - **Put away in full screen**, where a drawer below the window is off the
   display entirely.
 
@@ -310,6 +317,16 @@ because both looked plausible. An `NSSplitView` pane trades space with the
 passage and never appears or disappears. A clipping band inside the window
 eats the window's own height. A drawer is, by definition, outside its parent.
 (`NSDrawer`, the class that owns the name, has been deprecated since 10.13.)
+
+### Two kinds of setting
+
+Window shape and drawer speed live in `UserDefaults`, in their own Settings
+pane, and never touch the profile. `ProfileSettings` — its fields, bounds and
+defaults — is shared with the website and pinned by golden vector; a field
+added there would either break those vectors or have to be invented on both
+sides for something only a Mac window has. Both stores clamp on read as well
+as write, so a value typed straight into `defaults write` is no more able to
+produce a four-character window than a control is.
 
 ## The library
 
