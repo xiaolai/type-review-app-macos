@@ -209,6 +209,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         + "\(BundledCorpus.code.entries.count) code entries")
                 exit(1)
             }
+            // No key on any keyboard shape may be narrower than a key can be.
+            //
+            // Row totals are `unitsPerRow` by construction — the last key
+            // absorbs the slack — so checking the total proves nothing. What
+            // can go wrong is a row whose fixed keys leave the absorber too
+            // little, or nothing, or less than nothing. That is what a ragged
+            // or overflowing keyboard actually is, and nothing else reports
+            // it: the view just draws it.
+            for shape in [SystemKeyboard.Shape.ansi, .iso, .jis] {
+                for (index, row) in KeyboardGeometry.rows(for: shape).enumerated() {
+                    guard let narrowest = row.map(\.width).min(), narrowest >= 0.75 else {
+                        print(
+                            "SELFTEST FAIL: \(shape) row \(index) has a "
+                                + "\(row.map(\.width).min() ?? 0)u key — the row does not fit")
+                        exit(1)
+                    }
+                }
+            }
+
             // The library round-trip, through the real file store: add,
             // reload from disk, confirm the corpus serves it, delete. The unit
             // tests cover the parser and the picker; only this can tell

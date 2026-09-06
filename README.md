@@ -212,6 +212,23 @@ what Dvorak is. That is also why the website's "keyboard layout" and "keymap"
 settings do not appear in this app's Settings window: the system already knows,
 so it stops asking.
 
+Drawn the way Apple draws the object: white chiclet caps on a silver body,
+the function row and its Touch ID button, `!` printed above `1`, and
+`control` / `option` / `command` spelled out under their glyphs and hugging
+the outer edge of the cluster. The cap is one rounded rect in the border
+colour with the face inset a point on three sides and two at the bottom —
+that single asymmetric inset is the lip, and the lip is what stops a flat
+rectangle reading as a rectangle. A pressed key loses the lip and moves down
+by the point it lost, so it reads as travel rather than as a highlight.
+
+Every row is exactly 15 units wide, and the last key in each row absorbs
+whatever slack is left. That is how real keyboards are built — the odd sizes
+are always the edge keys — and it means ANSI, ISO and JIS all come out flush
+without a hand-tuned width per key per shape. The selftest checks that no row
+leaves its absorber less than three quarters of a unit; it caught the JIS
+bottom row overflowing by 1.5u the first time it ran. Checking the row
+*totals* would have proved nothing — they are 15 by construction.
+
 Keys are tinted by confidence against the user's target speed rather than
 relative to their own slowest key. A relative scale paints the whole keyboard
 warm the moment timings cluster, and answers "which key is worst" when the
