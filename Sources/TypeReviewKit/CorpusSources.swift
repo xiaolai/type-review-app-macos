@@ -140,6 +140,35 @@ public struct RawStaticEntry: Decodable {
     public let license: String
 }
 
+/// Where the Kit's resources actually live.
+///
+/// `Bundle.module` on its own is not enough once this executable is wrapped in
+/// a `.app`. SwiftPM generates an accessor that looks in exactly two places:
+/// `Bundle.main.bundleURL/TypeReview_TypeReviewKit.bundle` — the `.app`'s
+/// *root*, where nothing may legally live and where `codesign` would object to
+/// it — and an **absolute path into the build directory of the machine that
+/// compiled the binary**. Neither is `Contents/Resources`, which is the only
+/// correct place for it and the place the Makefile puts it.
+///
+/// So the app was reading its corpus out of `~/…/.build` and had never once
+/// loaded it from inside its own bundle. It worked on the build machine and
+/// nowhere else, and deleting `.build` was enough to make it fatal-error on
+/// launch. The Makefile's `|| true` on the copy is what kept that quiet.
+///
+/// `Contents/Resources` is therefore checked first, and `Bundle.module` stays
+/// as the fallback for `swift test` and for running the binary straight out of
+/// the build directory. Evaluating `Bundle.module` is what traps when it fails,
+/// so it is only reached when the first lookup found nothing.
+let resourceBundle: Bundle = {
+    if let resources = Bundle.main.resourceURL,
+        let bundle = Bundle(
+            url: resources.appendingPathComponent("TypeReview_TypeReviewKit.bundle"))
+    {
+        return bundle
+    }
+    return Bundle.module
+}()
+
 /// The corpus that ships inside the app.
 public enum BundledCorpus {
     private struct QuotesFile: Decodable {
@@ -147,7 +176,7 @@ public enum BundledCorpus {
     }
 
     public static let quotes: StaticCorpusSource = {
-        guard let url = Bundle.module.url(forResource: "Resources/quotes", withExtension: "json"),
+        guard let url = resourceBundle.url(forResource: "Resources/quotes", withExtension: "json"),
             let data = try? Data(contentsOf: url),
             let file = try? JSONDecoder().decode(QuotesFile.self, from: data)
         else { return StaticCorpusSource(raw: [], kind: .quote) }
@@ -158,7 +187,7 @@ public enum BundledCorpus {
     /// whitespace would turn a Python snippet into one unreadable line and
     /// remove exactly the keys that make code hard to type.
     public static let code: StaticCorpusSource = {
-        guard let directory = Bundle.module.url(forResource: "Resources/code", withExtension: nil),
+        guard let directory = resourceBundle.url(forResource: "Resources/code", withExtension: nil),
             let files = try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil)
         else { return StaticCorpusSource(raw: [], kind: .code, preserveLayout: true) }

@@ -20,11 +20,27 @@ $(APP): $(shell find Sources -name '*.swift') Info.plist Resources/TypeReview.ic
 	@cp .build/$(CONFIG)/$(BIN) $(CONTENTS)/MacOS/$(BIN)
 	@cp Info.plist $(CONTENTS)/Info.plist
 	@cp Resources/TypeReview.icns $(CONTENTS)/Resources/TypeReview.icns
+	# The typewriter sound pack's recording. Loaded through `Bundle.main`,
+	# so it goes straight into Contents/Resources rather than through a
+	# SwiftPM resource bundle — which is also why it sidesteps the
+	# generated-accessor trap the corpus bundle fell into.
+	cp $(CONTENTS)/Resources/typewriter.m4a
 	# SwiftPM puts a target's resources in its own .bundle beside the binary.
 	# Without this the corpus is simply absent at runtime and the app falls
 	# back to generated words — silently, because a missing corpus and an
 	# empty one look identical to the picker.
-	@cp -R .build/$(CONFIG)/*.bundle $(CONTENTS)/Resources/ 2>/dev/null || true
+	#
+	# No `|| true`. That is what let this step fail unnoticed for the whole
+	# life of the project: the app still ran, because SwiftPM's generated
+	# accessor falls back to an absolute path inside .build, so the corpus was
+	# being read from the build directory of this machine rather than from the
+	# app. Delete .build — or copy the app to any other Mac — and it died on
+	# launch. A build step that cannot do its job must stop the build.
+	cp -R .build/$(CONFIG)/*.bundle $(CONTENTS)/Resources/
+	# And prove it landed, rather than trusting that cp said nothing. The
+	# assertion is the part that stops this regressing quietly a second time.
+	@test -d "$(CONTENTS)/Resources/TypeReview_TypeReviewKit.bundle/Resources/code" \
+		|| { echo "error: corpus bundle missing from $(APP)" >&2; exit 1; }
 	@codesign --force --sign - --timestamp=none $(APP) >/dev/null 2>&1
 	@echo "built $(APP) ($$(du -sh $(APP) | cut -f1))"
 
