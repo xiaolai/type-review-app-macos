@@ -74,24 +74,38 @@ final class KeyboardView: NSView {
         needsDisplay = true
     }
 
-    /// The cap size that fits both dimensions.
+    /// The size of the case at a given key pitch.
+    private func caseSize(unit: CGFloat) -> NSSize {
+        let rows = CGFloat(KeyboardGeometry.rows(for: SystemKeyboard.shape).count)
+        let padding = casePadding(unit)
+        let gap = keyGap(unit)
+        return NSSize(
+            width: unit * CGFloat(KeyboardGeometry.unitsPerRow) + 2 * padding - gap,
+            height: unit * rows + 2 * padding - gap)
+    }
+
+    /// The largest cap size whose case fits both dimensions.
     ///
-    /// Height matters as much as width now that the keyboard lives in a
-    /// drawer: dragging the divider is *how* you resize it, and a keyboard
-    /// that only reads its width would either overflow the drawer or ignore
-    /// the drag. Padding scales with the unit, so it belongs inside the
-    /// division rather than being subtracted first.
+    /// Found by stepping down from an upper bound rather than by dividing.
+    /// Padding and gap are each rounded to whole points, so there is no exact
+    /// closed form — and the estimated divisor this used before was a hair too
+    /// large, which silently cost a whole point of key size: at the default
+    /// window the keyboard drew at 53 points inside a drawer sized for 54, and
+    /// came out 14 points narrower than the space it had.
+    ///
+    /// Height matters as much as width because the drawer sizes the keyboard;
+    /// `unit * unitsPerRow` is a safe upper bound since the padding always
+    /// exceeds the one trailing gap.
     private func unitWidth(for width: CGFloat, height: CGFloat = .greatestFiniteMagnitude)
         -> CGFloat
     {
-        let rows = CGFloat(KeyboardGeometry.rows(for: SystemKeyboard.shape).count)
-        // The case fills the width it is given. `unitsPerRow` keys plus the
-        // padding either side less the one trailing gap comes to 15.3 units,
-        // and dividing by that makes the case exactly as wide as the view —
-        // the drawer decides how wide that is.
-        let byWidth = width / (CGFloat(KeyboardGeometry.unitsPerRow) + 0.3)
-        let byHeight = (height - 2) / (rows + 0.3)
-        return floor(min(Self.maxUnit, max(Self.minUnit, min(byWidth, byHeight))))
+        var unit = min(Self.maxUnit, floor(width / CGFloat(KeyboardGeometry.unitsPerRow)))
+        while unit > Self.minUnit {
+            let size = caseSize(unit: unit)
+            if size.width <= width && size.height + 2 <= height { break }
+            unit -= 1
+        }
+        return max(Self.minUnit, unit)
     }
 
     private func casePadding(_ unit: CGFloat) -> CGFloat { max(4, (unit * 0.2).rounded()) }
