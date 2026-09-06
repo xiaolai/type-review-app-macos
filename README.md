@@ -241,6 +241,14 @@ The gap between caps is 0.16 of the key pitch — Apple's own proportion, a
 19 mm pitch with a 16 mm cap — which is 9 points at the default window's
 54-point keys.
 
+The four caps in the corners of the case have their outer corner rounded
+**concentrically** with the shell: radius equal to the case's radius less the
+padding between them, which comes to twice the normal cap radius. That is how
+a Magic Keyboard is cut, and it is the detail that stops a grid of rounded
+rectangles reading as a grid of rounded rectangles. It needed a path builder
+that takes four radii — `NSBezierPath(roundedRect:)` gives every corner the
+same one.
+
 Drawn the way Apple draws the object: white chiclet caps on a silver body,
 the function row and its Touch ID button, `!` printed above `1`, and
 `control` / `option` / `command` spelled out under their glyphs and hugging

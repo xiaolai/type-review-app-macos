@@ -96,6 +96,10 @@ final class KeyboardView: NSView {
 
     private func casePadding(_ unit: CGFloat) -> CGFloat { max(4, (unit * 0.2).rounded()) }
 
+    /// The case's corner radius, as a fraction of the key pitch. A Magic
+    /// Keyboard's shell is about 10 mm round on a 19 mm pitch.
+    private static let caseRadiusScale: CGFloat = 0.5
+
     /// The air between caps, as a fraction of the key pitch.
     ///
     /// Apple's own: a Magic Keyboard is a 19 mm pitch with a 16 mm cap, which
@@ -108,10 +112,15 @@ final class KeyboardView: NSView {
     /// re-derives the layout from the same formula proves only that the
     /// formula equals itself. This way the check measures the rectangles the
     /// view actually draws.
+    /// Which corner of the case a key sits in, if any.
+    enum Corner {
+        case topLeading, topTrailing, bottomTrailing, bottomLeading
+    }
+
     struct Layout {
         let caseRect: NSRect
         let unit: CGFloat
-        let keys: [(key: KeyboardGeometry.Key, rect: NSRect)]
+        let keys: [(key: KeyboardGeometry.Key, rect: NSRect, corner: Corner?)]
     }
 
     func layout(forWidth width: CGFloat, height: CGFloat = .greatestFiniteMagnitude) -> Layout {
@@ -138,14 +147,23 @@ final class KeyboardView: NSView {
             y: max(1, ((height.isFinite ? height : caseHeight + 2) - caseHeight) / 2).rounded(),
             width: caseWidth, height: caseHeight)
 
-        var placed: [(KeyboardGeometry.Key, NSRect)] = []
+        var placed: [(KeyboardGeometry.Key, NSRect, Corner?)] = []
         var y = caseRect.minY + padding
-        for row in rows {
+        for (rowIndex, row) in rows.enumerated() {
             var x = caseRect.minX + padding
-            for key in row where key.width > 0 {
+            let drawn = row.filter { $0.width > 0 }
+            for (index, key) in drawn.enumerated() {
                 let width = unit * CGFloat(key.width)
+                let corner: Corner? =
+                    switch (rowIndex, index) {
+                    case (0, 0): .topLeading
+                    case (0, drawn.count - 1): .topTrailing
+                    case (rows.count - 1, 0): .bottomLeading
+                    case (rows.count - 1, drawn.count - 1): .bottomTrailing
+                    default: nil
+                    }
                 placed.append(
-                    (key.key, NSRect(x: x, y: y, width: width - gap, height: unit - gap)))
+                    (key.key, NSRect(x: x, y: y, width: width - gap, height: unit - gap), corner))
                 x += width
             }
             y += unit
@@ -156,7 +174,7 @@ final class KeyboardView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let layout = layout(forWidth: bounds.width, height: bounds.height)
 
-        let radius = layout.unit * 0.35
+        let radius = layout.unit * Self.caseRadiusScale
         let casePath = NSBezierPath(
             roundedRect: layout.caseRect, xRadius: radius, yRadius: radius)
         // Apple's body is silver against white caps — a quiet frame, not a
@@ -169,28 +187,79 @@ final class KeyboardView: NSView {
         casePath.stroke()
 
         for placed in layout.keys {
-            draw(placed.key, in: placed.rect, unit: layout.unit)
+            draw(placed.key, in: placed.rect, unit: layout.unit, corner: placed.corner)
         }
     }
 
-    private func draw(_ key: KeyboardGeometry.Key, in rect: NSRect, unit: CGFloat) {
+    /// A rounded rectangle whose corners can differ.
+    ///
+    /// `NSBezierPath(roundedRect:)` gives every corner the same radius, and
+    /// the four keys in the corners of the case need one corner rounder than
+    /// the rest. Corner order runs clockwise from the top-left in this
+    /// flipped view.
+    private func capPath(_ rect: NSRect, _ radii: (CGFloat, CGFloat, CGFloat, CGFloat))
+        -> NSBezierPath
+    {
+        let (topLeading, topTrailing, bottomTrailing, bottomLeading) = radii
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX + topLeading, y: rect.minY))
+        path.appendArc(
+            from: NSPoint(x: rect.maxX, y: rect.minY),
+            to: NSPoint(x: rect.maxX, y: rect.maxY), radius: topTrailing)
+        path.appendArc(
+            from: NSPoint(x: rect.maxX, y: rect.maxY),
+            to: NSPoint(x: rect.minX, y: rect.maxY), radius: bottomTrailing)
+        path.appendArc(
+            from: NSPoint(x: rect.minX, y: rect.maxY),
+            to: NSPoint(x: rect.minX, y: rect.minY), radius: bottomLeading)
+        path.appendArc(
+            from: NSPoint(x: rect.minX, y: rect.minY),
+            to: NSPoint(x: rect.maxX, y: rect.minY), radius: topLeading)
+        path.close()
+        return path
+    }
+
+    /// The four radii for a cap, given which corner of the case it sits in.
+    ///
+    /// The outer corner is **concentric** with the case: its radius is the
+    /// case's radius less the padding between them. That is the whole rule on
+    /// a Magic Keyboard — the corner caps are cut to follow the shell, and it
+    /// is the detail that stops a grid of rounded rectangles reading as a
+    /// grid of rounded rectangles.
+    private func capRadii(_ corner: Corner?, unit: CGFloat) -> (
+        CGFloat, CGFloat, CGFloat, CGFloat
+    ) {
+        let normal = max(3, unit * 0.15)
+        guard let corner else { return (normal, normal, normal, normal) }
+        let outer = max(normal, unit * Self.caseRadiusScale - casePadding(unit))
+        switch corner {
+        case .topLeading: return (outer, normal, normal, normal)
+        case .topTrailing: return (normal, outer, normal, normal)
+        case .bottomTrailing: return (normal, normal, outer, normal)
+        case .bottomLeading: return (normal, normal, normal, outer)
+        }
+    }
+
+    private func draw(
+        _ key: KeyboardGeometry.Key, in rect: NSRect, unit: CGFloat, corner: Corner?
+    ) {
         let isPressed = pressed == key.code && key.code != 0xFFFF
         // A pressed cap sinks: the lip closes up and the whole cap moves down
         // by the point it loses. Same trick as the web's `translateY(1px)`,
         // and it reads as travel rather than as a highlight.
         let lip: CGFloat = isPressed ? 1 : 2
         let capRect = isPressed ? rect.offsetBy(dx: 0, dy: 1) : rect
-        let radius = max(3, unit * 0.15)
+        let radii = capRadii(corner, unit: unit)
 
         // The lip: the whole cap in the border colour, then the face inset by
         // one point on three sides and by the lip at the bottom.
         NSColor.separatorColor.setFill()
-        NSBezierPath(roundedRect: capRect, xRadius: radius, yRadius: radius).fill()
+        capPath(capRect, radii).fill()
         let faceRect = NSRect(
             x: capRect.minX + 1, y: capRect.minY + 1,
             width: capRect.width - 2, height: capRect.height - 1 - lip)
-        let face = NSBezierPath(
-            roundedRect: faceRect, xRadius: radius - 1, yRadius: radius - 1)
+        let face = capPath(
+            faceRect, (radii.0 - 1, radii.1 - 1, radii.2 - 1, radii.3 - 1))
         NSColor.textBackgroundColor.setFill()
         face.fill()
 
