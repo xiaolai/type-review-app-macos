@@ -358,7 +358,7 @@ extension LibraryWindowController: NSToolbarDelegate {
         item.label = label
         item.paletteLabel = label
         item.toolTip = tip
-        item.image = Theme.symbol(symbol, size: Theme.SymbolSize.toolbar)
+        item.image = Theme.toolbarSymbol(symbol)
         item.target = self
         item.action = action
         item.isBordered = true

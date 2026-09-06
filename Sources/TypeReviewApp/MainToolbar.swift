@@ -124,7 +124,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     /// button. Every name used here has shipped since well before the app's
     /// macOS 14 floor, so this is a guard, not an expectation.
     private func symbol(_ name: String) -> NSImage? {
-        Theme.symbol(name, size: Theme.SymbolSize.toolbar)
+        Theme.toolbarSymbol(name)
     }
 
     private func sourceMenu() -> NSMenu {

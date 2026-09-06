@@ -37,17 +37,32 @@ enum Theme {
     /// — which they already had, at `.regular`, `.medium` and unset.
     static let symbolWeight: NSFont.Weight = .light
 
+    /// Lighter still for the title bar.
+    ///
+    /// The toolbar sits on the same white as the passage and has nothing
+    /// around it to hold it down — no separator, no material edge — so it
+    /// carries weight the other surfaces do not. `.thin` there and `.light`
+    /// elsewhere is not an inconsistency: the status bar's mark sits beside
+    /// 13-point digits and would disappear against them, and the menu-bar
+    /// item has the system's own icons for neighbours.
+    static let toolbarSymbolWeight: NSFont.Weight = .thin
+
     /// An SF Symbol at the app's weight.
     ///
     /// `pointSize` is explicit because `NSImage.SymbolConfiguration` has no
     /// weight-only form: asking for a weight means stating a size too.
     @MainActor static func symbol(
-        _ name: String, size: CGFloat, scale: NSImage.SymbolScale = .medium,
-        description: String? = nil
+        _ name: String, size: CGFloat, weight: NSFont.Weight = symbolWeight,
+        scale: NSImage.SymbolScale = .medium, description: String? = nil
     ) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: description)?
             .withSymbolConfiguration(
-                NSImage.SymbolConfiguration(pointSize: size, weight: symbolWeight, scale: scale))
+                NSImage.SymbolConfiguration(pointSize: size, weight: weight, scale: scale))
+    }
+
+    /// A title-bar symbol, at the toolbar's own weight.
+    @MainActor static func toolbarSymbol(_ name: String) -> NSImage? {
+        symbol(name, size: SymbolSize.toolbar, weight: toolbarSymbolWeight)
     }
 
     /// Sizes, named so the call sites read as intent rather than as numbers.
