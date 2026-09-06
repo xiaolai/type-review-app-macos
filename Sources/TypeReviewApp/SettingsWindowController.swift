@@ -106,7 +106,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Lines of text", self.preferenceStepper(AppPreferences.rows))
             self.addRow(
-                grid, "Keyboard drawer", self.drawerSpeedPopup(),
+                grid, "Keyboard width", self.percentPopup(AppPreferences.drawerWidth, [95, 90, 85, 80]),
+                hint: "The keyboard's width, as a share of the window's.")
+            self.addRow(
+                grid, "Keyboard gap", self.preferenceStepper(AppPreferences.drawerGap),
+                hint: "Points of air between the window and the keyboard.")
+            self.addRow(
+                grid, "Drawer speed", self.drawerSpeedPopup(),
                 hint: "How long the keyboard takes to slide out and back.")
         }
 
@@ -197,6 +203,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let row = NSStackView(views: [field, stepper])
         row.spacing = 4
         return StackControl(row)
+    }
+
+    /// A popup of whole percentages. An out-of-list stored value — one typed
+    /// straight into `defaults write` — is added to the list rather than
+    /// silently snapped to a neighbour, so the popup never lies about what is
+    /// in effect.
+    private func percentPopup(
+        _ preference: AppPreferences.Preference<Int>, _ choices: [Int]
+    ) -> NSControl {
+        let popup = NSPopUpButton()
+        var values = choices
+        if !values.contains(preference.value) { values.append(preference.value) }
+        values.sort(by: >)
+        popup.addItems(withTitles: values.map { "\($0)%" })
+        popup.selectItem(at: values.firstIndex(of: preference.value) ?? 0)
+        bind(popup) { preference.value = values[popup.indexOfSelectedItem] }
+        return popup
     }
 
     /// Speeds by name rather than a number of seconds. Nobody knows what 0.26

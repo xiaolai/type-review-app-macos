@@ -17,6 +17,12 @@ enum AppPreferences {
     /// How long the keyboard drawer takes to open or close. Zero is a valid
     /// answer, and for anyone who finds animation costly it is the right one.
     static let drawerSeconds = Preference(key: "DrawerSeconds", default: 0.26, range: 0...1.5)
+    /// The drawer's width as a percentage of the window's. The keyboard fills
+    /// it, so this is the keyboard's size.
+    static let drawerWidth = Preference(key: "DrawerWidthPercent", default: 95, range: 50...100)
+    /// The air between the window's bottom edge and the drawer's top, in
+    /// points. Zero is allowed: flush is a look, even if it is not this one.
+    static let drawerGap = Preference(key: "DrawerGap", default: 10, range: 0...60)
 
     /// Fired when any of these change, so the window can take its new shape
     /// without being reopened.

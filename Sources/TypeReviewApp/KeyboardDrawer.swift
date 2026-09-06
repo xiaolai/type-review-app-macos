@@ -25,13 +25,12 @@ final class KeyboardDrawer {
 
     private(set) var isOpen = false
 
-    /// How wide the drawer is relative to the window it hangs from. Not full
-    /// width: a drawer inset a little on each side reads as a separate object
-    /// rather than as the window's own bottom edge.
-    private static let widthFraction: CGFloat = 0.95
-    /// The air between the window's bottom edge and the drawer's top. Without
-    /// it the two shapes touch and merge into one.
-    private static let gap: CGFloat = 10
+    /// How wide the drawer is relative to the window it hangs from, and the
+    /// air between them. Both are settings: a drawer inset on each side and
+    /// held off the window reads as a separate object rather than as the
+    /// window's own bottom edge, but how much of each is taste.
+    private var widthFraction: CGFloat { CGFloat(AppPreferences.drawerWidth.value) / 100 }
+    private var gap: CGFloat { CGFloat(AppPreferences.drawerGap.value) }
     /// A window cannot have zero height, so "shut" is one point tall and
     /// ordered out once it gets there.
     private static let shutHeight: CGFloat = 1
@@ -106,7 +105,7 @@ final class KeyboardDrawer {
     /// The keyboard is sized from the drawer's width, so the drawer's width has
     /// to be known before its height can be.
     private var drawerWidth: CGFloat {
-        (parent?.frame.width ?? 0) * Self.widthFraction
+        (parent?.frame.width ?? 0) * widthFraction
     }
 
     private func frame(open: Bool) -> NSRect {
@@ -114,7 +113,7 @@ final class KeyboardDrawer {
         let width = drawerWidth
         let height = open ? keyboard.naturalHeight(forWidth: width) : Self.shutHeight
         return NSRect(
-            x: parent.frame.midX - width / 2, y: parent.frame.minY - Self.gap - height,
+            x: parent.frame.midX - width / 2, y: parent.frame.minY - gap - height,
             width: width, height: height)
     }
 
@@ -173,7 +172,7 @@ final class KeyboardDrawer {
     /// the user cannot see and has no way to discover.
     private func makeRoomBelow(_ parent: NSWindow) {
         guard let screen = parent.screen else { return }
-        let needed = Self.gap + keyboard.naturalHeight(forWidth: drawerWidth)
+        let needed = gap + keyboard.naturalHeight(forWidth: drawerWidth)
         let shortfall = screen.visibleFrame.minY - (parent.frame.minY - needed)
         guard shortfall > 0 else { return }
         var moved = parent.frame

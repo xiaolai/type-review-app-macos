@@ -237,9 +237,10 @@ nearest the edge of the keyboard, as Apple prints them. `esc`, `fn`, `⇥`,
 `⇪`, `⇧`, `↵` and `⌫` carry the glyph alone; `⌃`, `⌥` and `⌘` keep their
 spelled word beneath it, since the glyph alone does not name them.
 
-The keyboard is 93.5% of the window's width at the default size: the drawer
-window is exactly 95%, and the case fills all but the 13 points its own
-padding takes. The key pitch that comes out of that is found by stepping down
+The keyboard is 93.5% of the window's width at the default setting: the drawer
+window is 95% — settable at 95, 90, 85 or 80 — and the case fills all but the
+13 points its own padding takes. The air between the window and the drawer is
+settable too, in points. The key pitch that comes out of that is found by stepping down
 from an upper bound until the case fits, not by dividing — padding and gap are
 each rounded to whole points, so there is no exact closed form, and the
 estimated divisor this used before was a hair too large. It cost a whole point
