@@ -14,6 +14,7 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     private let table = NSTableView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let removeButton = NSButton()
+    private let emptyLabel = NSTextField(labelWithString: "")
 
     init(store: LibraryStore) {
         self.store = store
@@ -45,7 +46,11 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         let content = DropView()
         content.onDrop = { [weak self] urls in self?.ingest(urls: urls) }
 
-        table.usesAlternatingRowBackgroundColors = true
+        // Switched on only when there is something to alternate. An empty
+        // inset table paints its blank rows as rounded grey bands, which reads
+        // as content still loading rather than as a library with nothing in
+        // it.
+        table.usesAlternatingRowBackgroundColors = false
         table.rowHeight = 34
         table.dataSource = self
         table.delegate = self
@@ -67,6 +72,13 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         scroll.hasVerticalScroller = true
         scroll.borderType = .bezelBorder
 
+        // What an empty table should say, in place of four blank rows.
+        emptyLabel.stringValue = "Nothing here yet.\nAdd a .txt or .md file, or paste text."
+        emptyLabel.alignment = .center
+        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.font = .systemFont(ofSize: 13)
+        emptyLabel.maximumNumberOfLines = 2
+
         let addFile = NSButton(
             title: "Add File…", target: self, action: #selector(addFile(_:)))
         let paste = NSButton(
@@ -85,7 +97,7 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         buttons.spacing = 8
         buttons.alignment = .centerY
 
-        for subview in [scroll, buttons] {
+        for subview in [scroll, buttons, emptyLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(subview)
         }
@@ -98,6 +110,9 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             buttons.trailingAnchor.constraint(
                 lessThanOrEqualTo: content.trailingAnchor, constant: -16),
             buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
+
+            emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
         ])
         window?.contentView = content
     }
@@ -106,8 +121,12 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         table.reloadData()
         removeButton.isEnabled = !table.selectedRowIndexes.isEmpty
         let count = store.passages.count
+        emptyLabel.isHidden = count > 0
+        table.usesAlternatingRowBackgroundColors = count > 0
+        // The empty case is stated in the middle of the table, so the status
+        // line does not repeat it.
         statusLabel.stringValue = count == 0
-            ? "empty — add a .txt or .md file, or paste text"
+            ? ""
             : "\(count) of \(maxUserPassages) · practise them with View ▸ Source ▸ Library"
     }
 

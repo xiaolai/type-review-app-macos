@@ -196,6 +196,24 @@ The Appearance and Sound panes the website has are deliberately absent: this
 app follows the system appearance rather than shipping four hand-built themes,
 and no audio is ported yet.
 
+## Living in the menu bar
+
+The app does not quit when its window closes, because it has a menu-bar item.
+That was not true when the item was added, and the two together made no sense:
+closing the window took the icon with it, so "Open TYPE" was a menu entry that
+could only be reached while a window was already open.
+
+Three things had to follow from the change. `isReleasedWhenClosed` goes false,
+or reopening reaches a window that has been deallocated — the default is true
+for a programmatically created window. `applicationShouldHandleReopen` brings
+the window back on a Dock click. And the drawer is put back by hand: it is a
+child window, so closing its parent takes it off screen while leaving this
+side of it thinking the drawer is still out.
+
+The bundle is `TYPE.app`, not `TypeReview.app`. macOS labels the Dock item
+from the bundle, and the old name gave the Dock a tooltip that disagreed with
+the app's own menu bar.
+
 ## The Settings window
 
 Four things were making it look like a form rather than a Mac settings pane,

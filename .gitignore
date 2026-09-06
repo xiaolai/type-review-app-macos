@@ -2,5 +2,6 @@
 # source with `make`, and both are binaries — tracking them made every commit
 # carry thousands of object files.
 .build/
+TYPE.app/
 TypeReview.app/
 .DS_Store

@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // text on a plain ground; a rule across the top divides it from
         // nothing.
         window.titlebarSeparatorStyle = .none
+        // Or closing the window deallocates it, and reopening from the menu
+        // bar reaches a window that is no longer there. The default is true
+        // for a programmatically created window.
+        window.isReleasedWhenClosed = false
         window.setFrameAutosaveName("TypeReviewMain")
         applyWindowSize(to: window)
         if window.frame.origin == .zero { window.center() }
@@ -133,6 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showMainWindow(_ sender: Any?) {
         window?.makeKeyAndOrderFront(nil)
+        // The drawer is a child window, so closing the main one took it off
+        // screen while leaving it marked open. Without this it never comes
+        // back and the keyboard is gone until the setting is toggled twice.
+        drawer?.restoreIfOpen()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -151,7 +159,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(size)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// The app outlives its window, because it has a menu-bar item.
+    ///
+    /// It used to quit — which made the status item incoherent the moment it
+    /// was added: closing the window took the menu-bar icon with it, so
+    /// "Open TYPE" was an item that could only be reached while a window was
+    /// already open. An app with a presence in the menu bar is reachable from
+    /// there, and quits from there.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Clicking the Dock icon with no window open brings it back.
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication, hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag { showMainWindow(nil) }
+        return true
+    }
 
     /// Every key equivalent carries Command.
     ///

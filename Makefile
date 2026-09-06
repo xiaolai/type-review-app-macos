@@ -1,7 +1,10 @@
 # Assembles the .app bundle around the SPM executable. A window needs an
 # Info.plist and a bundle identifier; `swift run` alone gives neither.
 
-APP      := TypeReview.app
+# Named for the app, not for the repo. macOS labels the Dock item from the
+# bundle, and a bundle called TypeReview.app under an app called TYPE gets a
+# Dock tooltip that disagrees with its own menu bar.
+APP      := TYPE.app
 BIN      := TypeReviewApp
 CONTENTS := $(APP)/Contents
 CONFIG   := release

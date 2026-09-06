@@ -132,6 +132,14 @@ final class KeyboardDrawer {
         window.setFrame(frame(open: true), display: true)
     }
 
+    /// Puts the drawer back after its parent has been closed and reopened.
+    /// Closing the parent removes the child window from the screen but leaves
+    /// this side of it thinking the drawer is out.
+    func restoreIfOpen() {
+        guard isOpen, window.parent == nil else { return }
+        present()
+    }
+
     func setOpen(_ open: Bool, animated: Bool) {
         guard let parent, open != isOpen else { return }
         isOpen = open
