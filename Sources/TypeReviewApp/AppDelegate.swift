@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var libraryWindow: LibraryWindowController?
     private var keyboardMenuItem: NSMenuItem?
     private var preferencesObserver: NSObjectProtocol?
+    private var statusItem: NSStatusItem?
+    private var statusKeyboardItem: NSMenuItem?
     private var sourceMenuItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -39,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
 
         NSApp.mainMenu = makeMenu()
+        // Before the drawer's state is applied: both menus that offer the
+        // keyboard toggle have to exist by the time the checkmark is set, or
+        // the one built later starts out lying about it.
+        installStatusItem()
         let drawer = KeyboardDrawer()
         self.drawer = drawer
         practice.keyboard = drawer.keyboard
@@ -49,7 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // should already be out when the app appears, not slide out at launch.
         let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
         drawer.setOpen(showKeyboard, animated: false)
-        keyboardMenuItem?.state = showKeyboard ? .on : .off
+        markKeyboardMenus(showKeyboard)
         NSApp.activate(ignoringOtherApps: true)
 
         preferencesObserver = NotificationCenter.default.addObserver(
@@ -63,6 +69,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if CommandLine.arguments.contains("--selftest") { runSelfTest() }
+    }
+
+    /// The menu-bar item.
+    ///
+    /// `keyboard.badge.ellipsis` as a template image, so macOS inverts it for
+    /// a dark menu bar and dims it when the bar is inactive — the two things a
+    /// hand-tinted image gets wrong. The badge is the point: it says this icon
+    /// leads somewhere rather than being a status light.
+    ///
+    /// The menu is the app's own verbs, not a second copy of the main menu:
+    /// what someone reaches for when TYPE is not the front app.
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        let image = NSImage(
+            systemSymbolName: "keyboard.badge.ellipsis", accessibilityDescription: "TYPE")
+        image?.isTemplate = true
+        item.button?.image = image
+        item.button?.toolTip = "TYPE"
+
+        let menu = NSMenu()
+        let show = menu.addItem(
+            withTitle: "Open TYPE", action: #selector(showMainWindow(_:)), keyEquivalent: "")
+        show.target = self
+        menu.addItem(.separator())
+        let keyboard = menu.addItem(
+            withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "")
+        keyboard.target = self
+        statusKeyboardItem = keyboard
+        let newText = menu.addItem(
+            withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "")
+        newText.target = self
+        menu.addItem(.separator())
+        for (title, action) in [
+            ("Library", #selector(showLibrary(_:))),
+            ("Statistics", #selector(showStats(_:))),
+            ("Settings…", #selector(showSettings(_:))),
+        ] {
+            let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            entry.target = self
+        }
+        menu.addItem(.separator())
+        menu.addItem(
+            withTitle: "Quit TYPE", action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "")
+        item.menu = menu
+        statusItem = item
+    }
+
+    /// Two menus offer the keyboard toggle, so both carry the checkmark.
+    private func markKeyboardMenus(_ visible: Bool) {
+        keyboardMenuItem?.state = visible ? .on : .off
+        statusKeyboardItem?.state = visible ? .on : .off
+    }
+
+    @objc private func showMainWindow(_ sender: Any?) {
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     /// Sizes the window to hold exactly the requested lines and columns.
@@ -184,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let drawer else { return }
         let visible = !drawer.isOpen
         drawer.setOpen(visible, animated: true)
-        keyboardMenuItem?.state = visible ? .on : .off
+        markKeyboardMenus(visible)
         UserDefaults.standard.set(visible, forKey: "ShowKeyboard")
     }
 

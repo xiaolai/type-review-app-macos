@@ -6,16 +6,17 @@ BIN      := TypeReviewApp
 CONTENTS := $(APP)/Contents
 CONFIG   := release
 
-.PHONY: all run selftest test clean
+.PHONY: all run selftest test icon clean
 
 all: $(APP)
 
-$(APP): $(shell find Sources -name '*.swift') Info.plist
+$(APP): $(shell find Sources -name '*.swift') Info.plist Resources/TypeReview.icns
 	swift build -c $(CONFIG) --product $(BIN)
 	@rm -rf $(APP)
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
 	@cp .build/$(CONFIG)/$(BIN) $(CONTENTS)/MacOS/$(BIN)
 	@cp Info.plist $(CONTENTS)/Info.plist
+	@cp Resources/TypeReview.icns $(CONTENTS)/Resources/TypeReview.icns
 	# SwiftPM puts a target's resources in its own .bundle beside the binary.
 	# Without this the corpus is simply absent at runtime and the app falls
 	# back to generated words — silently, because a missing corpus and an
@@ -35,6 +36,14 @@ selftest: $(APP)
 
 test:
 	swift test
+
+# Regenerates the icon set. The .icns is committed, so this runs only when
+# the artwork changes — Tools/make-icon.swift is the artwork.
+icon:
+	@swiftc -O Tools/make-icon.swift -o /tmp/type-make-icon
+	@/tmp/type-make-icon /tmp/TypeReview.iconset
+	@iconutil -c icns /tmp/TypeReview.iconset -o Resources/TypeReview.icns
+	@echo "wrote Resources/TypeReview.icns ($$(du -h Resources/TypeReview.icns | cut -f1))"
 
 clean:
 	rm -rf $(APP) .build

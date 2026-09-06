@@ -196,6 +196,33 @@ The Appearance and Sound panes the website has are deliberately absent: this
 app follows the system appearance rather than shipping four hand-built themes,
 and no audio is ported yet.
 
+## The icon set
+
+`keyboard.macwindow` for the app, `keyboard.badge.ellipsis` for the menu bar.
+Both are SF Symbols, which means they carry Apple's optical corrections rather
+than a traced approximation of them, and the menu-bar one is a template image
+so macOS inverts it for a dark bar and dims it when the bar is inactive — the
+two things a hand-tinted image gets wrong.
+
+`Tools/make-icon.swift` draws the app icon; `make icon` runs it through
+`iconutil`. The `.icns` is committed, so an ordinary build needs neither, but
+the artwork stays reproducible and changing it is an edit to code.
+
+Three things make it a *set* rather than one picture scaled ten ways:
+
+- **The artwork simplifies below 64 pixels.** `keyboard.macwindow`'s window
+  frame and its rows of small keys fall under a pixel apiece there, so the
+  plain `keyboard` stands in, and `keyboard.fill` below 40 — the same
+  silhouette, minus the detail that has stopped being detail.
+- **The mark is fitted by rendered width, not point size.** A symbol's point
+  size is its cap height, so sizing by it makes a wide mark like
+  `keyboard.macwindow` overflow its tile and a narrow one look lost.
+- **The tile is a superellipse, not a rounded rectangle.** macOS icon tiles
+  use a continuous corner and `NSBezierPath` has none; `|x/a|^5 + |y/b|^5 = 1`
+  is the shape, and sampling it is shorter than faking it with arcs. Apple's
+  grid puts an 824-point tile on a 1024 canvas with a 185.4 corner, and the
+  shadow is part of the artwork rather than something the Dock adds.
+
 ## The on-screen keyboard
 
 The clearest case for having gone native. The website cannot ask which
