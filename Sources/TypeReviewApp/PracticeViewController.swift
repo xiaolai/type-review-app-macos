@@ -30,9 +30,14 @@ final class PracticeViewController: NSViewController {
     /// The adapter reports its pick from a `@Sendable` closure, so the value
     /// lands in a reference box rather than being captured mutably.
     private let entryBox = EntryBox()
-    /// Keystroke sounds. Holds no audio resources until the first audible
-    /// keystroke, so an `off` pack costs nothing.
-    private let sounds = KeySoundPlayer()
+    /// What a keystroke on the typing surface should sound like.
+    ///
+    /// A closure rather than a player of this screen's own. Sound is no longer
+    /// a property of the practice window — it can be heard in every app, from
+    /// a monitor that has nothing to do with this view — and two players would
+    /// mean two audio engines and, when both paths were live, two clicks per
+    /// key. The app owns the one player and decides which path feeds it.
+    var onKeyStruck: ((UInt16) -> Void)?
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
@@ -163,11 +168,7 @@ final class PracticeViewController: NSViewController {
         typingView.onBackspace = { [weak self] in try? self?.session?.backspace(); self?.refresh() }
         typingView.onRestart = { [weak self] in self?.startFreshRun() }
         typingView.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
-        typingView.onKeyStruck = { [weak self] code in
-            guard let self, let category = soundCategory(forKeyCode: code) else { return }
-            self.sounds.play(category: category, pan: KeyPan.pan(forKeyCode: code))
-        }
-        applySoundPreferences()
+        typingView.onKeyStruck = { [weak self] code in self?.onKeyStruck?(code) }
         applyTypingPreferences()
         typingView.onConfirm = { [weak self] in self?.startFreshRun() }
         start()
@@ -394,16 +395,5 @@ extension PracticeViewController {
     func applyTypingPreferences() {
         typingView.caretStyle = AppPreferences.caretStyle.value
         typingView.showsWhitespace = AppPreferences.showWhitespace.value
-    }
-
-    func applySoundPreferences() {
-        sounds.setPack(AppPreferences.soundPack.value)
-        sounds.setVolume(AppPreferences.soundVolume.value)
-    }
-
-    /// Plays one click at the current settings, so the Settings window can
-    /// preview a pack the moment it is picked.
-    func previewSound() {
-        sounds.play(category: .standard, pan: 0)
     }
 }

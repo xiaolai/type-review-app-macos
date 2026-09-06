@@ -36,6 +36,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Each pane and its grid, so a pane can be re-measured when a row is
     /// hidden.
     private var panes: [(controller: NSViewController, grid: NSGridView)] = []
+    /// The warning under "Sound in every app", shown only while the setting
+    /// is on and the system is not delivering the events it needs.
+    private var permissionLabel: NSTextField?
+    private var permissionRows: [NSGridRow] = []
+    /// The note under "Start at login". Carries whatever `SMAppService` has to
+    /// say — an approval it is still waiting for, or the reason it refused.
+    private var loginNoteLabel: NSTextField?
+    private var loginNoteRows: [NSGridRow] = []
+    /// The last registration error, kept until the next attempt. `status`
+    /// alone cannot say why something failed.
+    private var loginError: String?
     private static let lastPaneKey = "SettingsLastPane"
     private static let paneWidth: CGFloat = 500
     private static let paneMargin: CGFloat = 22
@@ -84,6 +95,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Both settings below can be changed from outside this app — Input
+    /// Monitoring in System Settings, the login item under General ▸ Login
+    /// Items — so what this window shows has to be re-read on the way back in
+    /// rather than trusted from when it was built.
+    func windowDidBecomeKey(_ notification: Notification) {
+        refreshSoundScope()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -162,6 +181,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Keyboard", self.soundPackPopup(),
                 hint: "Heard on every keystroke. Picking one plays it.")
             self.addRow(grid, "Volume", self.volumeSlider())
+            self.addRow(
+                grid, "Sound in every app", self.globalSoundToggle(),
+                hint: "Clicks wherever you type, not only in this window.")
+            self.addPermissionRow(grid)
+            self.addRow(
+                grid, "Start at login", self.loginItemToggle(),
+                hint: "TYPE waits in the menu bar, ready before you type.")
+            self.addLoginNoteRow(grid)
             self.addRow(
                 grid, "Shortcut", self.shortcutRecorder(),
                 hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
@@ -384,6 +411,138 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return slider
     }
 
+    /// Whether keystrokes are heard in every app.
+    ///
+    /// Asks for Input Monitoring as part of switching on rather than leaving
+    /// it as a second step to discover. Without the permission the monitor
+    /// installs cleanly and is never called — the switch would read "on" over
+    /// a keyboard that stayed silent.
+    private func globalSoundToggle() -> NSControl {
+        let toggle = NSSwitch()
+        toggle.identifier = .init("globalSound")
+        controls["globalSound"] = toggle
+        bind(toggle) { [weak self] in
+            let on = toggle.state == .on
+            if on, !GlobalKeySound.isPermitted { GlobalKeySound.requestPermission() }
+            AppPreferences.globalSound.value = on
+            self?.refreshSoundScope()
+        }
+        return toggle
+    }
+
+    /// Whether TYPE starts with the Mac.
+    ///
+    /// Reads `SMAppService` rather than a preference of its own: the user can
+    /// revoke this in System Settings, and a mirrored copy would go on saying
+    /// the app starts at login after they had turned it off.
+    private func loginItemToggle() -> NSControl {
+        let toggle = NSSwitch()
+        toggle.identifier = .init("loginItem")
+        controls["loginItem"] = toggle
+        bind(toggle) { [weak self] in
+            do {
+                self?.loginError = nil
+                try LoginItem.setEnabled(toggle.state == .on)
+            } catch {
+                self?.loginError = error.localizedDescription
+            }
+            self?.refreshSoundScope()
+        }
+        return toggle
+    }
+
+    /// The warning row for a missing Input Monitoring permission, with the
+    /// door to fix it. Built always and hidden most of the time, because a
+    /// row added and removed would re-order the pane under the pointer.
+    private func addPermissionRow(_ grid: NSGridView) {
+        let label = NSTextField(labelWithString: "")
+        label.font = .preferredFont(forTextStyle: .caption1)
+        // The system's own warning colour rather than red: this is a setting
+        // that is not doing anything yet, not an error.
+        label.textColor = .systemOrange
+        label.lineBreakMode = .byTruncatingTail
+        let button = NSButton(
+            title: "Allow…", target: self, action: #selector(openInputMonitoringSettings(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        let stack = NSStackView(views: [label, button])
+        stack.spacing = 8
+        stack.alignment = .centerY
+        let row = grid.addRow(with: [NSGridCell.emptyContentView, stack])
+        row.topPadding = 1
+        row.bottomPadding = 4
+        permissionLabel = label
+        permissionRows = [row]
+    }
+
+    /// The note under "Start at login" — an approval macOS is waiting for, or
+    /// the reason it refused. Hidden when there is nothing to say.
+    private func addLoginNoteRow(_ grid: NSGridView) {
+        let label = NSTextField(labelWithString: "")
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textColor = .systemOrange
+        label.lineBreakMode = .byTruncatingTail
+        let button = NSButton(
+            title: "Login Items…", target: self, action: #selector(openLoginItemsSettings(_:)))
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        let stack = NSStackView(views: [label, button])
+        stack.spacing = 8
+        stack.alignment = .centerY
+        let row = grid.addRow(with: [NSGridCell.emptyContentView, stack])
+        row.topPadding = 1
+        row.bottomPadding = 4
+        loginNoteLabel = label
+        loginNoteRows = [row]
+    }
+
+    /// Re-reads the two settings the system owns, and shows or hides the two
+    /// rows that only exist when something is in the way.
+    private func refreshSoundScope() {
+        let global = AppPreferences.globalSound.value
+        (controls["globalSound"] as? NSSwitch)?.state = global ? .on : .off
+        let blocked = global && !GlobalKeySound.isPermitted
+        permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
+        for row in permissionRows { row.isHidden = !blocked }
+
+        (controls["loginItem"] as? NSSwitch)?.state = LoginItem.isEnabled ? .on : .off
+        let note = loginNote
+        loginNoteLabel?.stringValue = note ?? ""
+        for row in loginNoteRows { row.isHidden = note == nil }
+
+        resizePanes()
+    }
+
+    /// What, if anything, stands between the switch and the app actually
+    /// starting at login.
+    ///
+    /// Only two things qualify: an approval macOS is waiting for, and a
+    /// refusal it actually gave. Not `.notFound` — which reads like "this app
+    /// is missing" and is in fact what `SMAppService` reports for a main app
+    /// that has simply never been registered. Showing it turned the ordinary
+    /// off state into a warning that TYPE could not be registered at all,
+    /// under a switch that then registered it on the first click.
+    private var loginNote: String? {
+        if let loginError { return loginError }
+        return LoginItem.status == .requiresApproval
+            ? "Waiting for your approval in System Settings." : nil
+    }
+
+    /// Asks, then opens the pane.
+    ///
+    /// The request is what puts TYPE into the Input Monitoring list in the
+    /// first place. Sending someone straight to that pane before the app has
+    /// ever asked lands them in a list TYPE is not in, with nothing to switch
+    /// on and no hint that the `+` button is the way through.
+    @objc private func openInputMonitoringSettings(_ sender: Any?) {
+        GlobalKeySound.requestPermission()
+        GlobalKeySound.openPermissionSettings()
+    }
+
+    @objc private func openLoginItemsSettings(_ sender: Any?) {
+        LoginItem.openSettings()
+    }
+
     /// The global shortcut, as a recorder. Held so nothing else has to know
     /// how it stores itself.
     private func shortcutRecorder() -> NSControl {
@@ -572,7 +731,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // count only in word mode.
         for row in rows["testDurationSec"] ?? [] { row.isHidden = settings.testMode != .time }
         for row in rows["wordCount"] ?? [] { row.isHidden = settings.testMode != .words }
-        resizePanes()
+        refreshSoundScope()
     }
 
     /// Selects a preset, or adds a `Custom (600)` item for a value that has

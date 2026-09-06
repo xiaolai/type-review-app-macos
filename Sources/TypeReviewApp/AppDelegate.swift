@@ -29,9 +29,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// changes, including when it changes from the global shortcut while
     /// neither menu is open.
     private var soundMenus: [NSMenu] = []
+    /// The "Sound in Every App" item in each of them.
+    private var globalSoundMenuItems: [NSMenuItem] = []
     private var soundHotKey: GlobalHotKey?
 
+    /// The one keystroke player, at app scope rather than inside the practice
+    /// screen. Sound outlives that window now — the whole point of the global
+    /// setting is that it works with no window on screen at all.
+    ///
+    /// `lazy`, like the monitor below, because a main-actor default value
+    /// cannot be initialised from AppDelegate's nonisolated init. Neither
+    /// costs anything until first touched: the player holds no audio device
+    /// until a pack that makes noise is set.
+    private lazy var sounds = KeySoundPlayer()
+    private lazy var globalSound = GlobalKeySound { [weak self] code in
+        self?.playKey(code)
+    }
+    /// Input Monitoring as of the last time the app was frontmost, so a grant
+    /// made while it was in the background can be noticed on the way back.
+    private var soundWasPermitted = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Read first, before anything else can dispatch another Apple event:
+        // this is a property of the event being handled right now, and there
+        // is no way to ask again later.
+        let atLogin = LoginItem.launchedAtLogin
         let practice = PracticeViewController()
         self.practice = practice
 
@@ -98,13 +120,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         practice.keyboard = drawer.keyboard
         drawer.attach(to: window)
         markSourceMenu()
-        window.makeKeyAndOrderFront(nil)
-        // After the window is on screen, and without animation: the drawer
-        // should already be out when the app appears, not slide out at launch.
+        // Started by launchd rather than by a person: leave the menu bar icon
+        // and the keystroke sound, and nothing else. A window thrown across
+        // whatever you were about to do is the reason people turn login items
+        // off again, and the only thing this app needs to be doing at login is
+        // making the keyboard sound like a keyboard.
+        //
+        // The drawer is still set up, before the retreat and while the window
+        // still has a chance to arrange it, so "Open TYPE" later shows the
+        // keyboard the user left out rather than a window missing half of
+        // itself.
+        if !atLogin { window.makeKeyAndOrderFront(nil) }
+        // Without animation: the drawer should already be out when the app
+        // appears, not slide out at launch.
         let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
         drawer.setOpen(showKeyboard, animated: false)
         markKeyboardMenus(showKeyboard)
-        NSApp.activate(ignoringOtherApps: true)
+        if atLogin {
+            window.orderOut(nil)
+            retreatToMenuBar()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
 
         preferencesObserver = NotificationCenter.default.addObserver(
             forName: AppPreferences.didChange, object: nil, queue: .main
@@ -116,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // Sound is an app preference too, and it rides the same
                 // notification — so a pack or volume changed in Settings is
                 // live on the next keystroke rather than at the next launch.
-                self.practice?.applySoundPreferences()
+                self.applySoundPreferences()
                 self.practice?.applyTypingPreferences()
                 self.markSoundMenus()
                 self.registerSoundShortcut()
@@ -124,6 +161,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         registerSoundShortcut()
+        // Pack, volume and — the new part — scope. This is what starts the
+        // system-wide monitor when the setting says so, and what decides
+        // whether the typing surface makes its own sound or leaves it to the
+        // monitor.
+        applySoundPreferences()
+        soundWasPermitted = GlobalKeySound.isPermitted
 
         if CommandLine.arguments.contains("--soundcheck") { runSoundCheck() }
         if CommandLine.arguments.contains("--selftest") { runSelfTest() }
@@ -453,6 +496,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let toggle = menu.addItem(
             withTitle: "Play Sounds", action: #selector(toggleSound(_:)), keyEquivalent: "")
         toggle.target = self
+        // Directly under it, because it answers the next question someone
+        // asks about the first: sound, yes — but where? This is the item that
+        // matters most from the status bar, since the case for system-wide
+        // sound is precisely the one where TYPE has no window open.
+        let everywhere = menu.addItem(
+            withTitle: "Sound in Every App", action: #selector(toggleGlobalSound(_:)),
+            keyEquivalent: "")
+        everywhere.target = self
+        globalSoundMenuItems.append(everywhere)
         menu.addItem(.separator())
         for pack in KeySoundPack.all {
             let item = menu.addItem(
@@ -476,6 +528,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             for item in menu.items {
                 if let name = item.representedObject as? String {
                     item.state = name == active.name ? .on : .off
+                } else if item.action == #selector(toggleGlobalSound(_:)) {
+                    let on = AppPreferences.globalSound.value
+                    item.state = on ? .on : .off
+                    // On, but muted by the system, is a state the user cannot
+                    // otherwise see from here — the monitor is installed and
+                    // never called. Say so where the switch is.
+                    item.title = on && !GlobalKeySound.isPermitted
+                        ? "Sound in Every App (Needs Permission)" : "Sound in Every App"
                 } else if item.action == #selector(toggleSound(_:)) {
                     item.state = AppPreferences.soundIsOn ? .on : .off
                     // The menu advertises whatever is actually registered, so
@@ -497,7 +557,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // worked — the shortcut is usable from another app, where there is no
         // window and no menu to look at. One click is the answer. Switching
         // off needs no confirmation: the next keystroke is the confirmation.
-        if AppPreferences.soundIsOn { practice?.previewSound() }
+        if AppPreferences.soundIsOn { previewSound() }
     }
 
     @objc private func chooseSoundPack(_ sender: NSMenuItem) {
@@ -506,7 +566,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else { return }
         AppPreferences.soundPack.value = pack
         markSoundMenus()
-        if AppPreferences.soundIsOn { practice?.previewSound() }
+        if AppPreferences.soundIsOn { previewSound() }
+    }
+
+    /// Coming back to the front is the one moment Input Monitoring is likely
+    /// to have just been granted — the user has been in System Settings.
+    ///
+    /// There is no notification for it, and a monitor installed before the
+    /// grant is not fed events afterwards, so the permission is re-read here
+    /// and the monitors replaced when the answer has changed. Belt and
+    /// braces: relaunching is the certain path, and the Settings pane stops
+    /// showing its warning either way.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        let permitted = GlobalKeySound.isPermitted
+        defer { soundWasPermitted = permitted }
+        guard permitted, !soundWasPermitted, AppPreferences.globalSound.value else { return }
+        globalSound.reinstall()
+        markSoundMenus()
+    }
+
+    /// Everything a keystroke sound needs to know, which is only which
+    /// physical key moved.
+    ///
+    /// The single sink. Both paths that can produce a keystroke — the typing
+    /// surface and the system-wide monitor — arrive here, so there is one
+    /// place that decides what a key sounds like and no way for the two to
+    /// drift apart.
+    private func playKey(_ code: UInt16) {
+        guard let category = soundCategory(forKeyCode: code) else { return }
+        sounds.play(category: category, pan: KeyPan.pan(forKeyCode: code))
+    }
+
+    /// Applies pack, volume and scope together.
+    ///
+    /// Scope is the part worth reading twice. Exactly one path may be live at
+    /// a time: while the monitor is running it also sees this app's own key
+    /// events — that is what its local half is for — so leaving the typing
+    /// surface wired as well would click twice for every key pressed in the
+    /// practice window. `onKeyStruck` is therefore set to nil, not merely
+    /// ignored, so the ownership is visible rather than conditional.
+    private func applySoundPreferences() {
+        sounds.setPack(AppPreferences.soundPack.value)
+        sounds.setVolume(AppPreferences.soundVolume.value)
+
+        let global = AppPreferences.globalSound.value
+        globalSound.setRunning(global)
+        practice?.onKeyStruck = global ? nil : { [weak self] code in self?.playKey(code) }
+        markSoundMenus()
+    }
+
+    /// Plays one click at the current settings, so a pack picked in the
+    /// Settings window or a menu can be heard the moment it is chosen.
+    private func previewSound() {
+        sounds.play(category: .standard, pan: 0)
+    }
+
+    /// Turns system-wide sound on or off from either menu.
+    ///
+    /// Asking for permission is part of switching it on, not a separate step
+    /// the user has to discover: without it the monitor installs cleanly and
+    /// is simply never called, and a setting that reports success while doing
+    /// nothing is worse than one that refuses. macOS only ever shows its own
+    /// prompt once per process lifetime of the answer, so the Settings window
+    /// carries the second door for everyone past that.
+    @objc private func toggleGlobalSound(_ sender: Any?) {
+        let wanted = !AppPreferences.globalSound.value
+        if wanted, !GlobalKeySound.isPermitted { GlobalKeySound.requestPermission() }
+        AppPreferences.globalSound.value = wanted
+        // Switching on with no window in front and no keystroke yet made is
+        // silent in a way that reads as broken. One click says it took.
+        if wanted, AppPreferences.soundIsOn { previewSound() }
     }
 
     @objc private func toggleKeyboard(_ sender: Any?) {
@@ -531,7 +660,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settings = controller
         controller.read = { [weak self] in self?.practice?.currentSettings ?? .default }
         controller.write = { [weak self] next in self?.practice?.applySettings(next) ?? false }
-        controller.previewSound = { [weak self] in self?.practice?.previewSound() }
+        controller.previewSound = { [weak self] in self?.previewSound() }
         controller.present()
     }
 

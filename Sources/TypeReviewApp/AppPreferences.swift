@@ -99,6 +99,27 @@ enum AppPreferences {
         }
     }
 
+    /// Whether keystroke sounds are heard everywhere or only while typing
+    /// here.
+    ///
+    /// Off by default, and deliberately so twice over. Hearing every key you
+    /// press all day is a taste, not an improvement; and switching it on asks
+    /// macOS for permission to watch the keyboard, which is not something an
+    /// app should acquire because it was installed.
+    ///
+    /// Orthogonal to the pack: `off` still means silence everywhere, so the
+    /// global shortcut mutes the whole machine without this having to know.
+    enum globalSound {
+        static let key = "GlobalSound"
+        static var value: Bool {
+            get { UserDefaults.standard.bool(forKey: key) }
+            set {
+                UserDefaults.standard.set(newValue, forKey: key)
+                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+            }
+        }
+    }
+
     /// Whether keystrokes make any sound at all.
     static var soundIsOn: Bool { soundPack.value != .off }
 
