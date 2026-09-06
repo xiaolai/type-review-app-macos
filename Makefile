@@ -13,7 +13,7 @@ CONFIG   := release
 
 all: $(APP)
 
-$(APP): $(shell find Sources -name '*.swift') Info.plist Resources/TypeReview.icns
+$(APP): $(shell find Sources -name '*.swift') Info.plist Resources/TypeReview.icns Resources/typewriter.m4a
 	swift build -c $(CONFIG) --product $(BIN)
 	@rm -rf $(APP)
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
@@ -24,7 +24,7 @@ $(APP): $(shell find Sources -name '*.swift') Info.plist Resources/TypeReview.ic
 	# so it goes straight into Contents/Resources rather than through a
 	# SwiftPM resource bundle — which is also why it sidesteps the
 	# generated-accessor trap the corpus bundle fell into.
-	cp $(CONTENTS)/Resources/typewriter.m4a
+	cp Resources/typewriter.m4a $(CONTENTS)/Resources/typewriter.m4a
 	# SwiftPM puts a target's resources in its own .bundle beside the binary.
 	# Without this the corpus is simply absent at runtime and the app falls
 	# back to generated words — silently, because a missing corpus and an
@@ -41,6 +41,8 @@ $(APP): $(shell find Sources -name '*.swift') Info.plist Resources/TypeReview.ic
 	# assertion is the part that stops this regressing quietly a second time.
 	@test -d "$(CONTENTS)/Resources/TypeReview_TypeReviewKit.bundle/Resources/code" \
 		|| { echo "error: corpus bundle missing from $(APP)" >&2; exit 1; }
+	@test -s "$(CONTENTS)/Resources/typewriter.m4a" \
+		|| { echo "error: typewriter sample missing from $(APP)" >&2; exit 1; }
 	@codesign --force --sign - --timestamp=none $(APP) >/dev/null 2>&1
 	@echo "built $(APP) ($$(du -sh $(APP) | cut -f1))"
 
