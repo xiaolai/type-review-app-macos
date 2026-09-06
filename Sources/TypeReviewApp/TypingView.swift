@@ -79,6 +79,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         self.statuses = statuses
         self.cursor = cursor
         if passageChanged { invalidateLayout() }
+        restartBlink()
         needsDisplay = true
     }
 
@@ -86,7 +87,114 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     func update(statuses: [CharStatus], cursor: Int) {
         self.statuses = statuses
         self.cursor = cursor
+        restartBlink()
         needsDisplay = true
+    }
+
+    // MARK: - Blinking
+
+    /// The blink phase. The caret is drawn only on the lit half.
+    private var caretIsVisible = true
+    private var blinkTimer: Timer?
+
+    /// How long the caret stays lit and dark, from the system's own settings.
+    ///
+    /// `NSTextInsertionPointBlinkPeriod` is a real preference people set —
+    /// raised to slow a distracting cursor, and set to zero to stop it moving
+    /// at all, which is an accessibility setting rather than a curiosity. A
+    /// hard-coded half second would quietly ignore all of it, so these read
+    /// what the system reads, in the order AppKit reads it: the combined key
+    /// first, then either half on top.
+    ///
+    /// Zero anywhere means no blink. That is not a degenerate case to guard
+    /// against — it is the setting doing exactly what it says.
+    private static var blinkPeriods: (on: TimeInterval, off: TimeInterval)? {
+        let defaults = UserDefaults.standard
+        func milliseconds(_ key: String) -> Double? {
+            defaults.object(forKey: key) != nil ? defaults.double(forKey: key) : nil
+        }
+        let both = milliseconds("NSTextInsertionPointBlinkPeriod")
+        let on = milliseconds("NSTextInsertionPointBlinkPeriodOn") ?? both ?? 500
+        let off = milliseconds("NSTextInsertionPointBlinkPeriodOff") ?? both ?? 500
+        guard on > 0, off > 0 else { return nil }
+        return (on / 1000, off / 1000)
+    }
+
+    /// Whether the caret should be blinking at all.
+    ///
+    /// Only where keystrokes would actually land. A caret blinking in a window
+    /// that is not accepting input is an invitation to type into nothing, and
+    /// it is the one thing every Mac text field agrees on.
+    private var caretShouldBlink: Bool {
+        guard let window, !isHidden, Self.blinkPeriods != nil else { return false }
+        return window.isKeyWindow && window.firstResponder === self
+    }
+
+    /// Puts the caret back on and starts the cycle again.
+    ///
+    /// Called from every cursor move, and that is the point rather than an
+    /// optimisation: without it a keystroke landing during the dark half
+    /// would leave the place you just reached unmarked for up to half a
+    /// second, which is precisely when you are looking for it.
+    private func restartBlink() {
+        blinkTimer?.invalidate()
+        blinkTimer = nil
+        if caretIsVisible == false { needsDisplay = true }
+        caretIsVisible = true
+        guard caretShouldBlink else { return }
+        scheduleBlinkPhase()
+    }
+
+    /// One phase at a time rather than a repeating timer, because the lit and
+    /// dark halves can be different lengths — a single interval would have to
+    /// pick one and be wrong about the other.
+    private func scheduleBlinkPhase() {
+        guard let periods = Self.blinkPeriods else { return }
+        let timer = Timer(
+            timeInterval: caretIsVisible ? periods.on : periods.off, repeats: false
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                // Re-checked rather than assumed: the window can stop being
+                // key without this view being told, and a caret still winking
+                // in a background window is the thing this guards against.
+                guard self.caretShouldBlink else { return self.restartBlink() }
+                self.caretIsVisible.toggle()
+                self.needsDisplay = true
+                self.scheduleBlinkPhase()
+            }
+        }
+        // `.common`, not the default mode. A timer in the default mode stops
+        // while a menu is open or a window is being resized, and a caret that
+        // freezes mid-blink for as long as a menu is down looks like the app
+        // has hung.
+        RunLoop.main.add(timer, forMode: .common)
+        blinkTimer = timer
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        defer { restartBlink() }
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        defer { restartBlink() }
+        return super.resignFirstResponder()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        restartBlink()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        restartBlink()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        restartBlink()
     }
 
     private func invalidateLayout() {
@@ -242,6 +350,8 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         let end = range.location + range.length
         let isLastLine = end >= expected.utf16.count
         guard cursor >= start, cursor < end || (isLastLine && cursor == end) else { return }
+
+        guard caretIsVisible else { return }
 
         let offset = CTLineGetOffsetForStringIndex(line, cursor, nil)
         var ascent: CGFloat = 0
