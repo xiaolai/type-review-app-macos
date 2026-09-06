@@ -212,6 +212,26 @@ final class KeyboardView: NSView {
         drawLabels(key, character: character, in: faceRect, unit: unit)
     }
 
+    /// Legend size as a fraction of the key.
+    ///
+    /// Sans, not monospace, and smaller than feels right on paper. Apple's
+    /// keycap legends are a sans face at roughly a quarter of the key pitch;
+    /// a monospaced face at a third — what this drew first — is the wrong
+    /// shape *and* the wrong size, and it shows most on the modifier symbols,
+    /// where SF Mono's ⇧ and ⌘ are thin stylised outlines rather than the
+    /// solid ones the system font uses everywhere else on macOS.
+    ///
+    /// Words are set smaller than glyphs because they are longer: `esc` and
+    /// `F12` are printed small on the real thing for the same reason.
+    private static func labelScale(for key: KeyboardGeometry.Key) -> CGFloat {
+        switch key.role {
+        case .letter, .space: return 0.26
+        case .modifier: return 0.22
+        case .function: return 0.19
+        case .touchID: return 0.19
+        }
+    }
+
     private func drawLabels(
         _ key: KeyboardGeometry.Key, character: String?, in rect: NSRect, unit: CGFloat
     ) {
@@ -235,8 +255,7 @@ final class KeyboardView: NSView {
             shiftedText = shifted
         }
 
-        let labelFont = NSFont.monospacedSystemFont(
-            ofSize: max(7, unit * (key.role == .letter ? 0.34 : 0.30)), weight: .regular)
+        let labelFont = NSFont.systemFont(ofSize: max(6, unit * Self.labelScale(for: key)))
 
         /// A caption sits nearer the cap edge than a glyph does, which is both
         /// how Apple prints it and the three points that decide whether the
@@ -253,15 +272,14 @@ final class KeyboardView: NSView {
             lines.append(
                 Line(
                     text: shiftedText,
-                    font: NSFont.monospacedSystemFont(
-                        ofSize: max(6, unit * 0.26), weight: .regular),
+                    font: NSFont.systemFont(ofSize: max(5, unit * 0.21)),
                     color: Theme.secondaryText.withAlphaComponent(0.75), inset: glyphInset))
         }
         lines.append(Line(text: label, font: labelFont, color: color, inset: glyphInset))
         if let sub = key.sub {
             lines.append(
                 Line(
-                    text: sub, font: NSFont.systemFont(ofSize: max(6, unit * 0.18)),
+                    text: sub, font: NSFont.systemFont(ofSize: max(5, unit * 0.15)),
                     color: Theme.secondaryText.withAlphaComponent(0.55), inset: 2))
         }
 

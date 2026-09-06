@@ -226,6 +226,14 @@ machine that only ever runs a US layout both answers agree and the check
 proves little; on one with an input method active — which is where this
 appeared — restoring the old call fails it.
 
+Legends are set in the **system sans** at about a quarter of the key, not in
+a monospaced face at a third. Both halves of that mattered. Monospace is the
+wrong shape for a keycap and, worse, SF Mono's `⇧` and `⌘` are thin stylised
+outlines rather than the solid glyphs macOS uses everywhere else — the
+modifier keys were where it looked most wrong. And the big keys print their
+word under the glyph the way Apple does — `⇧ shift`, `⇪ caps lock`, `↵ return`
+— because a lone Unicode arrow reads as clip art next to a row of letters.
+
 Drawn the way Apple draws the object: white chiclet caps on a silver body,
 the function row and its Touch ID button, `!` printed above `1`, and
 `control` / `option` / `command` spelled out under their glyphs and hugging

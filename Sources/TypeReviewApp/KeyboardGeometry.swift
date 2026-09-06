@@ -44,7 +44,8 @@ enum KeyboardGeometry {
         let width: Double?
         /// Shown instead of the character, for keys that produce none.
         let label: String?
-        /// The spelled-out modifier name printed under the glyph.
+        /// The word printed under the glyph, as Apple prints it. Dropped
+        /// automatically when the cap is too narrow to hold it.
         let sub: String?
         let align: Align
         let role: Role
@@ -126,10 +127,10 @@ enum KeyboardGeometry {
             Key(kVK_ANSI_Equal),
             // JIS keeps ¥ where ANSI ends the row.
             Key(kVK_JIS_Yen, label: "¥", shapes: Shape.jisOnly),
-            Key(kVK_Delete, nil, label: "⌫", align: .end, role: .modifier),
+            Key(kVK_Delete, nil, label: "⌫", sub: "delete", align: .end, role: .modifier),
         ],
         [
-            Key(kVK_Tab, 1.5, label: "⇥", align: .start, role: .modifier),
+            Key(kVK_Tab, 1.5, label: "⇥", sub: "tab", align: .start, role: .modifier),
             Key(kVK_ANSI_Q), Key(kVK_ANSI_W), Key(kVK_ANSI_E),
             Key(kVK_ANSI_R), Key(kVK_ANSI_T), Key(kVK_ANSI_Y), Key(kVK_ANSI_U),
             Key(kVK_ANSI_I), Key(kVK_ANSI_O), Key(kVK_ANSI_P), Key(kVK_ANSI_LeftBracket),
@@ -137,21 +138,21 @@ enum KeyboardGeometry {
             Key(kVK_ANSI_Backslash, nil, shapes: Shape.notISO),
             // ISO's return is tall and L-shaped. Drawn as its two halves — a
             // deliberate simplification, and the seam is one gap wide.
-            Key(kVK_Return, nil, label: "⏎", align: .end, role: .modifier, shapes: Shape.isoOnly),
+            Key(kVK_Return, nil, label: "⏎", sub: "return", align: .end, role: .modifier, shapes: Shape.isoOnly),
         ],
         [
-            Key(kVK_CapsLock, 1.75, label: "⇪", align: .start, role: .modifier),
+            Key(kVK_CapsLock, 1.75, label: "⇪", sub: "caps lock", align: .start, role: .modifier),
             Key(kVK_ANSI_A), Key(kVK_ANSI_S),
             Key(kVK_ANSI_D), Key(kVK_ANSI_F), Key(kVK_ANSI_G), Key(kVK_ANSI_H),
             Key(kVK_ANSI_J), Key(kVK_ANSI_K), Key(kVK_ANSI_L), Key(kVK_ANSI_Semicolon),
             Key(kVK_ANSI_Quote),
             Key(kVK_ANSI_Backslash, 1, shapes: Shape.isoOnly),
-            Key(kVK_Return, nil, label: "⏎", align: .end, role: .modifier),
+            Key(kVK_Return, nil, label: "⏎", sub: "return", align: .end, role: .modifier),
         ],
         [
             // ISO's left shift is short — the extra key sits beside it.
-            Key(kVK_Shift, 2.25, label: "⇧", align: .start, role: .modifier, shapes: Shape.notISO),
-            Key(kVK_Shift, 1.25, label: "⇧", align: .start, role: .modifier, shapes: Shape.isoOnly),
+            Key(kVK_Shift, 2.25, label: "⇧", sub: "shift", align: .start, role: .modifier, shapes: Shape.notISO),
+            Key(kVK_Shift, 1.25, label: "⇧", sub: "shift", align: .start, role: .modifier, shapes: Shape.isoOnly),
             // The extra key ISO keyboards have and ANSI ones do not — the one
             // the web version cannot draw at all.
             Key(kVK_ISO_Section, shapes: Shape.isoOnly),
@@ -159,7 +160,7 @@ enum KeyboardGeometry {
             Key(kVK_ANSI_B), Key(kVK_ANSI_N), Key(kVK_ANSI_M), Key(kVK_ANSI_Comma),
             Key(kVK_ANSI_Period), Key(kVK_ANSI_Slash),
             Key(kVK_JIS_Underscore, shapes: Shape.jisOnly),
-            Key(kVK_RightShift, nil, label: "⇧", align: .end, role: .modifier),
+            Key(kVK_RightShift, nil, label: "⇧", sub: "shift", align: .end, role: .modifier),
         ],
         [
             Key(kVK_Function, 1, label: "fn", align: .start, role: .function),
