@@ -117,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 // notification — so a pack or volume changed in Settings is
                 // live on the next keystroke rather than at the next launch.
                 self.practice?.applySoundPreferences()
+                self.practice?.applyTypingPreferences()
                 self.markSoundMenus()
                 self.registerSoundShortcut()
             }

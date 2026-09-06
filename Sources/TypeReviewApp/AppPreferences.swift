@@ -25,6 +25,49 @@ enum AppPreferences {
     /// points. Zero is allowed: flush is a look, even if it is not this one.
     static let drawerGap = Preference(key: "DrawerGap", default: 10, range: 0...60)
 
+    /// The shape of the caret on the typing surface.
+    ///
+    /// Three, because they are the three every terminal and editor offers and
+    /// people arrive with a preference already formed. Stored by raw value, so
+    /// the names have to stay stable.
+    enum CaretStyle: String, CaseIterable {
+        case vertical, block, horizontal
+
+        var label: String {
+            switch self {
+            case .vertical: return "Bar"
+            case .block: return "Block"
+            case .horizontal: return "Underline"
+            }
+        }
+    }
+
+    enum caretStyle {
+        static let key = "CaretStyle"
+        static var value: CaretStyle {
+            get { CaretStyle(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .vertical }
+            set {
+                UserDefaults.standard.set(newValue.rawValue, forKey: key)
+                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+            }
+        }
+    }
+
+    /// Whether spaces, tabs and line ends are marked on the typing surface.
+    ///
+    /// The same setting the website calls `showWhitespace`, and the same three
+    /// marks, so someone moving between them sees the same page.
+    enum showWhitespace {
+        static let key = "ShowWhitespace"
+        static var value: Bool {
+            get { UserDefaults.standard.bool(forKey: key) }
+            set {
+                UserDefaults.standard.set(newValue, forKey: key)
+                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+            }
+        }
+    }
+
     /// How loud the keystroke sounds are. Zero is off in practice, and the
     /// pack named `off` is off by construction; both are honoured.
     static let soundVolume = Preference(key: "SoundVolume", default: 0.5, range: 0...1)

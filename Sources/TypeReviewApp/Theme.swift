@@ -14,6 +14,9 @@ enum Theme {
     static var incorrect: NSColor { .systemRed }
     static var caret: NSColor { .controlAccentColor }
     static var secondaryText: NSColor { .secondaryLabelColor }
+    /// Whitespace marks. Fainter than untyped text, because they are a guide
+    /// to the shape of the passage and not part of what has to be typed.
+    static var whitespaceMark: NSColor { .quaternaryLabelColor }
 
     // Computed, not stored: NSFont is not Sendable, and a static let would be
     // shared mutable state under strict concurrency. These are cheap.

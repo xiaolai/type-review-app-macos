@@ -46,6 +46,16 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     private var cursor: Int = 0
     private var markedText: String = ""
 
+    /// Read from `AppPreferences` and pushed in, rather than read here: this
+    /// view is drawn on every keystroke and should not be querying
+    /// `UserDefaults` in a draw call.
+    var caretStyle: AppPreferences.CaretStyle = .vertical {
+        didSet { if caretStyle != oldValue { needsDisplay = true } }
+    }
+    var showsWhitespace = false {
+        didSet { if showsWhitespace != oldValue { needsDisplay = true } }
+    }
+
     private var framesetter: CTFramesetter?
     private var textFrame: CTFrame?
     private var layoutWidth: CGFloat = 0
@@ -147,8 +157,21 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
         for (index, line) in lines.enumerated() {
             let origin = origins[index]
+            // A block caret is a highlight, so it belongs under the glyph it
+            // marks. A bar or an underline sits beside or below one and can be
+            // drawn over the top.
+            if caretStyle == .block {
+                drawCaretIfNeeded(line: line, at: origin, in: context)
+            }
             drawColoured(line: line, at: origin, in: context)
-            drawCaretIfNeeded(line: line, at: origin, in: context)
+            if caretStyle != .block {
+                drawCaretIfNeeded(line: line, at: origin, in: context)
+            }
+            if showsWhitespace {
+                drawWhitespaceMarks(
+                    line: line, at: origin, in: context,
+                    isLast: index == lines.count - 1)
+            }
         }
         context.restoreGState()
     }
@@ -216,10 +239,139 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         CTLineGetTypographicBounds(line, &ascent, &descent, nil)
-        let caret = CGRect(
-            x: origin.x + offset - 1, y: origin.y - descent, width: 2, height: ascent + descent)
-        context.setFillColor(Theme.caret.cgColor)
-        context.fill(caret)
+        let x = origin.x + offset
+        let bottom = origin.y - descent
+        let height = ascent + descent
+
+        switch caretStyle {
+        case .vertical:
+            context.setFillColor(Theme.caret.cgColor)
+            context.fill(CGRect(x: x - 1, y: bottom, width: 2, height: height))
+        case .block:
+            // Translucent, and drawn under the glyph rather than over it. A
+            // solid block would have to invert the character to keep it
+            // readable, and an inverted glyph in a passage where colour
+            // already means correct-or-wrong would be one signal too many.
+            context.setFillColor(Theme.caret.withAlphaComponent(0.3).cgColor)
+            context.fill(CGRect(x: x, y: bottom, width: advance(on: line, at: cursor), height: height))
+        case .horizontal:
+            // On the baseline, not the descender line: an underline that sits
+            // below `g` and `y` reads as a separate rule rather than as a
+            // caret under the letter.
+            context.setFillColor(Theme.caret.cgColor)
+            context.fill(
+                CGRect(x: x, y: origin.y - 2, width: advance(on: line, at: cursor), height: 2))
+        }
+    }
+
+    /// The width of the character at `index`, from the line's own offsets.
+    ///
+    /// Measured rather than taken from the font, because the last character of
+    /// a line has no next offset to subtract from — there the trailing edge of
+    /// the line is the answer. The font is monospaced, so a fallback to one
+    /// advance is exact rather than approximate.
+    private func advance(on line: CTLine, at index: Int) -> CGFloat {
+        let here = CTLineGetOffsetForStringIndex(line, index, nil)
+        let next = CTLineGetOffsetForStringIndex(line, index + 1, nil)
+        let width = next - here
+        guard width > 0.5 else {
+            return ("0" as NSString).size(withAttributes: [.font: Theme.typingFont]).width
+        }
+        return width
+    }
+
+    // MARK: - Whitespace marks
+
+    /// Space, tab and line ends, drawn *over* the text rather than in it.
+    ///
+    /// The marks are not characters in the attributed string, and that is the
+    /// whole design. Putting them in the string — even as attributes — changes
+    /// what CoreText measures, so the line height moves the moment they are
+    /// switched on and the passage reflows under the reader. Drawn here they
+    /// are ink on top of a layout that has not changed, so toggling them moves
+    /// nothing.
+    ///
+    /// The three glyphs are the website's, so the same passage reads the same
+    /// way in both. The fourth is this app's own: the website never marks a
+    /// soft wrap.
+    private func drawWhitespaceMarks(
+        line: CTLine, at origin: CGPoint, in context: CGContext, isLast: Bool
+    ) {
+        let range = CTLineGetStringRange(line)
+        guard range.length > 0 else { return }
+        let units = Array(expected.utf16)
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+
+        let font = Theme.typingFont
+        let colour = Theme.whitespaceMark
+        var endsWithHardBreak = false
+
+        for index in range.location..<(range.location + range.length) {
+            guard index < units.count else { break }
+            let mark: String
+            switch units[index] {
+            case 0x20: mark = "·"
+            case 0x09: mark = "→"
+            case 0x0A:
+                // A hard break is the newline actually in the passage. It is
+                // drawn at the end of the line rather than at its own offset,
+                // which is past the visible edge.
+                endsWithHardBreak = true
+                continue
+            default: continue
+            }
+            let x = origin.x + CTLineGetOffsetForStringIndex(line, index, nil)
+            draw(
+                mark, at: CGPoint(x: x, y: origin.y), width: advance(on: line, at: index),
+                font: font, colour: colour, in: context)
+        }
+
+        // The line's own ending. `¶` for a paragraph break the passage
+        // contains, `↵` for a wrap this window's width happens to cause —
+        // the word-processor distinction, and the one the request asked for.
+        // The final line of a passage ends because the text ran out, which is
+        // neither, so it gets nothing.
+        if !isLast || endsWithHardBreak {
+            let trailing = CTLineGetOffsetForStringIndex(line, range.location + range.length, nil)
+            draw(
+                endsWithHardBreak ? "¶" : "↵",
+                at: CGPoint(x: origin.x + trailing, y: origin.y),
+                width: advance(on: line, at: range.location + range.length - 1),
+                font: font, colour: colour, in: context)
+        }
+    }
+
+    /// One mark, centred in the cell it stands for.
+    ///
+    /// Drawn with CoreText, in the flipped space the glyphs are already being
+    /// drawn in. The obvious alternative — `NSAttributedString.draw(at:)` —
+    /// renders through `NSGraphicsContext`, and mixing that with the raw
+    /// `CGContext` transform this method sits inside does not survive a
+    /// save/restore: every line of the passage *after* the first mark came out
+    /// upside down and mirrored. Staying in CoreText means no second
+    /// coordinate system to reconcile.
+    private func draw(
+        _ mark: String, at point: CGPoint, width: CGFloat, font: NSFont, colour: NSColor,
+        in context: CGContext
+    ) {
+        let line = CTLineCreateWithAttributedString(
+            NSAttributedString(
+                string: mark, attributes: [.font: font, .foregroundColor: colour]))
+        let markWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        context.saveGState()
+        context.textPosition = CGPoint(x: point.x + (width - markWidth) / 2, y: point.y)
+        CTLineDraw(line, context)
+        context.restoreGState()
+        // `CTLineDraw` leaves the text matrix as it found it useful, not as it
+        // found it. `draw(_:)` sets the identity matrix once for the whole
+        // frame and `CTFontDrawGlyphs` relies on it — so without this the
+        // glyphs on every line after the first mark were transformed off
+        // screen and the passage appeared to lose its text. Restoring the
+        // graphics state alone does not cover it; the text matrix is not part
+        // of what `saveGState` saves.
+        context.textMatrix = .identity
     }
 
     // MARK: - Input

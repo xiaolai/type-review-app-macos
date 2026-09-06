@@ -127,7 +127,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // here is part of the profile. These are properties of this window on
         // this Mac, and they are stored and validated separately from the
         // settings the website also has.
-        addPane(title: "Window", symbol: "macwindow") { grid in
+        // "Appearance", not "Window": it started as window shape alone and now
+        // also holds how the typing surface itself is drawn. The website calls
+        // its equivalent tab the same thing.
+        addPane(title: "Appearance", symbol: "macwindow") { grid in
+            self.addRow(
+                grid, "Caret", self.caretPopup(),
+                hint: "The shape of the cursor on the typing surface.")
+            self.addRow(
+                grid, "Show invisibles", self.whitespaceToggle(),
+                hint: "space · tab → wrap ↵ paragraph ¶")
             self.addRow(
                 grid, "Characters per line", self.preferenceStepper(AppPreferences.columns),
                 hint: "The window is sized to fit exactly this many.")
@@ -315,6 +324,28 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             AppPreferences.drawerSeconds.value = choices[popup.indexOfSelectedItem].1
         }
         return popup
+    }
+
+    /// Caret shape. Applies live — the view redraws and the run is untouched.
+    private func caretPopup() -> NSControl {
+        let popup = NSPopUpButton()
+        let styles = AppPreferences.CaretStyle.allCases
+        popup.addItems(withTitles: styles.map(\.label))
+        popup.selectItem(at: styles.firstIndex(of: AppPreferences.caretStyle.value) ?? 0)
+        bind(popup) {
+            let index = popup.indexOfSelectedItem
+            guard index >= 0, index < styles.count else { return }
+            AppPreferences.caretStyle.value = styles[index]
+        }
+        return popup
+    }
+
+    /// Whether spaces, tabs and line ends are marked.
+    private func whitespaceToggle() -> NSControl {
+        let toggle = NSSwitch()
+        toggle.state = AppPreferences.showWhitespace.value ? .on : .off
+        bind(toggle) { AppPreferences.showWhitespace.value = toggle.state == .on }
+        return toggle
     }
 
     /// The sound packs, by label. Writes immediately rather than on close —

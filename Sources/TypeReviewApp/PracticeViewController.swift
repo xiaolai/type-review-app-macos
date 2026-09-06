@@ -159,6 +159,7 @@ final class PracticeViewController: NSViewController {
             self.sounds.play(category: category, pan: KeyPan.pan(forKeyCode: code))
         }
         applySoundPreferences()
+        applyTypingPreferences()
         typingView.onConfirm = { [weak self] in self?.startFreshRun() }
         start()
     }
@@ -378,6 +379,14 @@ extension PracticeViewController {
     /// again whenever the Settings window changes them, so a pack or volume
     /// picked mid-run takes effect on the very next keystroke rather than at
     /// the next launch.
+    /// Caret shape and whitespace marks. Both are pure presentation — the
+    /// view redraws and nothing about the run changes — so they apply live
+    /// rather than at the next passage.
+    func applyTypingPreferences() {
+        typingView.caretStyle = AppPreferences.caretStyle.value
+        typingView.showsWhitespace = AppPreferences.showWhitespace.value
+    }
+
     func applySoundPreferences() {
         sounds.setPack(AppPreferences.soundPack.value)
         sounds.setVolume(AppPreferences.soundVolume.value)
