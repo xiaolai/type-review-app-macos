@@ -115,7 +115,14 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
     override func draw(_ dirtyRect: NSRect) {
         Theme.background.setFill()
-        dirtyRect.fill()
+        // `bounds`, not `dirtyRect`. AppKit is free to hand a view a dirty
+        // rect larger than its own bounds — it passes the union of what needs
+        // redrawing — and NSView does not clip drawing to bounds by default.
+        // Filling the dirty rect therefore painted the background over
+        // whatever sat above this view, which is why the header of live
+        // numbers was invisible from the first day this view existed: it was
+        // there, laid out correctly, and covered.
+        bounds.fill()
         ensureLayout()
         guard let textFrame, let context = NSGraphicsContext.current?.cgContext else { return }
 

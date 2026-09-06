@@ -257,6 +257,25 @@ The generators remain the fallback and always will be. A six-letter lesson has
 no real sentence available, and a timed run needs more text than any quote
 holds — so "no passage" is never an outcome the app can reach.
 
+## What a view test cannot see
+
+The header of live numbers — wpm, accuracy, mode — was invisible from the day
+the app was written. Not hidden, not misplaced, not mis-coloured: it was laid
+out at the right point, in the hierarchy, `isHidden == false`, `alphaValue ==
+1`, with the right text and the right colour. Every property a test could
+assert from the view tree was correct while the pixels were blank.
+
+The typing view below it filled its **dirty rect** rather than its **bounds**,
+and AppKit does not clip a view's drawing to its own bounds — it hands a view
+whatever rect needs redrawing, which can be bigger. So the passage's white
+background was painted over the header, every frame.
+
+Nothing but the pixels can catch that, so the selftest now looks at them: it
+renders the practice view into a bitmap, finds the label whose text ends in
+"wpm", and requires that its rectangle contains pixels differing from the
+background. Restoring the dirty-rect fill reports `only 0 of its pixels differ
+from the background — it is covered`.
+
 ## The keyboard drawer
 
 `⌘K` slides the keyboard out of the bottom of the window and back in. Full

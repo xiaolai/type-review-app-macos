@@ -251,6 +251,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // The header of live numbers must actually reach the screen.
+            //
+            // It did not, for the whole life of this app: laid out correctly,
+            // in the hierarchy, not hidden, with the right text and colour —
+            // and painted over, because the typing view filled its dirty rect
+            // rather than its bounds and AppKit does not clip a view's drawing
+            // to its own bounds. Every property that can be asserted from the
+            // view tree was true while the pixels were blank, so the only
+            // check that can catch it is a look at the pixels.
+            let allLabels = practice.view.subviews
+                .compactMap { $0 as? NSStackView }
+                .flatMap(\.views)
+                .compactMap { $0 as? NSTextField }
+            guard let wpmLabel = allLabels.first(where: { $0.stringValue.hasSuffix("wpm") }) else {
+                print("SELFTEST FAIL: no wpm label in the header")
+                exit(1)
+            }
+            let root = practice.view
+            guard let bitmap = root.bitmapImageRepForCachingDisplay(in: root.bounds) else {
+                print("SELFTEST FAIL: could not render the practice view")
+                exit(1)
+            }
+            root.cacheDisplay(in: root.bounds, to: bitmap)
+            let labelRect = wpmLabel.convert(wpmLabel.bounds, to: root)
+            let scale = CGFloat(bitmap.pixelsWide) / max(root.bounds.width, 1)
+            // Raw bytes rather than `colorAt(x:y:)`, which raises on bitmap
+            // formats it does not recognise — including the one AppKit hands
+            // back for a cached display.
+            guard let bytes = bitmap.bitmapData, bitmap.samplesPerPixel >= 3 else {
+                print("SELFTEST FAIL: rendered bitmap has no readable pixels")
+                exit(1)
+            }
+            let rowBytes = bitmap.bytesPerRow
+            let step = bitmap.samplesPerPixel
+            // The bitmap counts rows from the top; the view does not.
+            let top = Int((root.bounds.height - labelRect.maxY) * scale)
+            let background = Theme.background.usingColorSpace(.deviceRGB)?.brightnessComponent ?? 1
+            let firstRow = max(0, top)
+            let lastRow = min(bitmap.pixelsHigh, top + Int(labelRect.height * scale))
+            let firstColumn = max(0, Int(labelRect.minX * scale))
+            let lastColumn = min(bitmap.pixelsWide, Int(labelRect.maxX * scale))
+            let rows: Range<Int> = firstRow..<max(firstRow, lastRow)
+            let columns: Range<Int> = firstColumn..<max(firstColumn, lastColumn)
+            var inked = 0
+            for y in rows {
+                for x in columns {
+                    let offset = y * rowBytes + x * step
+                    let brightness =
+                        (CGFloat(bytes[offset]) + CGFloat(bytes[offset + 1])
+                            + CGFloat(bytes[offset + 2])) / (3 * 255)
+                    if abs(brightness - background) > 0.15 { inked += 1 }
+                }
+            }
+            guard inked > 20 else {
+                print(
+                    "SELFTEST FAIL: the header reads \"\(wpmLabel.stringValue)\" but only "
+                        + "\(inked) of its pixels differ from the background — it is covered")
+                exit(1)
+            }
+
             // The library round-trip, through the real file store: add,
             // reload from disk, confirm the corpus serves it, delete. The unit
             // tests cover the parser and the picker; only this can tell
