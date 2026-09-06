@@ -22,7 +22,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// what it sounds like, so choosing one plays it.
     var previewSound: () -> Void = {}
 
-    private let tabs = NSTabViewController()
+    private let tabs = SettingsTabViewController()
     private var controls: [String: NSControl] = [:]
     /// Every row a setting owns — its control row and, when it has one, the
     /// caption beneath. Hiding a setting has to hide both, or a stray line of
@@ -513,12 +513,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return StackControl(numberRow(field, stepper))
     }
 
-    /// A number field with its stepper beside it, spaced the way AppKit spaces
-    /// them elsewhere.
+    /// A number field with its stepper, drawn as one control.
+    ///
+    /// Two fixes to what AppKit gives you by default, both visible in a
+    /// screenshot. The stepper sat three points clear of the field, which made
+    /// the value and the thing that changes it read as two separate controls
+    /// that happened to be adjacent. And `NSStepper` is intrinsically taller
+    /// than `NSTextField` at the same control size, so it stood proud of the
+    /// field above and below — the row looked misaligned rather than paired.
+    ///
+    /// Flush, and pinned to the field's height, so it reads as one input with
+    /// its own increment control.
     private func numberRow(_ field: NSTextField, _ stepper: NSStepper) -> NSStackView {
         let row = NSStackView(views: [field, stepper])
-        row.spacing = 3
+        row.spacing = 0
         row.alignment = .centerY
+        stepper.heightAnchor.constraint(equalTo: field.heightAnchor).isActive = true
         return row
     }
 
@@ -663,4 +673,86 @@ private final class StackControl: NSControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
+}
+
+/// The tab controller, with the window resize animated to match the crossfade.
+///
+/// The panes are different heights — Practice is 554 points tall and Data is
+/// 188 — so switching tabs changes the window's height by up to 366. AppKit
+/// crossfades the *views* for you and snaps the *window* to its new size in
+/// one frame, and the two together read as a flash rather than as a
+/// transition: the content dissolves politely inside a window that has already
+/// jumped.
+///
+/// Animating the frame over the same duration is what makes it one movement.
+/// The top edge is pinned, because a settings window that grows from its
+/// title bar downward is what every other one on the system does — letting
+/// macOS keep the bottom edge instead would walk the title bar up the screen
+/// on every click.
+final class SettingsTabViewController: NSTabViewController {
+    /// Matched to the crossfade AppKit runs for `.crossfade`, so neither
+    /// finishes visibly before the other.
+    private static let duration: TimeInterval = 0.2
+
+    override func transition(
+        from fromViewController: NSViewController, to toViewController: NSViewController,
+        options: NSViewController.TransitionOptions = [],
+        // `@Sendable` to match what AppKit declares. Without it every call to
+        // `super` warns about handing a non-Sendable closure to a Sendable
+        // parameter — the override is the place to state the contract, not
+        // three call sites downstream.
+        completionHandler completion: (@Sendable () -> Void)? = nil
+    ) {
+        guard let window = view.window else {
+            super.transition(
+                from: fromViewController, to: toViewController, options: options,
+                completionHandler: completion)
+            return
+        }
+
+        let target = toViewController.preferredContentSize
+        guard target.height > 0 else {
+            super.transition(
+                from: fromViewController, to: toViewController, options: options,
+                completionHandler: completion)
+            return
+        }
+        let content = window.contentRect(forFrameRect: window.frame)
+        var frame = window.frameRect(
+            forContentRect: NSRect(origin: content.origin, size: target))
+        frame.origin.y = window.frame.maxY - frame.height
+
+        // Order depends on the direction, and getting it wrong is visible.
+        //
+        // Both panes are in the view hierarchy while the crossfade runs, so
+        // the window cannot shrink below the taller one: animating a shrink
+        // first ran the window down to the new height and then let it snap
+        // straight back to the old one — measurably, 554 → 191 → 554. Growing
+        // has no such conflict.
+        //
+        // So: grow before the crossfade, shrink after it. Either way the
+        // window is never asked to be smaller than what it currently holds.
+        let isGrowing = frame.height >= window.frame.height
+        if isGrowing { animate(to: frame) }
+        // Only Sendable values cross into the completion handler — a `CGRect`,
+        // a `Bool`, and `self` weakly. Capturing a local closure there is what
+        // the compiler objects to, and rightly.
+        super.transition(
+            from: fromViewController, to: toViewController, options: options
+        ) { [weak self] in
+            MainActor.assumeIsolated {
+                if !isGrowing { self?.animate(to: frame) }
+                completion?()
+            }
+        }
+    }
+
+    private func animate(to frame: NSRect) {
+        guard let window = view.window else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(frame, display: true)
+        }
+    }
 }
