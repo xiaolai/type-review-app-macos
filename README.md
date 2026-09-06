@@ -204,6 +204,13 @@ than a traced approximation of them, and the menu-bar one is a template image
 so macOS inverts it for a dark bar and dims it when the bar is inactive — the
 two things a hand-tinted image gets wrong.
 
+The menu-bar symbol is sized explicitly. A symbol's default configuration
+sizes by cap height, and `keyboard.badge.ellipsis` is a wide, short mark — at
+the default it drew 19 by 11 points of ink and was the shortest thing in the
+bar, against neighbours running 12 to 15.5. `.large` at 13 points brings it to
+24 by 13.5: as tall as the taller neighbours, two points wider than the widest.
+The numbers come from measuring the rendered menu bar, not from the API.
+
 `Tools/make-icon.swift` draws the app icon; `make icon` runs it through
 `iconutil`. The `.icns` is committed, so an ordinary build needs neither, but
 the artwork stays reproducible and changing it is an edit to code.

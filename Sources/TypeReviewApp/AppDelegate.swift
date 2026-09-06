@@ -82,8 +82,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// what someone reaches for when TYPE is not the front app.
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        // Sized explicitly. Left at its default the symbol draws 19 by 11
+        // points of ink, which is the shortest thing in the menu bar — its
+        // neighbours run 12 to 15.5 tall — because `keyboard.badge.ellipsis`
+        // is a wide, short mark and the default configuration sizes by cap
+        // height. `.large` at 13 points brings the ink to roughly 24 by 14,
+        // matching the taller neighbours and a hair wider than the widest.
         let image = NSImage(
-            systemSymbolName: "keyboard.badge.ellipsis", accessibilityDescription: "TYPE")
+            systemSymbolName: "keyboard.badge.ellipsis", accessibilityDescription: "TYPE"
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .regular, scale: .large))
         image?.isTemplate = true
         item.button?.image = image
         item.button?.toolTip = "TYPE"
