@@ -321,16 +321,22 @@ final class KeyboardView: NSView {
         }
     }
 
-    /// The round button, as an outlined circle at two thirds of the cap. A
-    /// drawn circle rather than a glyph: no font places one predictably.
+    /// The round button, as a thin outlined circle. A drawn circle rather than
+    /// a glyph: no font places one predictably.
+    ///
+    /// Both the ring's width and its weight are deliberately small. The stroke
+    /// scales with the key, so a width that looked right on a 20-point cap
+    /// becomes a three-point band on a 54-point one — the button ended up
+    /// heavier than every letter on the keyboard, when on the real thing it is
+    /// the quietest thing in the row.
     private func drawTouchID(in rect: NSRect, unit: CGFloat) {
-        let diameter = min(rect.width, rect.height) * 0.666
+        let diameter = min(rect.width, rect.height) * 0.52
         let circle = NSBezierPath(
             ovalIn: NSRect(
                 x: rect.midX - diameter / 2, y: rect.midY - diameter / 2,
                 width: diameter, height: diameter))
-        circle.lineWidth = max(1, unit * 0.06)
-        Theme.secondaryText.withAlphaComponent(0.55).setStroke()
+        circle.lineWidth = max(0.75, unit * 0.022)
+        Theme.secondaryText.withAlphaComponent(0.3).setStroke()
         circle.stroke()
     }
 
