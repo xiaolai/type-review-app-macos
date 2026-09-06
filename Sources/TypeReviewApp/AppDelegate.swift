@@ -209,6 +209,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         + "\(BundledCorpus.code.entries.count) code entries")
                 exit(1)
             }
+            // The case must sit the same distance from the caps on all four
+            // sides. This was wrong until it was measured: the inter-key gap
+            // was being applied after the last key too, so the right and
+            // bottom margins were a gap wider than the left and top.
+            let keyboardLayout = KeyboardView().layout(forWidth: 900)
+            let capsRect = keyboardLayout.keys.dropFirst().reduce(keyboardLayout.keys[0].rect) {
+                $0.union($1.rect)
+            }
+            let margins = [
+                capsRect.minX - keyboardLayout.caseRect.minX,
+                keyboardLayout.caseRect.maxX - capsRect.maxX,
+                capsRect.minY - keyboardLayout.caseRect.minY,
+                keyboardLayout.caseRect.maxY - capsRect.maxY,
+            ]
+            guard let tightest = margins.min(), let widest = margins.max(),
+                widest - tightest < 0.5, tightest > 0
+            else {
+                print("SELFTEST FAIL: keyboard margins are \(margins) — expected four equal")
+                exit(1)
+            }
+
             // No key on any keyboard shape may be narrower than a key can be.
             //
             // Row totals are `unitsPerRow` by construction — the last key

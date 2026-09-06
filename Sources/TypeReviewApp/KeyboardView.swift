@@ -58,9 +58,7 @@ final class KeyboardView: NSView {
     }
 
     func height(forWidth width: CGFloat) -> CGFloat {
-        let unit = unitWidth(for: width)
-        let rows = CGFloat(KeyboardGeometry.rows(for: SystemKeyboard.shape).count)
-        return ceil(unit * rows + 2 * casePadding(unit) + 2)
+        ceil(layout(forWidth: width).caseRect.maxY + 1)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -78,22 +76,60 @@ final class KeyboardView: NSView {
         return floor(min(Self.maxUnit, max(Self.minUnit, raw)))
     }
 
-    private func casePadding(_ unit: CGFloat) -> CGFloat { (unit * 0.35).rounded() }
+    private func casePadding(_ unit: CGFloat) -> CGFloat { max(4, (unit * 0.2).rounded()) }
 
-    override func draw(_ dirtyRect: NSRect) {
+    private func keyGap(_ unit: CGFloat) -> CGFloat { max(3, (unit * 0.1).rounded()) }
+
+    /// Where everything goes, for a given available width.
+    ///
+    /// Shared with the selftest rather than recomputed there: a check that
+    /// re-derives the layout from the same formula proves only that the
+    /// formula equals itself. This way the check measures the rectangles the
+    /// view actually draws.
+    struct Layout {
+        let caseRect: NSRect
+        let unit: CGFloat
+        let keys: [(key: KeyboardGeometry.Key, rect: NSRect)]
+    }
+
+    func layout(forWidth width: CGFloat) -> Layout {
         let rows = KeyboardGeometry.rows(for: SystemKeyboard.shape)
-        let unit = unitWidth(for: bounds.width)
+        let unit = unitWidth(for: width)
         let padding = casePadding(unit)
-        let gap = max(3, (unit * 0.1).rounded())
-        let caseWidth = unit * CGFloat(KeyboardGeometry.unitsPerRow) + 2 * padding
-        let caseHeight = unit * CGFloat(rows.count) + 2 * padding
+        let gap = keyGap(unit)
+        // The gap belongs *between* caps, so the case gives back the one
+        // trailing gap on each axis. Without this the right and bottom margins
+        // are a full gap wider than the left and top — small, consistent, and
+        // exactly the kind of asymmetry the eye reads as "not quite right"
+        // without being able to name it.
+        let caseWidth = unit * CGFloat(KeyboardGeometry.unitsPerRow) + 2 * padding - gap
+        let caseHeight = unit * CGFloat(rows.count) + 2 * padding - gap
         // Centred rather than stretched: a keyboard is a fixed object, and one
         // that changes shape with the window stops looking like hardware.
-        let origin = NSPoint(x: ((bounds.width - caseWidth) / 2).rounded(), y: 1)
-        let caseRect = NSRect(x: origin.x, y: origin.y, width: caseWidth, height: caseHeight)
+        let caseRect = NSRect(
+            x: ((width - caseWidth) / 2).rounded(), y: 1, width: caseWidth, height: caseHeight)
 
+        var placed: [(KeyboardGeometry.Key, NSRect)] = []
+        var y = caseRect.minY + padding
+        for row in rows {
+            var x = caseRect.minX + padding
+            for key in row where key.width > 0 {
+                let width = unit * CGFloat(key.width)
+                placed.append(
+                    (key.key, NSRect(x: x, y: y, width: width - gap, height: unit - gap)))
+                x += width
+            }
+            y += unit
+        }
+        return Layout(caseRect: caseRect, unit: unit, keys: placed)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let layout = layout(forWidth: bounds.width)
+
+        let radius = layout.unit * 0.35
         let casePath = NSBezierPath(
-            roundedRect: caseRect, xRadius: unit * 0.35, yRadius: unit * 0.35)
+            roundedRect: layout.caseRect, xRadius: radius, yRadius: radius)
         // Apple's body is silver against white caps — a quiet frame, not a
         // dark tray. `underPageBackgroundColor` reads as the latter and turned
         // the keyboard into the loudest thing on the screen.
@@ -103,16 +139,8 @@ final class KeyboardView: NSView {
         casePath.lineWidth = 1
         casePath.stroke()
 
-        var y = caseRect.minY + padding
-        for row in rows {
-            var x = caseRect.minX + padding
-            for placed in row where placed.width > 0 {
-                let width = unit * CGFloat(placed.width)
-                let rect = NSRect(x: x, y: y, width: width - gap, height: unit - gap)
-                draw(placed.key, in: rect, unit: unit)
-                x += width
-            }
-            y += unit
+        for placed in layout.keys {
+            draw(placed.key, in: placed.rect, unit: layout.unit)
         }
     }
 
@@ -140,18 +168,16 @@ final class KeyboardView: NSView {
         // The character this physical key types under the *current* layout.
         let character = key.types ? SystemKeyboard.character(forKeyCode: key.code) : nil
         if let tint = heat(for: key, character: character), !isPressed {
-            tint.setFill()
-            face.fill()
+            glaze(face, tint.color, strength: tint.strength)
         }
         if let expected, let character, character == expected, !isPressed {
-            // The drilling target. An inside fill rather than a ring, so the
-            // heat underneath is still readable.
-            Theme.caret.withAlphaComponent(0.22).setFill()
-            face.fill()
+            // The drilling target. Laid over the heat rather than replacing it
+            // — a ring or a border would say "next" while hiding "how is this
+            // key going", and both are worth knowing at once.
+            glaze(face, Theme.caret, strength: 0.20)
         }
         if isPressed {
-            Theme.caret.withAlphaComponent(0.22).setFill()
-            face.fill()
+            glaze(face, Theme.caret, strength: 0.30)
         }
 
         if key.role == .touchID {
@@ -238,26 +264,56 @@ final class KeyboardView: NSView {
         circle.stroke()
     }
 
+    /// A pane of tinted glass over the cap.
+    ///
+    /// Flat colour at the alpha these tints need reads as paint — the cap
+    /// stops being white plastic and becomes a coloured tile, and eleven
+    /// coloured tiles are louder than the text they are supposed to annotate.
+    /// A vertical ramp from nearly clear at the top to `strength` at the
+    /// bottom reads instead as something laid *over* the cap: the cap is still
+    /// white, and the colour is a property of the light on it.
+    private func glaze(_ face: NSBezierPath, _ color: NSColor, strength: CGFloat) {
+        guard
+            let gradient = NSGradient(
+                starting: color.withAlphaComponent(strength * 0.35),
+                ending: color.withAlphaComponent(strength))
+        else {
+            color.withAlphaComponent(strength).setFill()
+            face.fill()
+            return
+        }
+        // -90 in a flipped view puts the light end at the top.
+        gradient.draw(in: face, angle: -90)
+    }
+
     /// Heat by speed, with error rate overriding it.
     ///
     /// Speed and accuracy are different problems and a single colour ramp
     /// cannot say both. A key you hit slowly is warm; a key you keep getting
     /// wrong is red regardless of how fast you get it wrong.
-    private func heat(for key: KeyboardGeometry.Key, character: String?) -> NSColor? {
+    ///
+    /// Strengths are deliberately low. This is an annotation on a keyboard,
+    /// not a chart: it has to be readable at a glance and invisible when you
+    /// are looking at the passage instead.
+    private func heat(
+        for key: KeyboardGeometry.Key, character: String?
+    ) -> (color: NSColor, strength: CGFloat)? {
         guard key.types, let character, let stat = stats[character], stat.hits >= 5
         else { return nil }
         if stat.errorRate > 0.05 {
-            return Theme.incorrect.withAlphaComponent(min(0.55, 0.15 + stat.errorRate * 2))
+            return (Theme.incorrect, min(0.30, 0.08 + CGFloat(stat.errorRate)))
         }
         // Confidence, the same ratio the planner uses to decide mastery: at or
         // above 1 the key is at target and stays cool; below it warms.
         let confidence = targetMs / max(stat.avgMs, 1)
         if confidence >= 1 {
-            return NSColor.systemTeal.withAlphaComponent(min(0.34, 0.12 + (confidence - 1) * 0.2))
+            return (.systemTeal, min(0.18, 0.07 + CGFloat(confidence - 1) * 0.11))
         }
-        let deficit = min(1, 1 - confidence)
-        return NSColor(
-            calibratedHue: 0.12 - 0.12 * deficit, saturation: 0.62, brightness: 0.95,
-            alpha: 0.18 + 0.30 * deficit)
+        let deficit = CGFloat(min(1, 1 - confidence))
+        return (
+            NSColor(
+                calibratedHue: 0.12 - 0.12 * deficit, saturation: 0.5, brightness: 0.92, alpha: 1),
+            0.09 + 0.17 * deficit
+        )
     }
 }

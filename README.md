@@ -229,6 +229,12 @@ leaves its absorber less than three quarters of a unit; it caught the JIS
 bottom row overflowing by 1.5u the first time it ran. Checking the row
 *totals* would have proved nothing — they are 15 by construction.
 
+The tints are drawn as glass, not paint: each is a vertical ramp from nearly
+clear at the top to its full strength at the bottom, at strengths low enough
+that the cap still reads as white plastic with coloured light on it. Flat fill
+at any useful opacity turns the cap into a coloured tile, and a dozen coloured
+tiles shout over the passage they are supposed to annotate.
+
 Keys are tinted by confidence against the user's target speed rather than
 relative to their own slowest key. A relative scale paints the whole keyboard
 warm the moment timings cluster, and answers "which key is worst" when the
