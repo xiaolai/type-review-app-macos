@@ -29,7 +29,6 @@ public let maxUserTitleLength = 200
 public enum UserPassageError: Error, Equatable {
     case empty
     case full
-    case duplicateID(String)
 }
 
 /// Normalises a candidate passage the way the web store's `add` does:
@@ -39,15 +38,28 @@ public enum UserPassageError: Error, Equatable {
 public func makeUserPassage(
     id: String, title: String, text: String, createdAt: Double
 ) throws -> UserPassage {
-    let cleanText = String(text.prefix(maxUserPassageLength))
+    // UTF-16 units, not Characters. Every other length in this engine is
+    // counted in code units — it is the coordinate system the web store shares
+    // — and `String.prefix` counts grapheme clusters, so text built from
+    // combining marks kept more units than the advertised cap and the two
+    // implementations disagreed about where the same paste was truncated.
+    let cleanText = prefixByCodeUnits(text, maxUserPassageLength)
     guard !cleanText.isEmpty else { throw UserPassageError.empty }
     let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    let cleanTitle = String(trimmed.prefix(maxUserTitleLength))
+    let cleanTitle = prefixByCodeUnits(trimmed, maxUserTitleLength)
     return UserPassage(
         id: id,
-        title: cleanTitle.isEmpty ? String(cleanText.prefix(40)) : cleanTitle,
+        title: cleanTitle.isEmpty ? prefixByCodeUnits(cleanText, 40) : cleanTitle,
         text: cleanText,
         createdAt: createdAt)
+}
+
+/// The first `count` UTF-16 code units of `string`, matching JavaScript's
+/// `String.prototype.slice`.
+private func prefixByCodeUnits(_ string: String, _ count: Int) -> String {
+    let units = Array(string.utf16)
+    guard units.count > count else { return string }
+    return String(utf16CodeUnits: Array(units.prefix(count)), count: count)
 }
 
 /// The library as a corpus source.

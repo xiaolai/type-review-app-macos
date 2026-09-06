@@ -165,7 +165,11 @@ public func streak(
     let sorted = days.sorted()
     var longest = 1
     var run = 1
-    for index in 1..<max(sorted.count, 1) where sorted.count > 1 {
+    // The guard above proves `results` is non-empty, so `sorted` holds at
+    // least one day and `1..<sorted.count` is either empty or valid. The
+    // `max(_:1)` and the `where` clause defended against a case that cannot
+    // reach here.
+    for index in 1..<sorted.count {
         if addOneDay(sorted[index - 1], calendar: calendar) == sorted[index] {
             run += 1
             longest = max(longest, run)

@@ -37,9 +37,8 @@ public func buildAlphabet(_ settings: ProfileSettings) -> [String] {
 /// Drops UTF-16 surrogate halves. Pasted prose easily contains an emoji, and
 /// refusing the whole paste over one is worse than dropping it.
 func stripSurrogates(_ string: String) -> String {
-    String(
-        utf16CodeUnits: Array(string.utf16).filter { !(0xD800...0xDFFF).contains($0) },
-        count: Array(string.utf16).filter { !(0xD800...0xDFFF).contains($0) }.count)
+    let units = string.utf16.filter { !(0xD800...0xDFFF).contains($0) }
+    return String(utf16CodeUnits: units, count: units.count)
 }
 
 public struct SessionSnapshot {
@@ -77,6 +76,14 @@ public final class Session {
     private var lastResult: RunResult?
     /// Mode captured at `start()`. May lag the settings until the next start.
     private var activeMode: Mode = .adaptive
+    /// Benchmark shape captured at `start()`, for the same reason as
+    /// `activeMode`: `stageSettings` promises a mid-run change takes effect on
+    /// the next run, and reading `profile.settings` live broke that promise for
+    /// the one setting where it is most visible — switching to word mode
+    /// mid-run stopped the running clock, and shortening the duration ended the
+    /// run instantly.
+    private var activeTestMode: TestMode = .words
+    private var activeTestDurationSec: Double = 30
     /// Latched by the keystroke that ends the run and cleared by `start()`.
     /// Without it, time-mode completion re-fires on every later keystroke —
     /// `TextInput.completed` tracks the cursor, not the clock — and each one
@@ -106,18 +113,29 @@ public final class Session {
     }
 
     /// Builds the plan, sources fresh text, resets typing state.
+    ///
+    /// Every throwing step runs against locals, and session state is replaced
+    /// only once they have all succeeded. Assigning as it went left a failed
+    /// start half-applied: `runCompleted` was already false and the *previous*
+    /// `TextInput` was still installed, so the run the user was in the middle
+    /// of became completable a second time and recorded a duplicate result
+    /// against the new plan.
     public func start() throws {
         let settings = profile.settings
-        lastResult = nil
-        runCompleted = false
-        activeMode = settings.mode
+        let nextPlan: LessonPlan?
+        let nextPassage: Passage
+        // The RNG is session state like any other, and the source closures take
+        // it `inout` — so a source that draws and then throws had already
+        // advanced the stream. Generating against a copy keeps a failed start
+        // from consuming draws the next one should have made.
+        var nextRNG = rng
 
         if settings.mode == .adaptive {
             let plan = buildPlan()
-            self.plan = plan
+            nextPlan = plan
             let filter = Filter(allowed: plan.included, focus: plan.focus)
-            passage = try adaptiveSource.map {
-                try $0(filter, Int(settings.wordCount), settings.passageLength, &rng)
+            nextPassage = try adaptiveSource.map {
+                try $0(filter, Int(settings.wordCount), settings.passageLength, &nextRNG)
             }
                 // The default source ignores passageLength: pseudo-words honour
                 // the word count directly, and the bucket only matters to
@@ -125,23 +143,33 @@ public final class Session {
                 ?? generatePseudoWords(
                     filter: filter,
                     options: PseudoWordOptions(wordCount: Int(settings.wordCount)),
-                    rng: &rng)
+                    rng: &nextRNG)
         } else {
-            plan = nil
+            nextPlan = nil
             let words =
                 settings.testMode == .time
                 ? timeModeWordBudget(settings.testDurationSec) : Int(settings.wordCount)
-            passage = try benchmarkSource.map { try $0(words, settings, &rng) }
+            nextPassage = try benchmarkSource.map { try $0(words, settings, &nextRNG) }
                 ?? generatePlainWords(
                     options: PlainWordsOptions(
                         wordCount: words, includeNumbers: settings.includeNumbers,
                         includePunctuation: settings.includePunctuation),
-                    rng: &rng)
+                    rng: &nextRNG)
         }
 
-        textInput = try TextInput(
-            expected: passage!.text, stopOnError: settings.stopOnError,
+        let nextInput = try TextInput(
+            expected: nextPassage.text, stopOnError: settings.stopOnError,
             noBackspace: settings.noBackspace)
+
+        rng = nextRNG
+        lastResult = nil
+        runCompleted = false
+        activeMode = settings.mode
+        activeTestMode = settings.testMode
+        activeTestDurationSec = settings.testDurationSec
+        plan = nextPlan
+        passage = nextPassage
+        textInput = nextInput
     }
 
     public func restart() throws { try start() }
@@ -152,14 +180,23 @@ public final class Session {
     public func startWithText(_ text: String) throws {
         let cleaned = stripSurrogates(text).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
+        // Same commit-last discipline as `start()`: `makePassage` and
+        // `TextInput` both throw, and a half-applied custom run would leave the
+        // previous one recordable again.
+        let nextPassage = try makePassage(
+            id: "custom:\(JSONWriter.stringify(.fromDouble(now())))", text: cleaned)
+        let nextInput = try TextInput(
+            expected: cleaned, stopOnError: profile.settings.stopOnError,
+            noBackspace: profile.settings.noBackspace)
+
         lastResult = nil
         runCompleted = false
         activeMode = profile.settings.mode
+        activeTestMode = profile.settings.testMode
+        activeTestDurationSec = profile.settings.testDurationSec
         plan = nil
-        passage = try makePassage(id: "custom:\(JSONWriter.stringify(.fromDouble(now())))", text: cleaned)
-        textInput = try TextInput(
-            expected: cleaned, stopOnError: profile.settings.stopOnError,
-            noBackspace: profile.settings.noBackspace)
+        passage = nextPassage
+        textInput = nextInput
     }
 
     /// Feeds one character. Records a result on the transition to completion.
@@ -171,8 +208,8 @@ public final class Session {
         if runCompleted { return .completed }
 
         var feedback = textInput.appendChar(character, timeStamp: timeStamp)
-        if feedback == .running, activeMode == .benchmark, profile.settings.testMode == .time,
-            textInput.elapsedMs >= profile.settings.testDurationSec * 1000
+        if feedback == .running, activeMode == .benchmark, activeTestMode == .time,
+            textInput.elapsedMs >= activeTestDurationSec * 1000
         {
             feedback = .completed
         }
@@ -208,10 +245,9 @@ public final class Session {
         guard let textInput else { throw SessionError.noActiveRun }
         let typing = textInput.snapshot()
         let elapsedMs = textInput.elapsedMs
-        let settings = profile.settings
         let remainingSec =
-            settings.testMode == .time && activeMode == .benchmark
-            ? max(0, settings.testDurationSec - elapsedMs / 1000) : nil
+            activeTestMode == .time && activeMode == .benchmark
+            ? max(0, activeTestDurationSec - elapsedMs / 1000) : nil
 
         return SessionSnapshot(
             mode: activeMode,
@@ -238,7 +274,11 @@ public final class Session {
         guard let passage else { throw SessionError.completedWithoutPassage }
         let typing = textInput.snapshot()
         // Monotonic: survives history trimming so identifiers are never reused.
-        let nextIndex = (profile.results.last?.index ?? -1) + 1
+        // Taken from the maximum rather than the last entry, because the
+        // deserializer accepts any non-negative index in any order — a profile
+        // whose final result is not its highest-numbered one would otherwise
+        // hand the next run an index that already exists.
+        let nextIndex = (profile.results.map(\.index).max() ?? -1) + 1
         let result = RunResult(
             index: nextIndex,
             mode: activeMode,

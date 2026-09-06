@@ -76,16 +76,28 @@ public struct RunMetrics: Sendable, Equatable {
 
 /// Consistency from the per-second binning.
 public func computeConsistency(_ steps: [Step]) -> Double {
-    let perSecond = binBySecond(steps).map(\.rawWpm)
-    let m = Stats.mean(perSecond)
-    guard !perSecond.isEmpty, m > 0 else { return 0 }
-    return Stats.roundTo2(Stats.kogasa(Stats.stdDev(perSecond) / m))
+    consistency(ofSeries: binBySecond(steps).map(\.rawWpm))
 }
 
 /// The ± figure on the results screen. Raw WPM rather than net, so it stays a
 /// pure measure of speed variance and does not fold accuracy into the spread.
 public func computeWpmStdDev(_ steps: [Step]) -> Double {
-    let perSecond = binBySecond(steps).map(\.rawWpm)
+    wpmStdDev(ofSeries: binBySecond(steps).map(\.rawWpm))
+}
+
+// Both figures are functions of the per-second series and nothing else, so
+// they are expressed over the series rather than over the steps. `binBySecond`
+// walks every keystroke and allocates a dictionary; `computeRunMetrics` used
+// to pay for that three times per completed run — once here, once for the
+// standard deviation, and once more to keep the series itself.
+
+private func consistency(ofSeries perSecond: [Double]) -> Double {
+    let m = Stats.mean(perSecond)
+    guard !perSecond.isEmpty, m > 0 else { return 0 }
+    return Stats.roundTo2(Stats.kogasa(Stats.stdDev(perSecond) / m))
+}
+
+private func wpmStdDev(ofSeries perSecond: [Double]) -> Double {
     guard perSecond.count >= 2 else { return 0 }
     return JSMath.round(Stats.stdDev(perSecond) * 10) / 10
 }
@@ -109,13 +121,15 @@ public func computeRunMetrics(
         steps.isEmpty
         ? 100 : Stats.roundTo2(Double(correctSteps) / Double(steps.count) * 100)
 
+    let series = binBySecond(steps).map(\.rawWpm)
+
     return RunMetrics(
         netWpm: netWpm,
         rawWpm: rawWpm,
         accuracy: accuracy,
-        consistency: computeConsistency(steps),
-        wpmStdDev: computeWpmStdDev(steps),
-        wpmSeries: binBySecond(steps).map(\.rawWpm),
+        consistency: consistency(ofSeries: series),
+        wpmStdDev: wpmStdDev(ofSeries: series),
+        wpmSeries: series,
         correctChars: correctChars,
         incorrectChars: incorrectChars,
         durationMs: durationMs)

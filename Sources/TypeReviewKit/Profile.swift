@@ -45,7 +45,7 @@ public struct RunResult: Sendable, Equatable {
     public var histogram: Histogram
 }
 
-public struct Profile: Sendable {
+public struct Profile: Sendable, Equatable {
     public var settings: ProfileSettings
     public var results: [RunResult]
 

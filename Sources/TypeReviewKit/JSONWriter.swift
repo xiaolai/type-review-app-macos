@@ -72,7 +72,14 @@ public enum JSONWriter {
     /// round-trips, which is the same rule JavaScript uses, but it renders a
     /// whole number as `50.0` and reaches for exponent form earlier. Whole
     /// values are handled before this is called; the rest agree.
+    ///
+    /// NaN and the infinities are the exception, and they are not academic:
+    /// `description` renders them `nan` and `inf`, which is not JSON at all — a
+    /// profile carrying one would be written to disk and then refuse to parse
+    /// on the next launch, taking the whole history with it. `JSON.stringify`
+    /// emits `null` for both, so that is what this does.
     private static func number(_ value: Double) -> String {
+        guard value.isFinite else { return "null" }
         if value.rounded() == value, abs(value) <= 9_007_199_254_740_991 {
             return String(Int(value))
         }
