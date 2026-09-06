@@ -232,10 +232,16 @@ wrong shape for a keycap and, worse, SF Mono's `⇧` and `⌘` are thin stylised
 outlines rather than the solid glyphs macOS uses everywhere else — the
 modifier keys were where it looked most wrong.
 
-The keys along the outer edges — `esc`, `fn`, `⇥`, `⇪`, `⇧`, `↵`, `⌫` — carry
-their legend alone, in the bottom corner nearest the edge of the keyboard, as
-Apple prints them. `⌃`, `⌥` and `⌘` keep their spelled word, since the glyph
-alone does not name them.
+Every key along the outer edges carries its legend in the bottom corner
+nearest the edge of the keyboard, as Apple prints them. `esc`, `fn`, `⇥`,
+`⇪`, `⇧`, `↵` and `⌫` carry the glyph alone; `⌃`, `⌥` and `⌘` keep their
+spelled word beneath it, since the glyph alone does not name them.
+
+The gap between caps is 0.13 of the key pitch — 7 points at the default
+window's 54-point keys. Apple's Magic Keyboard is nearer 0.16 (a 19 mm pitch
+with a 16 mm cap); this sits a little under that because these caps carry a
+drawn border and lip that a real one does not, and those read as part of the
+gap.
 
 Drawn the way Apple draws the object: white chiclet caps on a silver body,
 the function row and its Touch ID button, `!` printed above `1`, and

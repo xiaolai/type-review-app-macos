@@ -174,18 +174,18 @@ enum KeyboardGeometry {
         ],
         [
             Key(kVK_Function, 1, label: "fn", align: .start, vertical: .bottom, role: .function),
-            Key(kVK_Control, 1, label: "⌃", sub: "control", align: .start, role: .modifier),
-            Key(kVK_Option, 1, label: "⌥", sub: "option", align: .start, role: .modifier),
-            Key(kVK_Command, 1.25, label: "⌘", sub: "command", align: .start, role: .modifier),
+            Key(kVK_Control, 1, label: "⌃", sub: "control", align: .start, vertical: .bottom, role: .modifier),
+            Key(kVK_Option, 1, label: "⌥", sub: "option", align: .start, vertical: .bottom, role: .modifier),
+            Key(kVK_Command, 1.25, label: "⌘", sub: "command", align: .start, vertical: .bottom, role: .modifier),
             Key(kVK_JIS_Eisu, 1, label: "英数", role: .modifier, shapes: Shape.jisOnly),
             Key(kVK_Space, 6, label: " ", role: .space, shapes: [.ansi, .iso]),
             // JIS pays for 英数 and かな out of the space bar, exactly as the
             // hardware does — it is the shortest space bar Apple ships.
             Key(kVK_Space, 4.5, label: " ", role: .space, shapes: Shape.jisOnly),
             Key(kVK_JIS_Kana, 1, label: "かな", role: .modifier, shapes: Shape.jisOnly),
-            Key(kVK_RightCommand, 1.75, label: "⌘", sub: "command", align: .end, role: .modifier),
-            Key(kVK_RightOption, 1.5, label: "⌥", sub: "option", align: .end, role: .modifier),
-            Key(kVK_RightControl, nil, label: "⌃", sub: "control", align: .end, role: .modifier),
+            Key(kVK_RightCommand, 1.75, label: "⌘", sub: "command", align: .end, vertical: .bottom, role: .modifier),
+            Key(kVK_RightOption, 1.5, label: "⌥", sub: "option", align: .end, vertical: .bottom, role: .modifier),
+            Key(kVK_RightControl, nil, label: "⌃", sub: "control", align: .end, vertical: .bottom, role: .modifier),
         ],
     ]
 }
