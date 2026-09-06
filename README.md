@@ -259,31 +259,20 @@ holds — so "no passage" is never an outcome the app can reach.
 
 ## The keyboard drawer
 
-The keyboard lives in a drawer at the bottom of the window: drag the divider
-to resize it, drag past the bottom or press ⌘K to shut it, and it comes back
-the size you left it. Full width, and the passage above absorbs the change.
+`⌘K` slides the keyboard out of the bottom of the window and back in. Full
+width, and the practice screen reclaims the space in the same motion.
 
-`NSSplitViewController` with a collapsible bottom item, which is where every
-other Mac app puts this. `NSDrawer` — the class with the name — has been
-deprecated since 10.13 and slides *outside* the window, which is not this.
+A clipping band pinned to the window's bottom edge, with the keyboard anchored
+to the **top** of that band at its full height. Shrinking the band's height
+carries the keyboard down with it and clips whatever has passed the window
+edge — so it slides out of sight rather than being cropped in place. Anchored
+to the bottom instead, the keyboard would stay put and lose its top rows,
+which is a different and much worse effect.
 
-Four things had to be measured rather than reasoned about, each of which made
-the drawer look finished while being broken:
-
-| Symptom | Cause |
-| --- | --- |
-| Keyboard beside the passage, not under it | `NSSplitView.isVertical` describes the *divider*, and its default is a vertical one |
-| Drawer opens 80 pt tall | `holdingPriority = .defaultHigh` — the intuitive setting for "this pane keeps its size" — pins the item to its **minimum** thickness |
-| Divider will not drag | The view's intrinsic height at AppKit's default compression resistance of 750 is a floor, not a preference |
-| Keyboard stays big and clipped mid-drag | The pane is layer-backed during a live resize, so the cached layer is redrawn only at the end |
-
-Two more came from persistence. A drag emits a resize per mouse event, so the
-height is recorded a beat after the gesture settles and only if the drawer is
-still open — otherwise closing it by dragging saves an arbitrary frame of the
-way down. And a window resize arrives as the same notification as a drag, so
-they are told apart by whether the split view itself changed size; without
-that the panes divide the change proportionally, and a drawer set to 150 in a
-500-point window silently becomes 192 when the window settles.
+Two things it is not. `NSSplitView` gives a resizable pane with a divider: the
+panes stay on screen and trade space, which is a layout, not a drawer — I
+built that first and it was the wrong object. `NSDrawer`, which owns the name,
+has been deprecated since 10.13 and slides *outside* the window.
 
 ## The library
 

@@ -39,18 +39,9 @@ final class KeyboardView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        // The intrinsic height is the size the drawer *opens* to, not a floor
-        // it must keep. At AppKit's default compression resistance of 750 it
-        // is a floor: the divider cannot squeeze the pane past it, and the
-        // drawer looks draggable while refusing to move. Both priorities go
-        // low so the split view's own constraints decide the height and the
-        // intrinsic size is only consulted when nothing else has an opinion.
-        setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        setContentHuggingPriority(.defaultLow, for: .vertical)
-        // Everything here is drawn from the view's own size, so a cached layer
-        // is always wrong the moment the drawer is dragged. Without this the
-        // keyboard keeps its old size, clipped, until the drag ends — which
-        // makes the drag feel broken exactly while it is being used.
+        // Everything here is drawn from the view's own size, so a cached
+        // layer goes stale the moment the window is resized. Without this the
+        // keyboard keeps its old cap size, clipped, until the resize ends.
         layerContentsRedrawPolicy = .duringViewResize
     }
 
@@ -77,17 +68,10 @@ final class KeyboardView: NSView {
     ///
     /// Deliberately independent of the current width. Cap size is capped, so a
     /// wider window makes a wider case rather than a taller one — and a
-    /// width-dependent answer is dangerous here, because AppKit lays this view
-    /// out once at a near-zero width before the window is sized. Asked then,
-    /// a width-dependent height returns the minimum, and that minimum becomes
-    /// the constraint the drawer opens to. It is how the drawer first opened
-    /// 80 points tall.
+    /// width-dependent answer would be read once, early, at a width the window
+    /// has not reached yet.
     var naturalHeight: CGFloat {
         ceil(layout(forWidth: 4000, height: .greatestFiniteMagnitude).caseRect.height + 2)
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: naturalHeight)
     }
 
     override func setFrameSize(_ newSize: NSSize) {

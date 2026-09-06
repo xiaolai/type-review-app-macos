@@ -3,7 +3,6 @@ import TypeReviewKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
-    private var drawer: KeyboardDrawerController?
     private var practice: PracticeViewController?
     private var statsWindow: NSWindow?
     // Built on demand: a main-actor default value cannot be initialised from
@@ -15,12 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sourceMenuItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let drawer = KeyboardDrawerController()
-        self.drawer = drawer
-        let practice = drawer.practice
+        let practice = PracticeViewController()
         self.practice = practice
 
-        let window = NSWindow(contentViewController: drawer)
+        let window = NSWindow(contentViewController: practice)
         window.title = "TYPE"
         window.setContentSize(NSSize(width: 900, height: 640))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -30,12 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
 
         NSApp.mainMenu = makeMenu()
-        // The menu follows the drawer, not the other way round — the divider
-        // can be dragged shut without the menu ever hearing about it.
-        drawer.onDrawerChanged = { [weak self] open in
-            self?.keyboardMenuItem?.state = open ? .on : .off
-        }
-        keyboardMenuItem?.state = drawer.isDrawerOpen ? .on : .off
+        // Applied without animation: the drawer should already be where it
+        // belongs when the window first appears, not slide into place.
+        let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
+        practice.setKeyboardVisible(showKeyboard, animated: false)
+        keyboardMenuItem?.state = showKeyboard ? .on : .off
         markSourceMenu()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -144,8 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleKeyboard(_ sender: Any?) {
-        guard let drawer else { return }
-        drawer.setDrawerOpen(!drawer.isDrawerOpen)
+        guard let practice else { return }
+        let visible = !practice.isKeyboardVisible
+        practice.setKeyboardVisible(visible, animated: true)
+        keyboardMenuItem?.state = visible ? .on : .off
+        UserDefaults.standard.set(visible, forKey: "ShowKeyboard")
     }
 
     /// The Library gets its own window for the same reason Statistics does:
