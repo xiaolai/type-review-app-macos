@@ -137,8 +137,22 @@ enum IconArtwork {
 }
 
 let outputDirectory = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
-try? FileManager.default.createDirectory(
-    atPath: outputDirectory, withIntermediateDirectories: true)
+
+/// Fails loudly. `iconutil` runs straight after this in the Makefile, and a
+/// swallowed write error produced an iconset missing representations while the
+/// script still reported writing all ten — so the build carried on and the app
+/// shipped with a blurred icon at one size.
+func die(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("make-icon: \(message)\n".utf8))
+    exit(1)
+}
+
+do {
+    try FileManager.default.createDirectory(
+        atPath: outputDirectory, withIntermediateDirectories: true)
+} catch {
+    die("could not create \(outputDirectory): \(error.localizedDescription)")
+}
 
 /// The ten representations macOS asks for, by name.
 let representations: [(String, CGFloat)] = [
@@ -150,7 +164,13 @@ let representations: [(String, CGFloat)] = [
 ]
 for (name, size) in representations {
     let rep = IconArtwork.render(pixelSize: size)
-    guard let data = rep.representation(using: .png, properties: [:]) else { continue }
-    try? data.write(to: URL(fileURLWithPath: "\(outputDirectory)/\(name).png"))
+    guard let data = rep.representation(using: .png, properties: [:]) else {
+        die("could not encode \(name) as PNG")
+    }
+    do {
+        try data.write(to: URL(fileURLWithPath: "\(outputDirectory)/\(name).png"))
+    } catch {
+        die("could not write \(name).png: \(error.localizedDescription)")
+    }
 }
 print("wrote \(representations.count) representations to \(outputDirectory)")
