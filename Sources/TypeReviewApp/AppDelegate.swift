@@ -292,6 +292,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // Legends must come from a keyboard, not from an input method.
+            //
+            // With a CJK input method active, the *current* layout is the
+            // input method's own, and asking it what a key produces answers
+            // with `……` above 6 and `¥` above 4 — what that method types, not
+            // what is printed on the key. The ASCII-capable layout is the
+            // keyboard underneath. This check is worth little on a machine
+            // that only ever runs a US layout, where both answers agree; it
+            // bites on one where an input method is active, which is where the
+            // bug appeared.
+            guard SystemKeyboard.legendSourceIsASCIICapable else {
+                print(
+                    "SELFTEST FAIL: keycap legends are being read from "
+                        + "\(SystemKeyboard.layoutName), which is not an ASCII-capable layout")
+                exit(1)
+            }
+
             // The header of live numbers must actually reach the screen.
             //
             // It did not, for the whole life of this app: laid out correctly,

@@ -212,6 +212,20 @@ what Dvorak is. That is also why the website's "keyboard layout" and "keymap"
 settings do not appear in this app's Settings window: the system already knows,
 so it stops asking.
 
+The layout asked is the **ASCII-capable** one, not simply the current one.
+With a Chinese, Japanese or Korean input method active, the current layout is
+the input method's own, and `UCKeyTranslate` answers with what that method
+*produces*: `……` above 6, `¥` above 4, `《` and `》` on the comma and full
+stop, `【】` on the brackets. Every one is a true answer to the wrong question.
+An input method is a layer on top of a keyboard, and the keyboard underneath
+still has `^` above 6 — which is what the keycap says. Dvorak and Colemak are
+unaffected, both being ASCII-capable layouts.
+
+The selftest checks that the layout being read from is ASCII-capable. On a
+machine that only ever runs a US layout both answers agree and the check
+proves little; on one with an input method active — which is where this
+appeared — restoring the old call fails it.
+
 Drawn the way Apple draws the object: white chiclet caps on a silver body,
 the function row and its Touch ID button, `!` printed above `1`, and
 `control` / `option` / `command` spelled out under their glyphs and hugging
