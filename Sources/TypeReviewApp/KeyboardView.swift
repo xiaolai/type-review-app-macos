@@ -98,11 +98,9 @@ final class KeyboardView: NSView {
 
     /// The air between caps, as a fraction of the key pitch.
     ///
-    /// Apple's Magic Keyboard is a 19 mm pitch with a 16 mm cap, so its gap is
-    /// about 0.16 of the pitch. This sits a little under that: the caps here
-    /// carry a drawn border and a lip that a real one does not, and those read
-    /// as part of the gap.
-    private func keyGap(_ unit: CGFloat) -> CGFloat { max(3, (unit * 0.13).rounded()) }
+    /// Apple's own: a Magic Keyboard is a 19 mm pitch with a 16 mm cap, which
+    /// is a gap of 0.158.
+    private func keyGap(_ unit: CGFloat) -> CGFloat { max(3, (unit * 0.16).rounded()) }
 
     /// Where everything goes, for a given available width.
     ///

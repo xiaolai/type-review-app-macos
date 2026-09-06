@@ -237,11 +237,9 @@ nearest the edge of the keyboard, as Apple prints them. `esc`, `fn`, `⇥`,
 `⇪`, `⇧`, `↵` and `⌫` carry the glyph alone; `⌃`, `⌥` and `⌘` keep their
 spelled word beneath it, since the glyph alone does not name them.
 
-The gap between caps is 0.13 of the key pitch — 7 points at the default
-window's 54-point keys. Apple's Magic Keyboard is nearer 0.16 (a 19 mm pitch
-with a 16 mm cap); this sits a little under that because these caps carry a
-drawn border and lip that a real one does not, and those read as part of the
-gap.
+The gap between caps is 0.16 of the key pitch — Apple's own proportion, a
+19 mm pitch with a 16 mm cap — which is 9 points at the default window's
+54-point keys.
 
 Drawn the way Apple draws the object: white chiclet caps on a silver body,
 the function row and its Touch ID button, `!` printed above `1`, and
