@@ -1,0 +1,6 @@
+# SwiftPM build products and the assembled bundle. Both are reproducible from
+# source with `make`, and both are binaries — tracking them made every commit
+# carry thousands of object files.
+.build/
+TypeReview.app/
+.DS_Store
