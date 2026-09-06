@@ -37,6 +37,26 @@ final class KeyboardView: NSView {
 
     override var isFlipped: Bool { true }
 
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // The intrinsic height is the size the drawer *opens* to, not a floor
+        // it must keep. At AppKit's default compression resistance of 750 it
+        // is a floor: the divider cannot squeeze the pane past it, and the
+        // drawer looks draggable while refusing to move. Both priorities go
+        // low so the split view's own constraints decide the height and the
+        // intrinsic size is only consulted when nothing else has an opinion.
+        setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        setContentHuggingPriority(.defaultLow, for: .vertical)
+        // Everything here is drawn from the view's own size, so a cached layer
+        // is always wrong the moment the drawer is dragged. Without this the
+        // keyboard keeps its old size, clipped, until the drag ends — which
+        // makes the drag feel broken exactly while it is being used.
+        layerContentsRedrawPolicy = .duringViewResize
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
     func update(stats: OrderedMap<PerKeyStat>, expected: String?, targetWpm: Double) {
         self.stats = stats
         self.expected = expected
@@ -53,27 +73,42 @@ final class KeyboardView: NSView {
     /// constant works until the window is a different width, or the keyboard
     /// is an ISO or JIS one with an extra key per row — then the bottom row is
     /// quietly drawn outside the view.
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: height(forWidth: bounds.width))
+    /// The height the drawer opens to: this keyboard at full cap size.
+    ///
+    /// Deliberately independent of the current width. Cap size is capped, so a
+    /// wider window makes a wider case rather than a taller one — and a
+    /// width-dependent answer is dangerous here, because AppKit lays this view
+    /// out once at a near-zero width before the window is sized. Asked then,
+    /// a width-dependent height returns the minimum, and that minimum becomes
+    /// the constraint the drawer opens to. It is how the drawer first opened
+    /// 80 points tall.
+    var naturalHeight: CGFloat {
+        ceil(layout(forWidth: 4000, height: .greatestFiniteMagnitude).caseRect.height + 2)
     }
 
-    func height(forWidth width: CGFloat) -> CGFloat {
-        ceil(layout(forWidth: width).caseRect.maxY + 1)
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: naturalHeight)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
-        let widthChanged = abs(newSize.width - bounds.width) > 0.5
         super.setFrameSize(newSize)
-        if widthChanged { invalidateIntrinsicContentSize() }
+        needsDisplay = true
     }
 
-    private func unitWidth(for width: CGFloat) -> CGFloat {
-        let units = CGFloat(KeyboardGeometry.unitsPerRow)
-        // Solve for the unit that makes case + padding exactly fill the width,
-        // then clamp. Padding scales with the unit, so it is part of the
-        // equation rather than subtracted first.
-        let raw = width / (units + 0.7)
-        return floor(min(Self.maxUnit, max(Self.minUnit, raw)))
+    /// The cap size that fits both dimensions.
+    ///
+    /// Height matters as much as width now that the keyboard lives in a
+    /// drawer: dragging the divider is *how* you resize it, and a keyboard
+    /// that only reads its width would either overflow the drawer or ignore
+    /// the drag. Padding scales with the unit, so it belongs inside the
+    /// division rather than being subtracted first.
+    private func unitWidth(for width: CGFloat, height: CGFloat = .greatestFiniteMagnitude)
+        -> CGFloat
+    {
+        let rows = CGFloat(KeyboardGeometry.rows(for: SystemKeyboard.shape).count)
+        let byWidth = width / (CGFloat(KeyboardGeometry.unitsPerRow) + 0.7)
+        let byHeight = (height - 2) / (rows + 0.3)
+        return floor(min(Self.maxUnit, max(Self.minUnit, min(byWidth, byHeight))))
     }
 
     private func casePadding(_ unit: CGFloat) -> CGFloat { max(4, (unit * 0.2).rounded()) }
@@ -92,9 +127,9 @@ final class KeyboardView: NSView {
         let keys: [(key: KeyboardGeometry.Key, rect: NSRect)]
     }
 
-    func layout(forWidth width: CGFloat) -> Layout {
+    func layout(forWidth width: CGFloat, height: CGFloat = .greatestFiniteMagnitude) -> Layout {
         let rows = KeyboardGeometry.rows(for: SystemKeyboard.shape)
-        let unit = unitWidth(for: width)
+        let unit = unitWidth(for: width, height: height)
         let padding = casePadding(unit)
         let gap = keyGap(unit)
         // The gap belongs *between* caps, so the case gives back the one
@@ -106,8 +141,15 @@ final class KeyboardView: NSView {
         let caseHeight = unit * CGFloat(rows.count) + 2 * padding - gap
         // Centred rather than stretched: a keyboard is a fixed object, and one
         // that changes shape with the window stops looking like hardware.
+        // Centred both ways. Horizontally because a keyboard is a fixed
+        // object and one that stretches with the window stops looking like
+        // hardware; vertically because the drawer can be dragged taller than
+        // the cap size allows, and the slack should sit around the keyboard
+        // rather than under it.
         let caseRect = NSRect(
-            x: ((width - caseWidth) / 2).rounded(), y: 1, width: caseWidth, height: caseHeight)
+            x: ((width - caseWidth) / 2).rounded(),
+            y: max(1, ((height.isFinite ? height : caseHeight + 2) - caseHeight) / 2).rounded(),
+            width: caseWidth, height: caseHeight)
 
         var placed: [(KeyboardGeometry.Key, NSRect)] = []
         var y = caseRect.minY + padding
@@ -125,7 +167,7 @@ final class KeyboardView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let layout = layout(forWidth: bounds.width)
+        let layout = layout(forWidth: bounds.width, height: bounds.height)
 
         let radius = layout.unit * 0.35
         let casePath = NSBezierPath(
@@ -212,41 +254,64 @@ final class KeyboardView: NSView {
 
         let labelFont = NSFont.monospacedSystemFont(
             ofSize: max(7, unit * (key.role == .letter ? 0.34 : 0.30)), weight: .regular)
-        var lines: [(String, NSFont, NSColor)] = []
+
+        /// A caption sits nearer the cap edge than a glyph does, which is both
+        /// how Apple prints it and the three points that decide whether the
+        /// word "control" fits a one-unit key at all.
+        struct Line {
+            let text: String
+            let font: NSFont
+            let color: NSColor
+            let inset: CGFloat
+        }
+        let glyphInset = max(2, unit * 0.12)
+        var lines: [Line] = []
         if let shiftedText {
-            lines.append((
-                shiftedText,
-                NSFont.monospacedSystemFont(ofSize: max(6, unit * 0.26), weight: .regular),
-                Theme.secondaryText.withAlphaComponent(0.75)
-            ))
+            lines.append(
+                Line(
+                    text: shiftedText,
+                    font: NSFont.monospacedSystemFont(
+                        ofSize: max(6, unit * 0.26), weight: .regular),
+                    color: Theme.secondaryText.withAlphaComponent(0.75), inset: glyphInset))
         }
-        lines.append((label, labelFont, color))
-        if let sub = key.sub, unit >= 20 {
-            // Apple prints the word under the glyph. It only fits at full
-            // size — below that the ellipsis says less than nothing.
-            lines.append((
-                sub, NSFont.systemFont(ofSize: max(6, unit * 0.18)),
-                Theme.secondaryText.withAlphaComponent(0.55)
-            ))
+        lines.append(Line(text: label, font: labelFont, color: color, inset: glyphInset))
+        if let sub = key.sub {
+            lines.append(
+                Line(
+                    text: sub, font: NSFont.systemFont(ofSize: max(6, unit * 0.18)),
+                    color: Theme.secondaryText.withAlphaComponent(0.55), inset: 2))
         }
+
+        // Drop any line that does not fit its cap rather than clipping it.
+        // Font sizes have a legibility floor, so below a certain cap size the
+        // word "command" is wider than the key it names — and half a word
+        // spilling onto its neighbour says less than no word at all. Measured
+        // per line, so it adapts to the label, the font and the drawer height
+        // instead of guessing a cap size to switch at. The primary label is
+        // never dropped: a key with no label at all is worse than a tight one.
+        let primary = lines.count == 1 ? 0 : (shiftedText == nil ? 0 : 1)
+        lines = lines.enumerated().filter { index, line in
+            index == primary
+                || (line.text as NSString).size(withAttributes: [.font: line.font]).width
+                    <= rect.width - 2 * line.inset
+        }.map(\.element)
 
         let spacing = unit * 0.04
         let sizes = lines.map { line in
-            (line.0 as NSString).size(withAttributes: [.font: line.1])
+            (line.text as NSString).size(withAttributes: [.font: line.font])
         }
         let total = sizes.reduce(0) { $0 + $1.height } + spacing * CGFloat(lines.count - 1)
         var lineY = rect.midY - total / 2
-        let inset = max(2, unit * 0.12)
         for (line, size) in zip(lines, sizes) {
             let lineX: CGFloat =
                 switch key.align {
-                case .start: rect.minX + inset
-                case .end: rect.maxX - inset - size.width
+                case .start: rect.minX + line.inset
+                case .end: rect.maxX - line.inset - size.width
                 case .center: rect.midX - size.width / 2
                 }
-            (line.0 as NSString).draw(
+            (line.text as NSString).draw(
                 at: NSPoint(x: lineX, y: lineY),
-                withAttributes: [.font: line.1, .foregroundColor: line.2])
+                withAttributes: [.font: line.font, .foregroundColor: line.color])
             lineY += size.height + spacing
         }
     }

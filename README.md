@@ -257,6 +257,34 @@ The generators remain the fallback and always will be. A six-letter lesson has
 no real sentence available, and a timed run needs more text than any quote
 holds — so "no passage" is never an outcome the app can reach.
 
+## The keyboard drawer
+
+The keyboard lives in a drawer at the bottom of the window: drag the divider
+to resize it, drag past the bottom or press ⌘K to shut it, and it comes back
+the size you left it. Full width, and the passage above absorbs the change.
+
+`NSSplitViewController` with a collapsible bottom item, which is where every
+other Mac app puts this. `NSDrawer` — the class with the name — has been
+deprecated since 10.13 and slides *outside* the window, which is not this.
+
+Four things had to be measured rather than reasoned about, each of which made
+the drawer look finished while being broken:
+
+| Symptom | Cause |
+| --- | --- |
+| Keyboard beside the passage, not under it | `NSSplitView.isVertical` describes the *divider*, and its default is a vertical one |
+| Drawer opens 80 pt tall | `holdingPriority = .defaultHigh` — the intuitive setting for "this pane keeps its size" — pins the item to its **minimum** thickness |
+| Divider will not drag | The view's intrinsic height at AppKit's default compression resistance of 750 is a floor, not a preference |
+| Keyboard stays big and clipped mid-drag | The pane is layer-backed during a live resize, so the cached layer is redrawn only at the end |
+
+Two more came from persistence. A drag emits a resize per mouse event, so the
+height is recorded a beat after the gesture settles and only if the drawer is
+still open — otherwise closing it by dragging saves an arbitrary frame of the
+way down. And a window resize arrives as the same notification as a drag, so
+they are told apart by whether the split view itself changed size; without
+that the panes divide the change proportionally, and a drawer set to 150 in a
+500-point window silently becomes 192 when the window settles.
+
 ## The library
 
 `⌘3` opens a window for the user's own documents. A `.txt` or `.md` file

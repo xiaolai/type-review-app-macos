@@ -3,6 +3,7 @@ import TypeReviewKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
+    private var drawer: KeyboardDrawerController?
     private var practice: PracticeViewController?
     private var statsWindow: NSWindow?
     // Built on demand: a main-actor default value cannot be initialised from
@@ -14,10 +15,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sourceMenuItems: [NSMenuItem] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let practice = PracticeViewController()
+        let drawer = KeyboardDrawerController()
+        self.drawer = drawer
+        let practice = drawer.practice
         self.practice = practice
 
-        let window = NSWindow(contentViewController: practice)
+        let window = NSWindow(contentViewController: drawer)
         window.title = "TYPE"
         window.setContentSize(NSSize(width: 900, height: 640))
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -27,8 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
 
         NSApp.mainMenu = makeMenu()
-        practice.setKeyboardVisible(
-            UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true)
+        // The menu follows the drawer, not the other way round — the divider
+        // can be dragged shut without the menu ever hearing about it.
+        drawer.onDrawerChanged = { [weak self] open in
+            self?.keyboardMenuItem?.state = open ? .on : .off
+        }
+        keyboardMenuItem?.state = drawer.isDrawerOpen ? .on : .off
         markSourceMenu()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -77,8 +84,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keyboardItem = viewMenu.addItem(
             withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "k")
         keyboardItem.target = self
-        keyboardItem.state = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
-            ? .on : .off
         keyboardMenuItem = keyboardItem
 
         viewMenu.addItem(.separator())
@@ -139,10 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleKeyboard(_ sender: Any?) {
-        let visible = keyboardMenuItem?.state != .on
-        keyboardMenuItem?.state = visible ? .on : .off
-        UserDefaults.standard.set(visible, forKey: "ShowKeyboard")
-        practice?.setKeyboardVisible(visible)
+        guard let drawer else { return }
+        drawer.setDrawerOpen(!drawer.isDrawerOpen)
     }
 
     /// The Library gets its own window for the same reason Statistics does:
@@ -213,7 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // sides. This was wrong until it was measured: the inter-key gap
             // was being applied after the last key too, so the right and
             // bottom margins were a gap wider than the left and top.
-            let keyboardLayout = KeyboardView().layout(forWidth: 900)
+            let keyboardLayout = KeyboardView().layout(forWidth: 900, height: 220)
             let capsRect = keyboardLayout.keys.dropFirst().reduce(keyboardLayout.keys[0].rect) {
                 $0.union($1.rect)
             }
