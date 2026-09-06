@@ -106,7 +106,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Lines of text", self.preferenceStepper(AppPreferences.rows))
             self.addRow(
-                grid, "Keyboard width", self.percentPopup(AppPreferences.drawerWidth, [95, 90, 85, 80]),
+                grid, "Keyboard width", self.percentPopup(AppPreferences.drawerWidth, [95, 90, 85, 80, 75]),
                 hint: "The keyboard's width, as a share of the window's.")
             self.addRow(
                 grid, "Keyboard gap", self.preferenceStepper(AppPreferences.drawerGap),
