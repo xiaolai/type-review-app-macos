@@ -4,6 +4,10 @@ import TypeReviewKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var practice: PracticeViewController?
+    // Built in applicationDidFinishLaunching, for the same reason the stats
+    // controller is: a main-actor default value cannot be initialised from
+    // AppDelegate's nonisolated init.
+    private var drawer: KeyboardDrawer?
     private var statsWindow: NSWindow?
     // Built on demand: a main-actor default value cannot be initialised from
     // AppDelegate's nonisolated init.
@@ -27,13 +31,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.window = window
 
         NSApp.mainMenu = makeMenu()
-        // Applied without animation: the drawer should already be where it
-        // belongs when the window first appears, not slide into place.
-        let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
-        practice.setKeyboardVisible(showKeyboard, animated: false)
-        keyboardMenuItem?.state = showKeyboard ? .on : .off
+        let drawer = KeyboardDrawer()
+        self.drawer = drawer
+        practice.keyboard = drawer.keyboard
+        drawer.attach(to: window)
         markSourceMenu()
         window.makeKeyAndOrderFront(nil)
+        // After the window is on screen, and without animation: the drawer
+        // should already be out when the app appears, not slide out at launch.
+        let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
+        drawer.setOpen(showKeyboard, animated: false)
+        keyboardMenuItem?.state = showKeyboard ? .on : .off
         NSApp.activate(ignoringOtherApps: true)
 
         if CommandLine.arguments.contains("--selftest") { runSelfTest() }
@@ -139,10 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func toggleKeyboard(_ sender: Any?) {
-        guard let practice else { return }
-        let visible = !practice.isKeyboardVisible
-        practice.setKeyboardVisible(visible, animated: true)
+    @MainActor @objc private func toggleKeyboard(_ sender: Any?) {
+        guard let drawer else { return }
+        let visible = !drawer.isOpen
+        drawer.setOpen(visible, animated: true)
         keyboardMenuItem?.state = visible ? .on : .off
         UserDefaults.standard.set(visible, forKey: "ShowKeyboard")
     }

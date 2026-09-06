@@ -278,20 +278,38 @@ from the background — it is covered`.
 
 ## The keyboard drawer
 
-`⌘K` slides the keyboard out of the bottom of the window and back in. Full
-width, and the practice screen reclaims the space in the same motion.
+`⌘K` slides the keyboard out from under the window and back. The main window
+never changes size — the keyboard appears *below* it, with no panel or
+background of its own, just the keyboard floating against whatever is behind.
 
-A clipping band pinned to the window's bottom edge, with the keyboard anchored
-to the **top** of that band at its full height. Shrinking the band's height
-carries the keyboard down with it and clips whatever has passed the window
-edge — so it slides out of sight rather than being cropped in place. Anchored
-to the bottom instead, the keyboard would stay put and lose its top rows,
-which is a different and much worse effect.
+It is a separate borderless window with a clear background, attached to the
+main one with `addChildWindow`. That relationship is what makes it a drawer
+rather than a second window the user has to manage: it moves, orders,
+miniaturises and closes with its parent, for free. Width and the parent's
+bottom edge are the only things it does not track, so a resize is observed.
 
-Two things it is not. `NSSplitView` gives a resizable pane with a divider: the
-panes stay on screen and trade space, which is a layout, not a drawer — I
-built that first and it was the wrong object. `NSDrawer`, which owns the name,
-has been deprecated since 10.13 and slides *outside* the window.
+Details that each took a decision:
+
+- **No shadow.** macOS derives a window's shadow from its frame, not from what
+  it draws, so a transparent full-width window casts a rectangular shadow
+  around nothing. The keyboard's own case supplies the edge.
+- **`ignoresMouseEvents`.** The keyboard is a picture, not a control. Without
+  this the transparent area swallows clicks meant for what is behind it.
+- **Pinned to the bottom** of its content view, so as the window grows
+  downward the keyboard travels with its lower edge and is revealed bottom
+  first — a sheet coming out of a slot. Pinned to the top it would sit still
+  and unroll.
+- **The window is nudged up** if the drawer would open past the bottom of the
+  screen, which is what Apple's own drawers did. The alternative is a drawer
+  the user cannot see and has no way to discover.
+- **Put away in full screen**, where a drawer below the window is off the
+  display entirely.
+
+Two earlier attempts were not drawers at all, and both are worth naming
+because both looked plausible. An `NSSplitView` pane trades space with the
+passage and never appears or disappears. A clipping band inside the window
+eats the window's own height. A drawer is, by definition, outside its parent.
+(`NSDrawer`, the class that owns the name, has been deprecated since 10.13.)
 
 ## The library
 

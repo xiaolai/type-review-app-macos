@@ -10,9 +10,9 @@ final class PracticeViewController: NSViewController {
     private let modeLabel = NSTextField(labelWithString: "benchmark")
     private let hintLabel = NSTextField(labelWithString: "⇥ new text · ⏎ next run")
     private let resultsView = ResultsView()
-    /// The keyboard, in a band that slides out of the window's bottom edge.
-    private let drawer = KeyboardDrawerView()
-    private var keyboard: KeyboardView { drawer.keyboard }
+    /// The on-screen keyboard. It lives in the drawer below the window, so
+    /// this controller only drives it.
+    weak var keyboard: KeyboardView?
     /// The adapter reports its pick from a `@Sendable` closure, so the value
     /// lands in a reference box rather than being captured mutably.
     private let entryBox = EntryBox()
@@ -59,7 +59,7 @@ final class PracticeViewController: NSViewController {
         // are, and Enter starts the next one without moving anything.
         resultsView.isHidden = true
 
-        for subview in [header, typingView, resultsView, footer, drawer] {
+        for subview in [header, typingView, resultsView, footer] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
@@ -80,13 +80,7 @@ final class PracticeViewController: NSViewController {
             resultsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
 
             footer.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
-            // Above the drawer, and it moves with it: the attribution belongs
-            // to the passage, not to the keyboard.
-            footer.bottomAnchor.constraint(equalTo: drawer.topAnchor, constant: -20),
-
-            drawer.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            drawer.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            drawer.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            footer.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
         ])
         view = root
     }
@@ -96,7 +90,7 @@ final class PracticeViewController: NSViewController {
         typingView.onCharacter = { [weak self] character in self?.type(character) }
         typingView.onBackspace = { [weak self] in try? self?.session?.backspace(); self?.refresh() }
         typingView.onRestart = { [weak self] in self?.startFreshRun() }
-        typingView.onKeyPressed = { [weak self] code in self?.keyboard.setPressed(code) }
+        typingView.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
         typingView.onConfirm = { [weak self] in self?.startFreshRun() }
         start()
     }
@@ -197,12 +191,6 @@ final class PracticeViewController: NSViewController {
 
     var currentSettings: ProfileSettings { session?.profile.settings ?? .default }
 
-    var isKeyboardVisible: Bool { drawer.isOpen }
-
-    func setKeyboardVisible(_ visible: Bool, animated: Bool = true) {
-        drawer.setOpen(visible, animated: animated)
-    }
-
     /// Applies settings from the Settings window. Returns false when the
     /// engine refuses them.
     ///
@@ -254,7 +242,7 @@ final class PracticeViewController: NSViewController {
                 cursor: snapshot.typing.pos)
             typingView.isHidden = false
             resultsView.isHidden = true
-            keyboard.setPressed(nil)
+            keyboard?.setPressed(nil)
             let credit = attribution()
             hintLabel.stringValue = pendingSaveError
                 ?? (credit.isEmpty ? "⇥ new text · ⏎ next run" : credit)
@@ -269,7 +257,7 @@ final class PracticeViewController: NSViewController {
                 utf16CodeUnits: [Array(snapshot.typing.expected.utf16)[snapshot.typing.pos]],
                 count: 1)
             : nil
-        keyboard.update(
+        keyboard?.update(
             stats: aggregatePerKey(session.profile.results), expected: next?.lowercased(),
             targetWpm: session.profile.settings.targetWpm)
         wpmLabel.stringValue = String(format: "%.0f wpm", snapshot.liveMetrics.netWpm)
