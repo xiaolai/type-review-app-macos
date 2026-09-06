@@ -5,3 +5,7 @@
 TYPE.app/
 TypeReview.app/
 .DS_Store
+
+# Per-developer Claude Code config, including which plugins are enabled here.
+# Ignored in the web repo too; it is a choice about tooling, not about the app.
+.claude/
