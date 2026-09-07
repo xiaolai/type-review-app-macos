@@ -88,6 +88,18 @@ STORE_PROFILE  ?= dist/TYPE_Mac_App_Store.provisionprofile
 # `make pkg` builds the appstore variant through a sub-make, so the outer
 # invocation still has the direct build's value.
 BUNDLE_ID_STORE ?= review.type.app
+# Upload credentials. Two ways, and neither puts a secret on a command line.
+#
+#   API key   ASC_KEY_ID + ASC_ISSUER_ID, with the .p8 in
+#             ~/.appstoreconnect/private_keys/. Nothing to type, nothing to
+#             expire in a year, and revocable on its own.
+#   Apple ID  ASC_APPLE_ID + a password stored under ASC_KEYCHAIN_ITEM by
+#             `altool --store-password-in-keychain-item`. Referenced as
+#             @keychain:, so the password itself never appears anywhere.
+ASC_KEY_ID       ?=
+ASC_ISSUER_ID    ?=
+ASC_APPLE_ID     ?=
+ASC_KEYCHAIN_ITEM ?= TYPE_ASC
 STORE_PKG       ?= dist/TYPE-$(DIST_VERSION).pkg
 
 # Apple's notary service drops connections, and notarytool has no internal
@@ -182,7 +194,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg
+.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg upload
 
 all: $(APP)
 
@@ -495,6 +507,46 @@ pkg:
 	printf '  version : %s (build %s)\n' "$(DIST_VERSION)" "$(BUILD_NUMBER)"; \
 	printf '  size    : %s\n' "$$(du -h '$(STORE_PKG)' | cut -f1)"; \
 	printf '  sha256  : %s\n' "$$(shasum -a 256 '$(STORE_PKG)' | cut -d' ' -f1)"
+
+# Sends the package to App Store Connect.
+#
+# It re-reads the artefact first rather than trusting that `make pkg` left a
+# good one. `pkg` and `upload` are separate commands, so an hour and a rebuild
+# can sit between them, and the thing being sent is a file on disk rather than
+# something this invocation produced.
+upload:
+	@test -f "$(STORE_PKG)" \
+		|| { echo "error: no package at $(STORE_PKG) — run 'make pkg' first"; exit 1; }
+	# The same three questions the store will ask, asked here where the
+	# answer is cheap. An upload that fails validation costs a round trip
+	# and tells you less than this does.
+	@set -e; \
+	work=$$(mktemp -d); \
+	trap 'rm -rf "$$work"' EXIT; \
+	pkgutil --expand-full "$(STORE_PKG)" "$$work/x" >/dev/null; \
+	app=$$(find "$$work/x" -maxdepth 4 -name 'TYPE.app' -type d | head -1); \
+	test -n "$$app" || { echo "error: no app inside the package"; exit 1; }; \
+	codesign -dvvv "$$app" 2>&1 | grep -q "Authority=$(STORE_SIGN)" \
+		|| { echo "error: the packaged app is not signed with $(STORE_SIGN)"; exit 1; }; \
+	test -s "$$app/Contents/embedded.provisionprofile" \
+		|| { echo "error: the packaged app has no provisioning profile"; exit 1; }; \
+	codesign -d --entitlements :- "$$app" 2>/dev/null | grep -q "app-sandbox" \
+		|| { echo "error: the packaged app is not sandboxed"; exit 1; }; \
+	echo "  package verified: $(STORE_PKG)"
+	@if [ -n "$(ASC_KEY_ID)" ] && [ -n "$(ASC_ISSUER_ID)" ]; then \
+		echo "  uploading with the App Store Connect API key $(ASC_KEY_ID)"; \
+		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
+			--apiKey "$(ASC_KEY_ID)" --apiIssuer "$(ASC_ISSUER_ID)"; \
+	elif [ -n "$(ASC_APPLE_ID)" ]; then \
+		echo "  uploading as $(ASC_APPLE_ID), password from the keychain"; \
+		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
+			-u "$(ASC_APPLE_ID)" -p "@keychain:$(ASC_KEYCHAIN_ITEM)"; \
+	else \
+		echo "error: no upload credentials configured. Either:"; \
+		echo "  make upload ASC_KEY_ID=... ASC_ISSUER_ID=...   (App Store Connect API key)"; \
+		echo "  make upload ASC_APPLE_ID=you@example.com       (password in keychain item $(ASC_KEYCHAIN_ITEM))"; \
+		exit 1; \
+	fi
 
 version:
 	@printf 'marketing : %s   (Info.plist, edited by hand)\n' \
