@@ -303,7 +303,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             path.widthAnchor.constraint(equalToConstant: Self.pathWidth).isActive = true
             let pathRow = grid.addRow(with: [NSTextField(labelWithString: "Profile:"), path])
             pathRow.yPlacement = .center
-            let revealRow = grid.addRow(with: [NSGridCell.emptyContentView, reveal])
+            let importButton = NSButton(
+                title: "Import…", target: self, action: #selector(self.importProfile(_:)))
+            importButton.bezelStyle = .rounded
+            // Beside Show in Finder rather than anywhere else, because the two
+            // are the same idea from opposite ends: one hands the file over,
+            // the other takes one back. Moving between the App Store build and
+            // the direct one is the case that needs it — they are different
+            // applications to the system and cannot read each other's storage.
+            let buttons = NSStackView(views: [reveal, importButton])
+            buttons.spacing = 8
+            let revealRow = grid.addRow(with: [NSGridCell.emptyContentView, buttons])
             revealRow.topPadding = 10
         }
     }
@@ -1061,6 +1071,103 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // the engine refused looked exactly like one it accepted.
         if !write(.default) { NSSound.beep() }
         refresh()
+    }
+
+    /// Replaces the profile with one from a file.
+    ///
+    /// Validated through the same deserializer the app loads with, so a file
+    /// edited by hand or truncated by a crash is refused here rather than
+    /// becoming statistics that cannot be computed later. The reason shown is
+    /// the validator's own, which is more specific than anything this method
+    /// could invent.
+    ///
+    /// The old profile is renamed, never deleted. "Replace" is the one word in
+    /// this window that can lose a year of someone's history, and a rename
+    /// costs nothing.
+    @objc private func importProfile(_ sender: Any?) {
+        guard let store = try? ProfileFileStore.standard() else { return }
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        panel.message = "Choose a profile.json to replace the current one."
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+
+        let text: String
+        do {
+            text = try String(contentsOf: source, encoding: .utf8)
+        } catch {
+            present(error: "That file could not be read.", detail: error.localizedDescription)
+            return
+        }
+        let incoming: Profile
+        switch deserializeProfile(text) {
+        case .ok(let profile): incoming = profile
+        case .corrupt(let reason):
+            present(error: "That is not a profile TYPE can read.", detail: reason)
+            return
+        default:
+            present(error: "That file holds no profile.", detail: "It parsed, but there was nothing in it.")
+            return
+        }
+
+        let existing = store.load()
+        let losing: String
+        if case .ok(let current) = existing {
+            losing = "The \(current.results.count) run\(current.results.count == 1 ? "" : "s") "
+                + "already here will be kept in a file beside it."
+        } else {
+            losing = "There is nothing here to replace."
+        }
+        let confirm = NSAlert()
+        confirm.messageText = "Replace this profile with \(incoming.results.count) imported runs?"
+        confirm.informativeText = losing
+        confirm.alertStyle = .warning
+        confirm.addButton(withTitle: "Replace")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        // Renamed rather than overwritten, and before anything is written, so
+        // a failure half way leaves the old profile on disk under a name that
+        // says what it is.
+        if FileManager.default.fileExists(atPath: store.fileURL.path) {
+            let stamp = ISO8601DateFormatter().string(from: Date())
+                .replacingOccurrences(of: ":", with: "-")
+            let kept = store.fileURL.deletingLastPathComponent()
+                .appendingPathComponent("profile-replaced-\(stamp).json")
+            do {
+                try FileManager.default.moveItem(at: store.fileURL, to: kept)
+            } catch {
+                present(error: "The current profile could not be set aside.", detail: error.localizedDescription)
+                return
+            }
+        }
+        do {
+            try store.save(incoming)
+        } catch {
+            present(error: "The imported profile could not be written.", detail: error.localizedDescription)
+            return
+        }
+
+        // Every view that shows history read it at launch, so saying "it is
+        // in" while the window still shows the old numbers would be a lie the
+        // user can see. Reopening is the honest short path.
+        let done = NSAlert()
+        done.messageText = "Imported."
+        done.informativeText =
+            "TYPE needs to reopen to show it. The profile it replaced is in the same folder."
+        done.addButton(withTitle: "Quit TYPE")
+        done.addButton(withTitle: "Later")
+        if done.runModal() == .alertFirstButtonReturn { NSApp.terminate(nil) }
+    }
+
+    private func present(error: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = error
+        alert.informativeText = detail
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     @objc private func revealProfile(_ sender: Any?) {

@@ -385,5 +385,3 @@ extension KeySoundTests {
         XCTAssertEqual(nextSoundPack(current: .off, remembered: .off), .mechvibe)
     }
 }
-
-
