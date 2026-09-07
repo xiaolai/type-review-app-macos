@@ -11,6 +11,16 @@
   <key>CFBundleShortVersionString</key> <string>0.1.1</string>
   <key>CFBundleVersion</key>         <string>1</string>
   <key>LSMinimumSystemVersion</key>  <string>14.0</string>
+  <!-- Required by App Store submission, and pointless for the direct build,
+       but one Info.plist serves both channels and an extra key costs the
+       direct build nothing. -->
+  <key>LSApplicationCategoryType</key> <string>public.app-category.education</string>
+  <key>NSHumanReadableCopyright</key> <string>Copyright © 2026 type.review contributors. MIT licensed.</string>
+  <!-- False, and checked rather than assumed: the app imports no crypto and
+       links no Security framework, and the only framework it pulls beyond the
+       ordinary set is CoreServices. Declaring it here is what keeps every
+       upload from asking the export-compliance question again. -->
+  <key>ITSAppUsesNonExemptEncryption</key> <false/>
   <!-- One copy of this build at a time. `open` already activates the running
        instance rather than duplicating it, but `open -n` does not, and two
        processes of the same build means two event taps and every keystroke
