@@ -41,6 +41,9 @@ struct ProfileFileStore {
     private static let selfTestDirectory = FileManager.default.temporaryDirectory
         .appendingPathComponent("TypeReviewSelfTest-\(UUID().uuidString)", isDirectory: true)
 
+    /// The folder under Application Support, fixed across every build.
+    static let folderName = "review.type.app"
+
     static func standard() throws -> ProfileFileStore {
         let directory: URL
         if CommandLine.arguments.contains("--selftest") {
@@ -49,8 +52,15 @@ struct ProfileFileStore {
             let base = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
                 create: true)
-            let bundleID = Bundle.main.bundleIdentifier ?? "review.type.app"
-            directory = base.appendingPathComponent(bundleID, isDirectory: true)
+            // A constant, not the bundle identifier. The two distribution
+            // channels sign with different identifiers on purpose — see
+            // dev-docs — and reading the store's location from the identifier
+            // would mean a build signed for a different channel arrived to
+            // find no history, having moved the folder out from under itself.
+            // Where the profile lives is a property of the app, not of who
+            // signed it. The sandboxed build lands inside its container
+            // regardless, so the two still do not share a file.
+            directory = base.appendingPathComponent(Self.folderName, isDirectory: true)
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return ProfileFileStore(directory: directory)

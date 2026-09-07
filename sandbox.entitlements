@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The App Store requires this; the direct build deliberately does not
+	     carry it. Everything the app does was measured under it before this
+	     file existed: the CGEventTap listens (Input Monitoring is granted to
+	     sandboxed apps), LaunchServices lookups answer, and reading a
+	     credential-provider extension out of another app's bundle in
+	     /Applications is permitted — the sandbox restricts user data, not
+	     world-readable application bundles. -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- For the library importer and the profile importer: both go through
+	     NSOpenPanel, and powerbox grants access to what the user picked. -->
+	<key>com.apple.security.files.user-selected.read-only</key>
+	<true/>
+</dict>
+</plist>

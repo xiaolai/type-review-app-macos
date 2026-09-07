@@ -4,7 +4,34 @@
 # Named for the app, not for the repo. macOS labels the Dock item from the
 # bundle, and a bundle called TypeReview.app under an app called TYPE gets a
 # Dock tooltip that disagrees with its own menu bar.
-APP      := TYPE.app
+# Which channel this build is for. Two of them, and they differ in three
+# things: whether the sandbox entitlement is applied, which bundle identifier
+# the app carries, and where the bundle lands. Everything else — sources,
+# resources, signing identity while there is only one — is shared, which is the
+# point of having measured that a single event path works under both.
+#
+#   make                     the direct build, for Homebrew
+#   make VARIANT=appstore    sandboxed, for the App Store
+#   make appstore            the same, spelled shorter
+#
+# The App Store build cannot be signed for submission yet: that needs an Apple
+# Distribution certificate and this keychain has only a Developer ID. Signed
+# with Developer ID it is still a valid, runnable, sandboxed app — which is how
+# the sandbox was verified in the first place.
+VARIANT ?= direct
+
+ifeq ($(VARIANT),appstore)
+BUNDLE_ID    := review.type.app
+ENTITLEMENTS := sandbox.entitlements
+APP          := .build/appstore/TYPE.app
+else ifeq ($(VARIANT),direct)
+BUNDLE_ID    := review.type.app.direct
+ENTITLEMENTS :=
+APP          := TYPE.app
+else
+$(error VARIANT must be `direct` or `appstore`, not `$(VARIANT)`)
+endif
+
 BIN      := TypeReviewApp
 CONFIG   := release
 
@@ -105,7 +132,7 @@ endif
 # file", which is a property of where a line was pasted rather than of intent.
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version
+.PHONY: all run selftest test icon clean notarize password-managers version appstore
 
 all: $(APP)
 
@@ -121,12 +148,17 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist \
 	# that is a property of the build does not belong in source control.
 	@/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_NUMBER)" \
 		$(CONTENTS)/Info.plist
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $(BUNDLE_ID)" \
+		$(CONTENTS)/Info.plist
 	# And check it landed. PlistBuddy reports success for a key it did not
 	# write when the type disagrees, which is the kind of silence this
 	# project has been bitten by before.
 	@test "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' $(CONTENTS)/Info.plist)" \
 		= "$(BUILD_NUMBER)" \
 		|| { echo "error: CFBundleVersion did not take"; exit 1; }
+	@test "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' $(CONTENTS)/Info.plist)" \
+		= "$(BUNDLE_ID)" \
+		|| { echo "error: CFBundleIdentifier did not take"; exit 1; }
 	@cp Resources/TypeReview.icns $(CONTENTS)/Resources/TypeReview.icns
 	# The typewriter sound pack's recording. Loaded through `Bundle.main`,
 	# so it goes straight into Contents/Resources rather than through a
@@ -165,13 +197,15 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist \
 	# build, and requiring it would make `make` fail on a train.
 	@if security find-identity -v -p codesigning | grep -q "$(SIGN_ID)"; then \
 		codesign --force --options runtime --timestamp=none \
+			$(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS),) \
 			--sign "$(SIGN_ID)" "$(STAGE)" >/dev/null; \
 	else \
 		echo "warning: signing identity not in the keychain: $(SIGN_ID)"; \
 		echo "         falling back to ad hoc — macOS will treat each build as a"; \
 		echo "         different app, so Input Monitoring must be granted again"; \
 		echo "         after every one."; \
-		codesign --force --sign - --timestamp=none "$(STAGE)" >/dev/null; \
+		codesign --force --sign - --timestamp=none \
+			$(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS),) "$(STAGE)" >/dev/null; \
 	fi
 	# Proved, not assumed. A signature that does not verify is worse than none:
 	# the app launches until Gatekeeper decides otherwise.
@@ -179,6 +213,7 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist \
 	# Published only now, and by rename, so $(APP) is either the previous
 	# good bundle or this one — never a half-built mixture of the two.
 	@rm -rf $(APP)
+	@mkdir -p $(dir $(APP))
 	@mv "$(STAGE)" $(APP)
 	@printf '%s' '$(INPUT_SIG)' > $(INPUT_STAMP)
 	@echo "built $(APP) ($$(du -sh $(APP) | cut -f1))"
@@ -221,6 +256,10 @@ icon:
 # silently discarding a stapled ticket it had just earned.
 # What a build would call itself. Useful before tagging or submitting, and
 # cheap enough to run when a version number looks wrong.
+# The sandboxed build, without having to remember the variable.
+appstore:
+	@$(MAKE) --no-print-directory VARIANT=appstore
+
 version:
 	@printf 'marketing : %s   (Info.plist, edited by hand)\n' \
 		"$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
