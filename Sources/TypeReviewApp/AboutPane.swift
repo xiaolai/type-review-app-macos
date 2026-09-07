@@ -72,7 +72,11 @@ enum AboutPane {
         return stack
     }
 
-    /// `0.1.0 (1)`, read from the bundle rather than written down twice.
+    /// `0.1.1 (103)`, read from the bundle rather than written down twice.
+    ///
+    /// Only the first half is in `Info.plist`. The build number there is a
+    /// placeholder that the Makefile overwrites with the commit count, so the
+    /// tracked file does not change on every commit.
     private static var versionLine: String {
         let info = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String
