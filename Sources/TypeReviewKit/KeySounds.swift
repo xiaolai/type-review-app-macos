@@ -184,8 +184,133 @@ extension KeySoundPack {
                         durationMs: 50, filter: .lowpass, frequency: 900, q: 1, peak: 0.32)),
             ]))
 
-    /// Offered in this order, which is the website's.
-    public static let all: [KeySoundPack] = [off, mechvibe, typewriter, soft]
+    /// A heavy board on foam: the sound modern keyboards are built for.
+    ///
+    /// The gap `mechvibe` and `soft` leave between them. `mechvibe` is a bare
+    /// board — a bright click over a small body. `soft` is muted with no body
+    /// at all. Neither is what a gasket-mounted case full of foam does, which
+    /// is to swallow the click and leave the *body*: a low knock with the
+    /// top end taken off it.
+    ///
+    /// So the click sits at 1.1 kHz rather than 3, and the sine under it is
+    /// louder and longer than any other pack's. Being deep is not the same as
+    /// being quiet, and that distinction is the whole pack.
+    public static let thock = KeySoundPack(
+        name: "thock", label: "Thock",
+        kind: .synth(
+            standard: SynthVoice(
+                noise: NoiseVoice(
+                    durationMs: 55, filter: .bandpass, frequency: 1100, q: 1.2, peak: 0.38),
+                oscillator: OscillatorVoice(frequency: 60, durationMs: 95, peak: 0.26)),
+            overrides: [
+                .tab: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 62, filter: .bandpass, frequency: 1000, q: 1.2, peak: 0.38),
+                    oscillator: OscillatorVoice(frequency: 56, durationMs: 100, peak: 0.26)),
+                .enter: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 75, filter: .bandpass, frequency: 900, q: 1.3, peak: 0.44),
+                    oscillator: OscillatorVoice(frequency: 50, durationMs: 120, peak: 0.30)),
+                // Still the lightest key, but it keeps a body here — a
+                // bodyless tick in this pack would sound like a different
+                // keyboard, which is what `mechvibe` does on purpose and this
+                // one should not.
+                .esc: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 42, filter: .bandpass, frequency: 1400, q: 1.2, peak: 0.30),
+                    oscillator: OscillatorVoice(frequency: 72, durationMs: 60, peak: 0.18)),
+                // The deepest thing the pack makes: a long bar on a foamed
+                // plate, which is the sound people buy these boards for.
+                .space: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 80, filter: .bandpass, frequency: 820, q: 1.0, peak: 0.44),
+                    oscillator: OscillatorVoice(frequency: 45, durationMs: 130, peak: 0.32)),
+            ]))
+
+    /// A clicky switch, and the ring it leaves behind.
+    ///
+    /// The defining sound of a buckling spring or a blue switch is not the
+    /// click on its own — it is the metallic ping after it, a real spring
+    /// resonating in a real barrel. So the oscillator here is not a body at
+    /// 60 Hz like every other pack's; it is the ring, high and quiet.
+    ///
+    /// One oscillator per voice is the model's limit, so this pack spends it
+    /// on the ping and has no low end at all. That is the correct trade: a
+    /// clicky board with no ping is just a bright `mechvibe`, and the ping is
+    /// the thing anyone would recognise. The narrow Q is what keeps the noise
+    /// burst sounding struck rather than sprayed.
+    public static let clicky = KeySoundPack(
+        name: "clicky", label: "Clicky",
+        kind: .synth(
+            standard: SynthVoice(
+                noise: NoiseVoice(
+                    durationMs: 38, filter: .bandpass, frequency: 4200, q: 2.6, peak: 0.40),
+                oscillator: OscillatorVoice(frequency: 1800, durationMs: 55, peak: 0.09)),
+            overrides: [
+                .tab: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 44, filter: .bandpass, frequency: 3900, q: 2.6, peak: 0.42),
+                    oscillator: OscillatorVoice(frequency: 1650, durationMs: 60, peak: 0.10)),
+                .enter: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 52, filter: .bandpass, frequency: 3600, q: 2.8, peak: 0.46),
+                    oscillator: OscillatorVoice(frequency: 1450, durationMs: 70, peak: 0.11)),
+                .esc: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 28, filter: .bandpass, frequency: 5000, q: 2.4, peak: 0.34),
+                    oscillator: OscillatorVoice(frequency: 2200, durationMs: 34, peak: 0.07)),
+                // A stabilised bar rings lower and wider than a single switch.
+                .space: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 55, filter: .bandpass, frequency: 3000, q: 1.8, peak: 0.44),
+                    oscillator: OscillatorVoice(frequency: 1150, durationMs: 65, peak: 0.09)),
+            ]))
+
+    /// A scissor keyboard: 1 mm of travel onto an aluminium deck.
+    ///
+    /// Short, bright and shallow, which is exactly what a laptop key is. The
+    /// distinction from `soft` is worth stating, because both are quiet packs:
+    /// `soft` is muffled — a lowpass, everything above 1.2 kHz gone. This is
+    /// the opposite. It is almost *all* top end, just very brief, with a
+    /// faint low tap where the key bottoms out on the deck.
+    ///
+    /// Every duration here is under half of `mechvibe`'s. A scissor key that
+    /// rang for fifty milliseconds would be a different machine.
+    public static let laptop = KeySoundPack(
+        name: "laptop", label: "Laptop",
+        kind: .synth(
+            standard: SynthVoice(
+                noise: NoiseVoice(
+                    durationMs: 24, filter: .bandpass, frequency: 4800, q: 1.3, peak: 0.32),
+                oscillator: OscillatorVoice(frequency: 140, durationMs: 28, peak: 0.07)),
+            overrides: [
+                .tab: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 28, filter: .bandpass, frequency: 4500, q: 1.3, peak: 0.32),
+                    oscillator: OscillatorVoice(frequency: 130, durationMs: 32, peak: 0.07)),
+                .enter: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 34, filter: .bandpass, frequency: 3900, q: 1.2, peak: 0.35),
+                    oscillator: OscillatorVoice(frequency: 115, durationMs: 40, peak: 0.09)),
+                .esc: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 18, filter: .bandpass, frequency: 5600, q: 1.3, peak: 0.26),
+                    oscillator: OscillatorVoice(frequency: 165, durationMs: 20, peak: 0.05)),
+                // The one hollow key on a laptop, because the bar spans the
+                // unsupported middle of the deck.
+                .space: SynthVoice(
+                    noise: NoiseVoice(
+                        durationMs: 40, filter: .bandpass, frequency: 2900, q: 1.0, peak: 0.36),
+                    oscillator: OscillatorVoice(frequency: 105, durationMs: 48, peak: 0.10)),
+            ]))
+
+    /// Offered in this order, which is the website's. New packs are appended
+    /// rather than filed among the old ones: the order is what the picker
+    /// shows, and rearranging it moves entries under people who had learned
+    /// where they were.
+    public static let all: [KeySoundPack] = [
+        off, mechvibe, typewriter, soft, thock, clicky, laptop,
+    ]
 
     public static func named(_ name: String) -> KeySoundPack? {
         all.first { $0.name == name }

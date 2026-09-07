@@ -207,15 +207,34 @@ final class KeySoundTests: XCTestCase {
 
     // MARK: - Filters
 
-    func testBandpassStaysStableAtTheHighestCentreUsed() {
-        // 3.5 kHz is `mechvibe`'s esc voice, the highest centre in any pack.
+    func testEveryBandpassVoiceStaysStable() {
+        // Exhaustive, and it did not used to be. This was a literal 3.5 kHz
+        // with a comment naming the voice it came from — `mechvibe`'s esc,
+        // "the highest centre in any pack". Adding a pack with a 5.6 kHz voice
+        // left it passing over a case it no longer covered, and saying so.
+        // Instability is a function of Q as much as of centre anyway, so the
+        // highest centre was never the whole risk.
+        //
         // A state-variable filter goes unstable if its coefficient is pushed
-        // too far, and the failure is a burst of full-scale noise — loud,
-        // and exactly the kind of thing to catch before shipping.
-        let out = SynthRenderer.bandpass(
-            square(Int(0.05 * rate)), centre: 3500, q: 1.5, sampleRate: rate)
-        XCTAssertTrue(out.allSatisfy(\.isFinite))
-        XCTAssertLessThan(out.map(abs).max() ?? 0, 10, "bandpass ran away")
+        // too far, and the failure is a burst of full-scale noise — loud, and
+        // exactly the kind of thing to catch before shipping.
+        var checked = 0
+        for pack in KeySoundPack.all {
+            for category in SoundCategory.allCases {
+                guard let noise = pack.voice(for: category)?.noise, noise.filter == .bandpass
+                else { continue }
+                checked += 1
+                let out = SynthRenderer.bandpass(
+                    square(Int(0.05 * rate)), centre: noise.frequency, q: noise.q,
+                    sampleRate: rate)
+                let where_ = "\(pack.name)/\(category.rawValue) at \(noise.frequency) Hz Q \(noise.q)"
+                XCTAssertTrue(out.allSatisfy(\.isFinite), "\(where_) produced a non-finite sample")
+                XCTAssertLessThan(out.map(abs).max() ?? 0, 10, "\(where_) ran away")
+            }
+        }
+        // A loop that silently matched nothing looks exactly like a loop that
+        // passed.
+        XCTAssertGreaterThan(checked, 0, "no bandpass voice was checked")
     }
 
     func testLowpassAttenuatesFasterAlternationThanTheCutoff() {
