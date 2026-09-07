@@ -194,7 +194,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg validate upload
+.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -521,7 +521,7 @@ pkg:
 # refused the first attempt -- for an account-level reason no amount of reading
 # the artefact could have found. A validation costs nothing and does not
 # consume a submission.
-validate:
+validate: verify-pkg
 	@test -f "$(STORE_PKG)" \
 		|| { echo "error: no package at $(STORE_PKG) — run 'make pkg' first"; exit 1; }
 	@if [ -n "$(ASC_KEY_ID)" ] && [ -n "$(ASC_ISSUER_ID)" ]; then \
@@ -534,7 +534,9 @@ validate:
 		echo "error: no credentials — see 'make upload' for the two forms"; exit 1; \
 	fi
 
-upload: validate
+# The checks that need nothing but the file on disk. Free and instant, so
+# they run before anything is asked of Apple.
+verify-pkg:
 	@test -f "$(STORE_PKG)" \
 		|| { echo "error: no package at $(STORE_PKG) — run 'make pkg' first"; exit 1; }
 	# The same three questions the store will ask, asked here where the
@@ -552,7 +554,19 @@ upload: validate
 		|| { echo "error: the packaged app has no provisioning profile"; exit 1; }; \
 	codesign -d --entitlements :- "$$app" 2>/dev/null | grep -q "app-sandbox" \
 		|| { echo "error: the packaged app is not sandboxed"; exit 1; }; \
-	echo "  package verified: $(STORE_PKG)"
+	built=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$$app/Contents/Info.plist"); \
+	test "$$built" = "$(BUILD_NUMBER)" \
+		|| { echo "error: the package is build $$built, the tree is at $(BUILD_NUMBER)"; \
+		     echo "       built $$(( $(BUILD_NUMBER) - $$built )) commit(s) ago — run 'make pkg' again"; \
+		     exit 1; }; \
+	shortv=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$$app/Contents/Info.plist"); \
+	test "$$shortv" = "$(DIST_VERSION)" \
+		|| { echo "error: the package says $$shortv, Info.plist says $(DIST_VERSION)"; exit 1; }; \
+	test -z "$$(git status --porcelain)" \
+		|| { echo "error: the working tree is dirty — the package is not what is committed"; exit 1; }; \
+	echo "  package verified: $$shortv ($$built), matches the tree"
+
+upload: verify-pkg validate
 	@if [ -n "$(ASC_KEY_ID)" ] && [ -n "$(ASC_ISSUER_ID)" ]; then \
 		echo "  uploading with the App Store Connect API key $(ASC_KEY_ID)"; \
 		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
