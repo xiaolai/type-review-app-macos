@@ -304,15 +304,37 @@ test:
 # to write were shared by every checkout and every concurrent run: two of them
 # overwrote each other's artwork, and the files were left behind either way.
 icon:
+	# Every comment in this recipe sits above `@set -e`, not inside it. A `#`
+	# line without a trailing backslash ends the shell command it is standing
+	# in the middle of, and make then runs the rest as separate invocations --
+	# so `work` came back empty, swiftc wrote to /make-icon, and the whole
+	# thing still exited 0 because the last echo succeeded.
+	#
+	# The tool is compiled with the app's own copy of the mark rather than a
+	# duplicate of it: one definition, two drawers. It is copied to main.swift
+	# first because Swift allows top-level statements only in a file of that
+	# name, and only when it is not the sole file in the module. The tool keeps
+	# its readable name in the repository and gets the name the compiler
+	# insists on inside the work directory.
 	@set -e; \
 	work=$$(mktemp -d); \
 	trap 'rm -rf "$$work"' EXIT; \
-	swiftc -O Tools/make-icon.swift -o "$$work/make-icon"; \
-	"$$work/make-icon" "$$work/TypeReview.iconset" \
-		"$(ICON_DOC)/Assets/mark.svg"; \
+	before=$$(shasum -a 256 "$(ICON_DOC)/Assets/mark.svg" 2>/dev/null | cut -d" " -f1 || true); \
+	cp Tools/make-icon.swift "$$work/main.swift"; \
+	swiftc -O "$$work/main.swift" Sources/TypeReviewApp/IconMark.swift \
+		-o "$$work/make-icon"; \
+	test -x "$$work/make-icon" \
+		|| { echo "error: the generator did not build"; exit 1; }; \
+	"$$work/make-icon" "$$work/TypeReview.iconset" "$(ICON_DOC)/Assets/mark.svg"; \
+	test "$$(ls "$$work/TypeReview.iconset"/*.png | wc -l | tr -d " ")" = "10" \
+		|| { echo "error: the iconset is not ten representations"; exit 1; }; \
 	iconutil -c icns "$$work/TypeReview.iconset" -o Resources/TypeReview.icns; \
-	test -s "$(ICON_DOC)/Assets/mark.svg" \
+	after=$$(shasum -a 256 "$(ICON_DOC)/Assets/mark.svg" | cut -d" " -f1); \
+	test -n "$$after" \
 		|| { echo "error: the Liquid Glass layer was not written"; exit 1; }; \
+	if [ -n "$$before" ] && [ "$$before" = "$$after" ]; then \
+		echo "note: the layer is unchanged (same geometry, same bytes)"; \
+	fi; \
 	echo "wrote Resources/TypeReview.icns ($$(du -h Resources/TypeReview.icns | cut -f1))"; \
 	echo "wrote $(ICON_DOC)/Assets/mark.svg"
 

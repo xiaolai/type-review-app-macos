@@ -334,6 +334,45 @@ enum Diagnostics {
                             + "(\(metrics.correctChars) correct, \(metrics.incorrectChars) wrong)")
                     exit(1)
                 }
+                // The status item's mark, before the summary. A template
+                // image is only ever read for its alpha, so one that draws
+                // nothing is not a faint icon — it is an empty menu-bar slot,
+                // and every build in front of it stays green. The geometry is
+                // shared with the Dock icon, so a change made for one can
+                // empty the other with nothing on screen to say so.
+                let mark = Mark.menuBarImage(pointSize: Theme.SymbolSize.menuBarMark)
+                let side = Int(Theme.SymbolSize.menuBarMark * 2)
+                let markRep = NSBitmapImageRep(
+                    bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+                if let markRep {
+                    NSGraphicsContext.saveGraphicsState()
+                    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: markRep)
+                    mark.draw(in: NSRect(x: 0, y: 0, width: CGFloat(side), height: CGFloat(side)))
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+                var inked = 0
+                if let markRep {
+                    for y in 0..<markRep.pixelsHigh {
+                        for x in 0..<markRep.pixelsWide
+                        where (markRep.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.08 {
+                            inked += 1
+                        }
+                    }
+                }
+                // A fifth of the square is the floor. The mark is an outlined
+                // window with keys in it and covers about half; anything near
+                // zero is an empty slot, and a solid block would mean the
+                // geometry collapsed rather than drew.
+                let coverage = Double(inked) / Double(side * side)
+                guard mark.isTemplate, coverage > 0.20, coverage < 0.85 else {
+                    print(
+                        "SELFTEST FAIL: menu-bar mark covers "
+                            + String(format: "%.0f%%", coverage * 100)
+                            + " of its square (template: \(mark.isTemplate))")
+                    exit(1)
+                }
                 print(
                     "SELFTEST OK: typed \(expected.utf16.count) chars — "
                         + "\(Int(metrics.netWpm)) wpm, \(Int(metrics.accuracy))% accuracy, "

@@ -276,18 +276,36 @@ the value back to whatever it was built with.
 
 ## The icon set
 
-`keyboard.badge.ellipsis` for the menu bar — an SF Symbol, and a template
-image, so macOS inverts it for a dark bar and dims it when the bar is inactive:
-the two things a hand-tinted image gets wrong.
+Neither icon is an SF Symbol any more, and the menu bar draws literally the
+same mark as the Dock rather than one chosen to look like it. `Mark.geometry`
+lives in `Sources/TypeReviewApp/IconMark.swift`, and three things draw from it:
+`make icon` for the `.icns`, `make icon` again for the Icon Composer layer, and
+the status item at run time. A menu-bar mark that has quietly stopped matching
+the Dock icon is exactly the drift nobody notices until a screenshot puts the
+two side by side, and sharing the definition is what makes that impossible
+rather than merely unlikely.
 
-It is sized explicitly. A symbol's default configuration sizes by cap height,
-and `keyboard.badge.ellipsis` is a wide, short mark — at the default it drew 19
-by 11 points of ink and was the shortest thing in the bar, against neighbours
-running 12 to 15.5. `.large` at 13 points brings it to 24 by 13.5: as tall as
-the taller neighbours, two points wider than the widest. The numbers come from
-measuring the rendered menu bar, not from the API.
+The status item is a template image, so macOS inverts it for a dark bar and
+dims it when the bar is inactive — the two things a hand-tinted image gets
+wrong. A template reads only alpha, so the three window dots arrive as ink
+rather than as red, yellow and green; at that size the colours would be three
+pixels each, and what carries the meaning is the arrangement.
 
-The app icon is **not** an SF Symbol, and that is the more interesting half.
+It is sized by measurement. The mark is square and drawn edge to edge, so
+unlike the wide symbol it replaced it needs no scale correction: the ink comes
+out exactly the side it is given. 15 points matches the tallest of its
+neighbours, which run 12 to 15.5. The symbol it replaced was set to about 24 by
+14, and losing that width is right rather than a regression — the width was a
+badge hanging off one side. Its wall is also thinner than the Dock icon's, at
+0.055 of the side against 0.075: with no tile behind it, the full weight reads
+as a solid block rather than as a window, and thinning it is the same kind of
+size-dependent correction as dropping the keys at 16 pixels.
+
+An empty template image is invisible, not faint, and every build in front of it
+stays green — so `--selftest` measures the mark's coverage of its own square
+and fails outside 20% to 85%. Healthy is 56%. Both ends were checked by
+breaking them: a mark that draws nothing reports 0%, and one that has lost
+`isTemplate` is caught separately.
 
 ### Why the mark is drawn
 

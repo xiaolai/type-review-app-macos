@@ -117,6 +117,14 @@ enum Theme {
         /// Beside the status bar's digits, so it matches their cap height.
         static let statusBar: CGFloat = 13
         /// The menu-bar item — see the note at `installStatusItem`.
-        static let menuBar: CGFloat = 13
+        /// The status item's mark: the side of a square drawn edge to edge,
+        /// so this is ink rather than a symbol's cap height. 15 points matches
+        /// the tallest of its neighbours, which run 12 to 15.5.
+        ///
+        /// It replaced a `menuBar` symbol size of 13, which nothing referenced
+        /// once the status item stopped using an SF Symbol. Left in place it
+        /// would have been a number that looked like the answer to "how big is
+        /// the menu-bar icon" and was not.
+        static let menuBarMark: CGFloat = 15
     }
 }

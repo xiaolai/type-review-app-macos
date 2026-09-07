@@ -75,113 +75,6 @@ enum Palette {
     static let glassInk = "#000000"
 }
 
-/// The mark's geometry, defined once and rendered twice.
-enum Mark {
-    /// Both renderers work on a 1024 grid in SVG's convention, y downward.
-    /// AppKit's y runs the other way and is flipped at the point of drawing,
-    /// so there is one definition rather than two that can disagree.
-    static let canvas: CGFloat = 1024
-
-    struct Geometry {
-        var box: CGRect
-        var corner: CGFloat
-        var stroke: CGFloat
-        var dots: [CGPoint]
-        var dotRadius: CGFloat
-        var keyRows: [[CGRect]]
-    }
-
-    /// - Parameters:
-    ///   - side: the housing's side, as pixels on the 1024 grid.
-    ///   - bandShare: how much of the interior height the title band takes.
-    ///   - rows: rows of keys. The last is always the spacebar row.
-    ///   - columns: keys per row.
-    static func geometry(
-        side: CGFloat, bandShare: CGFloat, rows: Int, columns: Int
-    ) -> Geometry {
-        let box = CGRect(
-            x: (canvas - side) / 2, y: (canvas - side) / 2, width: side, height: side)
-        let stroke = side * 0.075
-        let corner = side * 0.185
-        let pad = stroke * 1.55
-        let inner = box.insetBy(dx: pad + stroke / 2, dy: pad + stroke / 2)
-
-        // The three dots, left-aligned, where a Mac window puts them and where
-        // `keyboard.macwindow` puts them. The mark still reads as centred
-        // because they sit *inside* a square housing rather than hanging off
-        // an edge, which was the whole problem with a badge.
-        let band = inner.height * bandShare
-        let dotR = band * 0.235
-        let dotGap = dotR * 2.75
-        let dotCY = inner.minY + band * 0.46
-        let dots = (0..<3).map {
-            CGPoint(x: inner.minX + dotR + dotGap * CGFloat($0), y: dotCY)
-        }
-
-        // No keys at all is a real request, not an edge case to guard against:
-        // see `detail(forPixelSize:)`. Everything below divides by `rows`.
-        guard rows > 0 else {
-            return Geometry(
-                box: box, corner: corner, stroke: stroke,
-                dots: dots, dotRadius: dotR, keyRows: [])
-        }
-
-        let keyTop = inner.minY + band + inner.height * 0.055
-        let area = CGRect(
-            x: inner.minX, y: keyTop, width: inner.width, height: inner.maxY - keyTop)
-        let gapY = area.height * 0.16
-        let keyH = (area.height - gapY * CGFloat(rows - 1)) / CGFloat(rows)
-        let gapX = area.width * 0.075
-        let keyW = (area.width - gapX * CGFloat(columns - 1)) / CGFloat(columns)
-
-        var keyRows: [[CGRect]] = []
-        for row in 0..<rows {
-            let y = area.minY + (keyH + gapY) * CGFloat(row)
-            if row == rows - 1 {
-                keyRows.append([
-                    CGRect(x: area.minX, y: y, width: keyW, height: keyH),
-                    CGRect(
-                        x: area.minX + keyW + gapX, y: y,
-                        width: keyW * CGFloat(columns - 2) + gapX * CGFloat(columns - 3),
-                        height: keyH),
-                    CGRect(x: area.maxX - keyW, y: y, width: keyW, height: keyH),
-                ])
-            } else {
-                keyRows.append(
-                    (0..<columns).map {
-                        CGRect(
-                            x: area.minX + (keyW + gapX) * CGFloat($0), y: y,
-                            width: keyW, height: keyH)
-                    })
-            }
-        }
-        return Geometry(
-            box: box, corner: corner, stroke: stroke,
-            dots: dots, dotRadius: dotR, keyRows: keyRows)
-    }
-
-    /// How much detail survives at a given rendered size.
-    ///
-    /// The thresholds come from rendering the candidates and looking, not from
-    /// guessing. A Dock icon is admired at 1024 and *used* at 32, so 32 is the
-    /// size that decides: five columns and three rows still read there, with
-    /// the dots still distinguishable as three colours.
-    ///
-    /// At 16 the keys go entirely. Coarsening them to two rows of three was
-    /// tried first and was worse than dropping them: at that size a key is
-    /// about a pixel and a half and the gaps are under one, so the grid fuses
-    /// into vertical bars and takes the housing's outline down with it. A
-    /// rounded window with three coloured dots is less information and more
-    /// of it survives, which is the whole point of simplifying rather than
-    /// shrinking.
-    static func detail(forPixelSize size: CGFloat) -> (rows: Int, columns: Int, dots: Bool) {
-        switch size {
-        case ..<24: return (0, 0, true)
-        default: return (3, 5, true)
-        }
-    }
-}
-
 /// Fails loudly. `iconutil` and `actool` both run straight after this in the
 /// Makefile, and a swallowed write error produced an iconset missing
 /// representations while the script still reported writing all ten — so the
@@ -233,49 +126,6 @@ enum SVGWriter {
             }
         }
         return out + "\n</svg>\n"
-    }
-}
-
-/// The same numbers as pixels, for the flat tile.
-enum RasterWriter {
-    /// The one place the two coordinate conventions meet. Everything else
-    /// works in SVG's, so there is no second definition to drift.
-    static func flip(_ r: CGRect) -> NSRect {
-        NSRect(x: r.minX, y: Mark.canvas - r.maxY, width: r.width, height: r.height)
-    }
-
-    static func draw(_ g: Mark.Geometry, ink: NSColor, dots: [NSColor], scale: CGFloat) {
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        let transform = NSAffineTransform()
-        transform.scale(by: scale)
-        transform.concat()
-
-        let outline = flip(g.box).insetBy(dx: g.stroke / 2, dy: g.stroke / 2)
-        let housing = NSBezierPath(
-            roundedRect: outline, xRadius: g.corner, yRadius: g.corner)
-        housing.lineWidth = g.stroke
-        ink.setStroke()
-        housing.stroke()
-
-        for (index, dot) in g.dots.enumerated() {
-            dots[index].setFill()
-            let y = Mark.canvas - dot.y
-            NSBezierPath(
-                ovalIn: NSRect(
-                    x: dot.x - g.dotRadius, y: y - g.dotRadius,
-                    width: g.dotRadius * 2, height: g.dotRadius * 2)
-            ).fill()
-        }
-
-        ink.setFill()
-        for row in g.keyRows {
-            for key in row {
-                let r = flip(key)
-                let radius = min(r.width, r.height) * 0.30
-                NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius).fill()
-            }
-        }
     }
 }
 
@@ -376,8 +226,8 @@ enum IconArtwork {
         let detail = Mark.detail(forPixelSize: pixelSize)
         let geometry = Mark.geometry(
             side: Mark.canvas * markShare, bandShare: 0.26,
-            rows: detail.rows, columns: detail.columns)
-        RasterWriter.draw(
+            rows: detail.rows, columns: detail.columns, strokeShare: detail.stroke)
+        MarkRenderer.draw(
             geometry, ink: colour(Palette.flatInk),
             dots: detail.dots
                 ? Palette.systemDots.map(colour)

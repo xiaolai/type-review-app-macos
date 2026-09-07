@@ -16,27 +16,35 @@ import TypeReviewKit
 extension AppDelegate {
     /// The menu-bar item.
     ///
-    /// `keyboard.badge.eye` as a template image, so macOS inverts it for a
-    /// dark menu bar and dims it when the bar is inactive — the two things a
-    /// hand-tinted image gets wrong. The same mark as the app icon, because
-    /// there is no reason for an app to have two faces; the badge is the point
-    /// either way, saying this icon leads somewhere rather than being a status
-    /// light.
+    /// The app's own mark as a template image, so macOS inverts it for a dark
+    /// menu bar and dims it when the bar is inactive — the two things a
+    /// hand-tinted image gets wrong.
+    ///
+    /// Literally the same mark as the Dock icon rather than a symbol chosen to
+    /// look like it: `Mark.menuBarImage` draws from the geometry that
+    /// `Tools/make-icon.swift` draws the `.icns` and the Icon Composer layer
+    /// from. There is no reason for an app to have two faces, and a menu-bar
+    /// mark that has quietly stopped matching the Dock is exactly the drift
+    /// nobody notices until a screenshot puts the two side by side.
+    ///
+    /// The colour does not survive — a template reads only alpha, so the three
+    /// window dots arrive as ink rather than as red, yellow and green. At this
+    /// size that is not a loss: the colours would be three pixels each, and
+    /// what carries the meaning is the arrangement.
     ///
     /// The menu is the app's own verbs, not a second copy of the main menu:
     /// what someone reaches for when TYPE is not the front app.
     func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        // Sized explicitly. Left at its default the symbol draws 19 by 11
-        // points of ink, which is the shortest thing in the menu bar — its
-        // neighbours run 12 to 15.5 tall — because `keyboard.badge.eye` is a
-        // wide, short mark and the default configuration sizes by cap
-        // height. `.large` at 13 points brings the ink to roughly 24 by 14,
-        // matching the taller neighbours and a hair wider than the widest.
-        let image = Theme.symbol(
-            "keyboard.badge.eye", size: Theme.SymbolSize.menuBar, scale: .large,
-            description: "TYPE")
-        image?.isTemplate = true
+        // Sized explicitly, and measured rather than guessed. The mark is
+        // square, so unlike the wide symbol this replaced it needs no scale
+        // correction — the ink comes out exactly the side it is given. 15
+        // points matches the tallest of its neighbours, which run 12 to 15.5;
+        // the old mark was set to about 24 by 14, and losing the width is
+        // correct rather than a regression, because that width was a badge
+        // hanging off one side.
+        let image = Mark.menuBarImage(pointSize: Theme.SymbolSize.menuBarMark)
+        image.accessibilityDescription = "TYPE"
         item.button?.image = image
         item.button?.toolTip = "TYPE"
 
