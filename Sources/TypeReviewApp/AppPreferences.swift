@@ -148,6 +148,16 @@ enum AppPreferences {
     /// global shortcut mutes the whole machine without this having to know.
     static let globalSound = Flag(key: "GlobalSound")
 
+    /// Whether keys are heard coming back up.
+    ///
+    /// On, because it is what a keyboard does: a real key makes two sounds,
+    /// and every pack here described only the first. The setting exists
+    /// anyway, because doubling the click rate of something you hear four
+    /// hundred times a minute is a taste, and one nobody had been offered
+    /// before. Which packs *have* a release is theirs to decide — `typewriter`
+    /// has none, since a typebar returns almost silently.
+    static let releaseSound = Flag(key: "ReleaseSound", default: true)
+
     /// Whether shift, control, option, command, fn and caps lock click too.
     ///
     /// Off, and the default is the interesting part. A real keyboard does

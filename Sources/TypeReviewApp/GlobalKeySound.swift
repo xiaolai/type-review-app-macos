@@ -1,4 +1,5 @@
 import AppKit
+import TypeReviewKit
 import ApplicationServices
 import Carbon.HIToolbox
 
@@ -38,7 +39,7 @@ import Carbon.HIToolbox
 @MainActor
 final class GlobalKeySound {
     /// Called for each physical key press, with the code and nothing else.
-    private let play: (UInt16) -> Void
+    private let play: (UInt16, Stroke) -> Void
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -47,6 +48,14 @@ final class GlobalKeySound {
     private var lastRawFlags: UInt = 0
     /// Whether modifier keys click. See `AppPreferences.modifierSound`.
     private(set) var soundsModifiers = false
+    /// Whether keys are heard coming back up as well as going down.
+    ///
+    /// Gates the event mask rather than the handler, and that is the whole
+    /// point. `.keyUp` doubles the keyboard events this process receives from
+    /// every application on the machine; taking them in order to throw them
+    /// away would be the wrong trade for a feature nobody switched on. The
+    /// same rule `.flagsChanged` already follows.
+    private(set) var soundsRelease = false
     /// Applications to stay silent in, by bundle identifier.
     var mutedApps: Set<String> = []
     /// The bundle identifier of the application in front, cached.
@@ -73,7 +82,7 @@ final class GlobalKeySound {
     private var rememberedForeignApp: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
 
-    init(play: @escaping (UInt16) -> Void) {
+    init(play: @escaping (UInt16, Stroke) -> Void) {
         self.play = play
     }
 
@@ -94,7 +103,7 @@ final class GlobalKeySound {
         // configuration observes fewer kinds of keyboard event rather than
         // observing them and throwing the result away.
         let matching: NSEvent.EventTypeMask =
-            soundsModifiers ? [.keyDown, .flagsChanged] : [.keyDown]
+            eventMask
         // Installed whether or not the permission has been granted, and that
         // is the point: *asking* for other applications' key events is what
         // makes macOS record this app as a client of Accessibility, list it
@@ -148,7 +157,7 @@ final class GlobalKeySound {
     private func installGlobalMonitor() {
         guard globalMonitor == nil, !isProtectedAppInFront else { return }
         let matching: NSEvent.EventTypeMask =
-            soundsModifiers ? [.keyDown, .flagsChanged] : [.keyDown]
+            eventMask
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
             MainActor.assumeIsolated { KeySoundMonitors.shared?.handleGlobal(event) }
         }
@@ -234,15 +243,27 @@ final class GlobalKeySound {
         start()
     }
 
+    /// The kinds of keyboard event this monitor asks for, which is as few as
+    /// the current settings allow.
+    private var eventMask: NSEvent.EventTypeMask {
+        var mask: NSEvent.EventTypeMask = [.keyDown]
+        if soundsModifiers { mask.insert(.flagsChanged) }
+        if soundsRelease { mask.insert(.keyUp) }
+        return mask
+    }
+
     /// Starts or stops to match `wanted`, and reports whether sound is now
     /// running. Idempotent, because it is called from every place the setting
     /// can change and from the launch path as well.
     @discardableResult
-    func setRunning(_ wanted: Bool, soundsModifiers modifiers: Bool) -> Bool {
+    func setRunning(_ wanted: Bool, soundsModifiers modifiers: Bool, soundsRelease release: Bool)
+        -> Bool
+    {
         // A change of scope needs new monitors: which event kinds they watch
         // is fixed when they are installed.
-        if isRunning, modifiers != soundsModifiers { stop() }
+        if isRunning, modifiers != soundsModifiers || release != soundsRelease { stop() }
         soundsModifiers = modifiers
+        soundsRelease = release
         if wanted { start() } else { stop() }
         return isRunning
     }
@@ -285,7 +306,12 @@ final class GlobalKeySound {
             // app, and a keyboard that goes quiet for every shortcut is not
             // the thing this setting promises.
             guard !event.isARepeat else { return }
-            play(event.keyCode)
+            play(event.keyCode, .press)
+        case .keyUp:
+            // No `isARepeat` to check: a held key repeats its `keyDown` and
+            // comes up exactly once, so the release is one sound however long
+            // the key was held.
+            play(event.keyCode, .release)
         case .flagsChanged:
             guard soundsModifiers else { return }
             handleModifier(event)
@@ -320,11 +346,18 @@ final class GlobalKeySound {
         // comes back up. Two clicks for one press.
         if event.keyCode == UInt16(kVK_CapsLock) {
             guard (raw ^ lastRawFlags) & mask != 0 else { return }
-            play(event.keyCode)
+            // Latching: the key moved once, so it clicks once, and there is no
+            // press-and-release pair to distinguish. It gets the press.
+            play(event.keyCode, .press)
             return
         }
-        guard raw & mask != 0, lastRawFlags & mask == 0 else { return }
-        play(event.keyCode)
+        let down = raw & mask != 0
+        let wasDown = lastRawFlags & mask != 0
+        guard down != wasDown else { return }
+        // The direction was already being computed here; it was only ever used
+        // to discard the release. Now it chooses which half to play.
+        guard down || soundsRelease else { return }
+        play(event.keyCode, down ? .press : .release)
     }
 
     /// The device-specific bit a modifier key sets, or nil if it is not one.

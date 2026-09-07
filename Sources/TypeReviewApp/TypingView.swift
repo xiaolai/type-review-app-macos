@@ -40,6 +40,10 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// those are seconds apart, and a keyboard whose sound lags the key is
     /// worse than one with no sound at all.
     var onKeyStruck: ((UInt16) -> Void)?
+    /// The other half of a keystroke. Separate from `onKeyStruck` rather than
+    /// one callback with a flag, because the two have different owners: a
+    /// press always sounds, a release only when the pack has one.
+    var onKeyReleased: ((UInt16) -> Void)?
 
     private var expected: String = ""
     private var statuses: [CharStatus] = []
@@ -695,6 +699,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         // was still down.
         held.remove(event.keyCode)
         onKeyPressed?(held.first)
+        // The same rule the press follows, for the same reason: ⌘S is a menu
+        // command rather than typing, and its release is not typing either.
+        if event.modifierFlags.intersection([.command, .control]).isEmpty {
+            onKeyReleased?(event.keyCode)
+        }
         super.keyUp(with: event)
     }
 

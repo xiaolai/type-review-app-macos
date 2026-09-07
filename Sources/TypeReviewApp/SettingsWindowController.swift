@@ -219,6 +219,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Modifier keys", self.modifierSoundToggle(),
                 hint: "⇧ ⌃ ⌥ ⌘ fn ⇪ click too. A capital stays one sound here.")
             self.addRow(
+                grid, "Key release", self.releaseSoundToggle(),
+                hint: "Keys are heard coming back up. Recorded packs have none.")
+            self.addRow(
                 grid, "Silent in", self.mutedAppsControl(),
                 hint: "Password managers are never watched. Password fields never sound.")
             self.addRow(
@@ -590,6 +593,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
+    /// Whether a key is heard coming back up.
+    ///
+    /// Not disabled with the scope switch above it, unlike "Modifier keys":
+    /// releases sound in the practice window as well, so this one means
+    /// something whether or not the system-wide monitor is running.
+    private func releaseSoundToggle() -> NSControl {
+        let toggle = checkbox()
+        toggle.identifier = .init("releaseSound")
+        controls["releaseSound"] = toggle
+        bind(toggle) { [weak self] in
+            AppPreferences.releaseSound.value = toggle.state == .on
+            self?.refreshSoundScope()
+        }
+        return toggle
+    }
+
     private func loginItemToggle() -> NSControl {
         let toggle = checkbox()
         toggle.identifier = .init("loginItem")
@@ -661,6 +680,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // means nothing while that is off — disabled rather than hidden, so it
         // does not appear and disappear as the box above it is used.
         (controls["modifierSound"] as? NSButton)?.isEnabled = global
+        (controls["releaseSound"] as? NSButton)?.state =
+            AppPreferences.releaseSound.value ? .on : .off
         mutedApps?.reload()
         let blocked = global && !GlobalKeySound.isPermitted
         permissionLabel?.stringValue = "Accessibility is off — other apps are not heard."

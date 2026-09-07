@@ -44,6 +44,7 @@ final class PracticeViewController: NSViewController {
     /// mean two audio engines and, when both paths were live, two clicks per
     /// key. The app owns the one player and decides which path feeds it.
     var onKeyStruck: ((UInt16) -> Void)?
+    var onKeyReleased: ((UInt16) -> Void)?
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
@@ -185,6 +186,7 @@ final class PracticeViewController: NSViewController {
         typingView.onRestart = { [weak self] in self?.startFreshRun() }
         typingView.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
         typingView.onKeyStruck = { [weak self] code in self?.onKeyStruck?(code) }
+        typingView.onKeyReleased = { [weak self] code in self?.onKeyReleased?(code) }
         applyTypingPreferences()
         typingView.onConfirm = { [weak self] in self?.startFreshRun() }
         start()

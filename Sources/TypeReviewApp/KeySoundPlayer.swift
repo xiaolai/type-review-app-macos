@@ -34,9 +34,20 @@ final class KeySoundPlayer {
     private var nextVoice = 0
     private static let voiceCount = 8
 
-    /// Rendered audio per category, built lazily and thrown away when the
-    /// pack changes.
-    private var rendered: [SoundCategory: AVAudioPCMBuffer] = [:]
+    /// What a rendered buffer belongs to.
+    ///
+    /// Both halves, not just the category. Keyed by category alone, the
+    /// release of a key would have been served the press's buffer — the cache
+    /// silently answering a question it had not been asked, which is the same
+    /// shape of bug as the single `sample` below.
+    private struct Rendered: Hashable {
+        let category: SoundCategory
+        let stroke: Stroke
+    }
+
+    /// Rendered audio per category and stroke, built lazily and thrown away
+    /// when the pack changes.
+    private var rendered: [Rendered: AVAudioPCMBuffer] = [:]
     /// For the sample pack: the whole recording, plus the onsets found in it.
     private var sample: AVAudioPCMBuffer?
     private var onsets: [Int] = []
@@ -114,10 +125,14 @@ final class KeySoundPlayer {
 
     // MARK: - Playing
 
-    /// Plays the click for a physical key. `pan` is -1...1.
-    func play(category: SoundCategory, pan: Double) {
+    /// Plays one half of a keystroke for a physical key. `pan` is -1...1.
+    ///
+    /// A pack with no release simply has no buffer for one, so nothing here
+    /// needs to know whether the current pack has releases — asking for one it
+    /// does not have is silence, not a special case.
+    func play(category: SoundCategory, stroke: Stroke = .press, pan: Double) {
         if case .silent = pack.kind { return }
-        guard volume > 0, let buffer = buffer(for: category) else { return }
+        guard volume > 0, let buffer = buffer(for: category, stroke: stroke) else { return }
         guard let node = nextPlayerNode() else { return }
         node.pan = Float(min(1, max(-1, pan)))
         // `.interrupts` rather than the default: the node is being reused
@@ -136,20 +151,29 @@ final class KeySoundPlayer {
         return node
     }
 
-    private func buffer(for category: SoundCategory) -> AVAudioPCMBuffer? {
-        if let cached = rendered[category] { return cached }
+    private func buffer(for category: SoundCategory, stroke: Stroke = .press)
+        -> AVAudioPCMBuffer?
+    {
+        let key = Rendered(category: category, stroke: stroke)
+        if let cached = rendered[key] { return cached }
         let built: AVAudioPCMBuffer?
         switch pack.kind {
         case .silent:
             built = nil
         case .synth:
-            built = pack.voice(for: category).flatMap(render)
+            built = pack.voice(for: category, stroke: stroke).flatMap(render)
         case .sample(let resource, let ext, _, _):
-            built = loadSample(resource, ext).flatMap { _ in
-                pack.sliceMs(for: category).flatMap(slice)
-            }
+            // Recorded packs have no release, and the typewriter is the
+            // reason that is the right default rather than a gap: a typebar
+            // returns almost silently, and the strike is the event. A release
+            // slice would be a quieter copy of a sound that does not happen.
+            built = stroke == .release
+                ? nil
+                : loadSample(resource, ext).flatMap { _ in
+                    pack.sliceMs(for: category).flatMap(slice)
+                }
         }
-        if let built { rendered[category] = built }
+        if let built { rendered[key] = built }
         return built
     }
 

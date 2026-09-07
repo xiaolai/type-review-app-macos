@@ -18,6 +18,35 @@ final class KeySoundTests: XCTestCase {
         (0..<count).map { $0.isMultiple(of: 2) ? 1.0 : -1.0 }
     }
 
+    /// A repeatable stand-in for the noise the app actually renders with.
+    ///
+    /// `square` is a Nyquist-rate tone, so a bandpass centred anywhere a pack
+    /// uses rejects nearly all of it: the peak it produces measures the
+    /// filter's rejection, not the voice's loudness. That is the right signal
+    /// for a stability test and the wrong one for an audibility test, which is
+    /// how four releases came to look silent while being perfectly audible.
+    /// The app feeds `SynthRenderer.whiteNoise`; so does this, seeded so the
+    /// numbers are the same on every run.
+    private func noise(_ count: Int) -> [Double] {
+        var generator = SeededGenerator(seed: 0x5EED_1234)
+        return SynthRenderer.whiteNoise(count, using: &generator)
+    }
+
+    /// A fixed-sequence generator: a test that fails one run in fifty is worse
+    /// than no test.
+    private struct SeededGenerator: RandomNumberGenerator {
+        private var state: UInt64
+        init(seed: UInt64) { state = seed }
+        mutating func next() -> UInt64 {
+            // xorshift64*, chosen for being four lines rather than for its
+            // statistics — this fills a noise burst, not a cryptosystem.
+            state ^= state >> 12
+            state ^= state << 25
+            state ^= state >> 27
+            return state &* 0x2545_F491_4F6C_DD1D
+        }
+    }
+
     // MARK: - Packs
 
     func testEveryPackIsReachableByItsStoredName() {
@@ -39,7 +68,7 @@ final class KeySoundTests: XCTestCase {
                 standard: SynthVoice(
                     noise: NoiseVoice(
                         durationMs: 30, filter: .lowpass, frequency: 1000, q: 1, peak: 0.3)),
-                overrides: [:]))
+                overrides: [:], release: nil))
         for category in SoundCategory.allCases {
             XCTAssertNotNil(sparse.voice(for: category), category.rawValue)
         }
@@ -175,16 +204,18 @@ final class KeySoundTests: XCTestCase {
         // every synth pack must produce samples, and they must not be zero.
         for pack in KeySoundPack.all {
             for category in SoundCategory.allCases {
-                guard let voice = pack.voice(for: category) else { continue }
-                let mix = SynthRenderer.render(voice, sampleRate: rate, noise: square)
-                XCTAssertFalse(
-                    mix.isEmpty, "\(pack.name)/\(category.rawValue) rendered no samples")
-                let peak = mix.map(abs).max() ?? 0
-                XCTAssertGreaterThan(
-                    peak, 0.001, "\(pack.name)/\(category.rawValue) rendered silence")
-                XCTAssertTrue(
-                    mix.allSatisfy(\.isFinite),
-                    "\(pack.name)/\(category.rawValue) produced a non-finite sample")
+                // Both halves. A release that rendered silence would be a
+                // pack claiming a sound it does not make.
+                for stroke in Stroke.allCases {
+                    guard let voice = pack.voice(for: category, stroke: stroke) else { continue }
+                    let mix = SynthRenderer.render(voice, sampleRate: rate, noise: noise)
+                    let where_ = "\(pack.name)/\(category.rawValue)/\(stroke.rawValue)"
+                    XCTAssertFalse(mix.isEmpty, "\(where_) rendered no samples")
+                    let peak = mix.map(abs).max() ?? 0
+                    XCTAssertGreaterThan(peak, 0.001, "\(where_) rendered silence")
+                    XCTAssertTrue(
+                        mix.allSatisfy(\.isFinite), "\(where_) produced a non-finite sample")
+                }
             }
         }
     }
@@ -207,6 +238,87 @@ final class KeySoundTests: XCTestCase {
 
     // MARK: - Filters
 
+    func testAReleaseIsQuieterShorterAndBrighterThanItsPress() {
+        // The shape's whole claim, checked against a pack that has one. If a
+        // release ever comes out louder or longer than the press it derives
+        // from, the numbers have been edited into something that is no longer
+        // a key coming back up.
+        for pack in KeySoundPack.all {
+            for category in SoundCategory.allCases {
+                guard let press = pack.voice(for: category, stroke: .press)?.noise,
+                    let release = pack.voice(for: category, stroke: .release)?.noise
+                else { continue }
+                let where_ = "\(pack.name)/\(category.rawValue)"
+                XCTAssertLessThan(release.peak, press.peak, "\(where_) release is not quieter")
+                XCTAssertLessThan(
+                    release.durationMs, press.durationMs, "\(where_) release is not shorter")
+                XCTAssertGreaterThan(
+                    release.frequency, press.frequency, "\(where_) release is not brighter")
+                // Loud enough to survive the envelope's own floor, or it
+                // renders as silence and the pack has a release in name only.
+                XCTAssertGreaterThan(
+                    release.peak, SynthRenderer.decayFloor, "\(where_) release is inaudible")
+                XCTAssertEqual(release.filter, press.filter, "\(where_) changed filter type")
+            }
+        }
+    }
+
+    func testAReleaseIsAudibleButNeverAsLoudAsItsPress() {
+        // The parameters are checked above; this checks what comes out of the
+        // renderer, which is not the same question — a release can be quieter
+        // on paper and still arrive inaudible once a short burst has been
+        // through a narrow filter.
+        //
+        // The band is wide because the packs genuinely differ: `thock` lands
+        // near an eighth of its press, since all of its weight is in a
+        // bottom-out that does not happen on the way up, while `soft` lands
+        // above a half, having no body to lose and less press to hide behind.
+        // What it rules out is a release nobody can hear and a release that is
+        // not a release.
+        for pack in KeySoundPack.all {
+            for category in SoundCategory.allCases {
+                guard let press = pack.voice(for: category, stroke: .press),
+                    let release = pack.voice(for: category, stroke: .release)
+                else { continue }
+                let pressed = SynthRenderer.render(press, sampleRate: rate, noise: noise)
+                    .map(abs).max() ?? 0
+                let released = SynthRenderer.render(release, sampleRate: rate, noise: noise)
+                    .map(abs).max() ?? 0
+                let ratio = released / max(pressed, 1e-9)
+                let where_ = "\(pack.name)/\(category.rawValue) at \(Int(ratio * 100))%"
+                XCTAssertGreaterThan(ratio, 0.05, "\(where_) — release is inaudible")
+                XCTAssertLessThan(ratio, 0.75, "\(where_) — release is not quieter enough")
+            }
+        }
+    }
+
+    func testABodyDoesNotSurviveTheKeyComingBackUp() {
+        // The physical claim behind `resonance`: the press's oscillator is a
+        // bottom-out, and there is no bottom-out on the way up. Packs that set
+        // resonance above zero mean something else by it — `clicky`'s spring —
+        // and they are the only ones allowed to keep it.
+        for pack in [KeySoundPack.mechvibe, .thock, .laptop] {
+            let press = pack.voice(for: .space, stroke: .press)
+            let release = pack.voice(for: .space, stroke: .release)
+            XCTAssertNotNil(press?.oscillator, "\(pack.name) press lost its body")
+            if pack.name == "thock" { continue }  // keeps a little case ring
+            XCTAssertNil(release?.oscillator, "\(pack.name) release kept a bottom-out")
+        }
+        XCTAssertNotNil(
+            KeySoundPack.clicky.voice(for: .standard, stroke: .release)?.oscillator,
+            "clicky lost the ring that is the whole pack")
+    }
+
+    func testRecordedPacksHaveNoRelease() {
+        // Not an oversight: a typebar returns almost silently, so the strike
+        // is the event. Asserted so that adding a release to a sample pack has
+        // to be a decision rather than a side effect.
+        for category in SoundCategory.allCases {
+            XCTAssertNil(KeySoundPack.typewriter.voice(for: category, stroke: .release))
+            XCTAssertNil(KeySoundPack.off.voice(for: category, stroke: .release))
+        }
+    }
+
     func testEveryBandpassVoiceStaysStable() {
         // Exhaustive, and it did not used to be. This was a literal 3.5 kHz
         // with a comment naming the voice it came from — `mechvibe`'s esc,
@@ -221,15 +333,23 @@ final class KeySoundTests: XCTestCase {
         var checked = 0
         for pack in KeySoundPack.all {
             for category in SoundCategory.allCases {
-                guard let noise = pack.voice(for: category)?.noise, noise.filter == .bandpass
-                else { continue }
-                checked += 1
-                let out = SynthRenderer.bandpass(
-                    square(Int(0.05 * rate)), centre: noise.frequency, q: noise.q,
-                    sampleRate: rate)
-                let where_ = "\(pack.name)/\(category.rawValue) at \(noise.frequency) Hz Q \(noise.q)"
-                XCTAssertTrue(out.allSatisfy(\.isFinite), "\(where_) produced a non-finite sample")
-                XCTAssertLessThan(out.map(abs).max() ?? 0, 10, "\(where_) ran away")
+                // Releases too, and they are the reason this matters more
+                // than it did: `brightness` multiplies the centre frequency,
+                // so the highest centre in the app is one no pack states.
+                for stroke in Stroke.allCases {
+                    guard let noise = pack.voice(for: category, stroke: stroke)?.noise,
+                        noise.filter == .bandpass
+                    else { continue }
+                    checked += 1
+                    let out = SynthRenderer.bandpass(
+                        square(Int(0.05 * rate)), centre: noise.frequency, q: noise.q,
+                        sampleRate: rate)
+                    let where_ =
+                        "\(pack.name)/\(category.rawValue)/\(stroke.rawValue) at \(noise.frequency) Hz Q \(noise.q)"
+                    XCTAssertTrue(
+                        out.allSatisfy(\.isFinite), "\(where_) produced a non-finite sample")
+                    XCTAssertLessThan(out.map(abs).max() ?? 0, 10, "\(where_) ran away")
+                }
             }
         }
         // A loop that silently matched nothing looks exactly like a loop that
@@ -265,3 +385,5 @@ extension KeySoundTests {
         XCTAssertEqual(nextSoundPack(current: .off, remembered: .off), .mechvibe)
     }
 }
+
+

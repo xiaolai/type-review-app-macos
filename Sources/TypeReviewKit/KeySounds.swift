@@ -77,10 +77,71 @@ public struct SynthVoice: Sendable, Equatable {
     public var isSilent: Bool { noise == nil && oscillator == nil }
 }
 
+/// Which half of a keystroke is sounding.
+///
+/// A real key makes two sounds, and every pack here used to describe only the
+/// first. The press is the finger driving the key onto the plate; the release
+/// is the spring pushing it back into the top housing, which is a lighter part
+/// struck by a weaker force.
+public enum Stroke: String, Sendable, CaseIterable {
+    case press, release
+}
+
+/// How a pack's release sounds, stated as what the press is *not*.
+///
+/// Derived rather than written out, and that is a claim about the physics
+/// rather than a shortcut. The release is the same mechanism running backwards
+/// — same materials, same switch, so the same filter over the same noise. What
+/// changes is only how hard, how long, how bright, and whether the body is
+/// there at all. Four numbers per pack says exactly that; twenty-five more
+/// voice literals would say it five times over and let them drift apart.
+public struct ReleaseShape: Sendable, Equatable {
+    /// Loudness against the press. The spring is doing this, not a finger.
+    public let gain: Double
+    /// Length against the press.
+    public let duration: Double
+    /// Centre frequency against the press. Higher: the upstroke arrives at
+    /// the top housing, which is thinner than the plate the downstroke hits.
+    public let brightness: Double
+    /// How much of the oscillator survives, and the one field that is not the
+    /// same story in every pack. For most it is the bottom-out body, which
+    /// simply does not happen on the way up — zero. For `clicky` it is the
+    /// spring, which does ring again on release, quieter.
+    public let resonance: Double
+
+    public init(gain: Double, duration: Double, brightness: Double, resonance: Double) {
+        self.gain = gain
+        self.duration = duration
+        self.brightness = brightness
+        self.resonance = resonance
+    }
+
+    public func applied(to voice: SynthVoice) -> SynthVoice {
+        SynthVoice(
+            noise: voice.noise.map {
+                NoiseVoice(
+                    durationMs: $0.durationMs * duration, filter: $0.filter,
+                    frequency: $0.frequency * brightness, q: $0.q, peak: $0.peak * gain)
+            },
+            // The pitch of a body is the case, and a case does not change
+            // pitch because the key is going the other way. Only its level
+            // and length do.
+            oscillator: resonance > 0
+                ? voice.oscillator.map {
+                    OscillatorVoice(
+                        frequency: $0.frequency, durationMs: $0.durationMs * duration,
+                        peak: $0.peak * gain * resonance)
+                }
+                : nil)
+    }
+}
+
 public struct KeySoundPack: Sendable, Equatable, Identifiable {
     public enum Kind: Sendable, Equatable {
         case silent
-        case synth(standard: SynthVoice, overrides: [SoundCategory: SynthVoice])
+        case synth(
+            standard: SynthVoice, overrides: [SoundCategory: SynthVoice],
+            release: ReleaseShape?)
         /// `resource` is a file in the app bundle's `Resources`, without its
         /// extension. Slice lengths are per category, in milliseconds.
         case sample(
@@ -97,9 +158,18 @@ public struct KeySoundPack: Sendable, Equatable, Identifiable {
 
     /// The voice for a category, falling back to `standard` — the same rule
     /// the original used, so a pack only has to describe what differs.
-    public func voice(for category: SoundCategory) -> SynthVoice? {
-        guard case .synth(let standard, let overrides) = kind else { return nil }
-        return overrides[category] ?? standard
+    ///
+    /// `.press` by default because it is the primary event: every keystroke
+    /// has one, and a pack without a `ReleaseShape` has nothing else. A `nil`
+    /// release is how a pack says its keys come back up silently, which is
+    /// the truth for a typewriter and a decision for everything else.
+    public func voice(for category: SoundCategory, stroke: Stroke = .press) -> SynthVoice? {
+        guard case .synth(let standard, let overrides, let release) = kind else { return nil }
+        let pressed = overrides[category] ?? standard
+        switch stroke {
+        case .press: return pressed
+        case .release: return release?.applied(to: pressed)
+        }
     }
 
     /// The slice length for a category, in milliseconds.
@@ -137,7 +207,10 @@ extension KeySoundPack {
                     noise: NoiseVoice(
                         durationMs: 70, filter: .bandpass, frequency: 1800, q: 1.0, peak: 0.45),
                     oscillator: OscillatorVoice(frequency: 60, durationMs: 95, peak: 0.22)),
-            ]))
+            ],
+            // A bare board: plastic arriving at plastic, with none of the
+            // bottom-out that gives the press its weight.
+            release: ReleaseShape(gain: 0.34, duration: 0.55, brightness: 1.30, resonance: 0)))
 
     /// A real mechanical typewriter, sliced at its own keystrokes.
     ///
@@ -182,7 +255,11 @@ extension KeySoundPack {
                 .space: SynthVoice(
                     noise: NoiseVoice(
                         durationMs: 50, filter: .lowpass, frequency: 900, q: 1, peak: 0.32)),
-            ]))
+            ],
+            // Proportionally the loudest release of any pack, which is not a
+            // mistake: there is less press here for it to hide behind, and a
+            // dampened board is exactly where you notice the key coming back.
+            release: ReleaseShape(gain: 0.42, duration: 0.60, brightness: 1.25, resonance: 0)))
 
     /// A heavy board on foam: the sound modern keyboards are built for.
     ///
@@ -225,7 +302,11 @@ extension KeySoundPack {
                     noise: NoiseVoice(
                         durationMs: 80, filter: .bandpass, frequency: 820, q: 1.0, peak: 0.44),
                     oscillator: OscillatorVoice(frequency: 45, durationMs: 130, peak: 0.32)),
-            ]))
+            ],
+            // The quietest and the brightest, both for the same reason: all
+            // of this pack's weight is in a bottom-out that does not happen
+            // on the way up. A little case ring survives, and no more.
+            release: ReleaseShape(gain: 0.30, duration: 0.50, brightness: 1.50, resonance: 0.12)))
 
     /// A clicky switch, and the ring it leaves behind.
     ///
@@ -264,7 +345,12 @@ extension KeySoundPack {
                     noise: NoiseVoice(
                         durationMs: 55, filter: .bandpass, frequency: 3000, q: 1.8, peak: 0.44),
                     oscillator: OscillatorVoice(frequency: 1150, durationMs: 65, peak: 0.09)),
-            ]))
+            ],
+            // The one pack whose release is a real second click. A buckling
+            // spring unbuckles on the way up and rings again, which is why
+            // this keeps far more of its oscillator than anything else here —
+            // and why a clicky board sounds busier than its keystroke count.
+            release: ReleaseShape(gain: 0.45, duration: 0.60, brightness: 1.15, resonance: 0.45)))
 
     /// A scissor keyboard: 1 mm of travel onto an aluminium deck.
     ///
@@ -302,7 +388,11 @@ extension KeySoundPack {
                     noise: NoiseVoice(
                         durationMs: 40, filter: .bandpass, frequency: 2900, q: 1.0, peak: 0.36),
                     oscillator: OscillatorVoice(frequency: 105, durationMs: 48, peak: 0.10)),
-            ]))
+            ],
+            // Barely there, and brief even by this pack's standards — the esc
+            // release lands at ten milliseconds. A scissor key returns under
+            // a light spring with nowhere to resonate.
+            release: ReleaseShape(gain: 0.38, duration: 0.55, brightness: 1.20, resonance: 0)))
 
     /// Offered in this order, which is the website's. New packs are appended
     /// rather than filed among the old ones: the order is what the picker

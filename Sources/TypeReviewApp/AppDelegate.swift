@@ -47,8 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var sounds = KeySoundPlayer()
     // Not private: the menu extension reads which application was last in
     // front, to name the item that silences it.
-    lazy var globalSound = GlobalKeySound { [weak self] code in
-        self?.playKey(code)
+    lazy var globalSound = GlobalKeySound { [weak self] code, stroke in
+        self?.playKey(code, stroke)
     }
     /// The passage shape the window was last sized to, so an unrelated
     /// preference change does not resize it. See `applyWindowSize`.
@@ -524,11 +524,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// surface and the system-wide monitor — arrive here, so there is one
     /// place that decides what a key sounds like and no way for the two to
     /// drift apart.
-    private func playKey(_ code: UInt16) {
+    private func playKey(_ code: UInt16, _ stroke: Stroke = .press) {
         // Every key has a category — the optional this used to unwrap could
         // not be nil, so the branch that handled it was unreachable.
         sounds.play(
-            category: soundCategory(forKeyCode: code), pan: KeyPan.pan(forKeyCode: code))
+            category: soundCategory(forKeyCode: code), stroke: stroke,
+            pan: KeyPan.pan(forKeyCode: code))
     }
 
     /// Applies pack, volume and scope together.
@@ -545,8 +546,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let global = AppPreferences.globalSound.value
         globalSound.mutedApps = Set(AppPreferences.mutedApps.value)
-        globalSound.setRunning(global, soundsModifiers: AppPreferences.modifierSound.value)
+        globalSound.setRunning(
+            global, soundsModifiers: AppPreferences.modifierSound.value,
+            soundsRelease: AppPreferences.releaseSound.value)
         practice?.onKeyStruck = global ? nil : { [weak self] code in self?.playKey(code) }
+        // The release rides the same switch as the press: while the system-wide
+        // monitor is running it sounds every key in every application, this one
+        // included, and routing the window's own releases as well would play
+        // each of them twice.
+        practice?.onKeyReleased =
+            global || !AppPreferences.releaseSound.value
+            ? nil : { [weak self] code in self?.playKey(code, .release) }
         markSoundMenus()
     }
 
