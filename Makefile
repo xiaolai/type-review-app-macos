@@ -69,6 +69,27 @@ SIGN_ID ?= Developer ID Application: HANDO K.K. (Y53RSUA3SM)
 # password is a second thing to rotate.
 NOTARY_PROFILE ?= chase-notary
 
+# App Store distribution. A different trust chain from Developer ID entirely —
+# that certificate signs software Apple has notarised but does not host, and
+# the store will not accept it. Two more are needed: one for the application,
+# one for the installer package.
+#
+# The organisation name differs between them (HANDO on the older Developer ID,
+# PANDO on these two) while the team identifier is the same. Same team, renamed
+# at some point; the identifier is what anything checks.
+STORE_SIGN     ?= Apple Distribution: PANDO K.K. (Y53RSUA3SM)
+INSTALLER_SIGN ?= 3rd Party Mac Developer Installer: PANDO K.K. (Y53RSUA3SM)
+TEAM_ID        ?= Y53RSUA3SM
+# Downloaded from the developer portal. Not in the repository: it is tied to
+# one team and expires, so a checked-in copy would be a stale secret-shaped
+# file that stops working silently.
+STORE_PROFILE  ?= dist/TYPE_Mac_App_Store.provisionprofile
+# The store's identifier, spelled out rather than taken from $(BUNDLE_ID):
+# `make pkg` builds the appstore variant through a sub-make, so the outer
+# invocation still has the direct build's value.
+BUNDLE_ID_STORE ?= review.type.app
+STORE_PKG       ?= dist/TYPE-$(DIST_VERSION).pkg
+
 # Apple's notary service drops connections, and notarytool has no internal
 # retry: a timed-out status poll fails the build even though the upload
 # succeeded and the submission is Accepted server-side. Retry the whole call
@@ -161,7 +182,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release
+.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg
 
 all: $(APP)
 
@@ -397,6 +418,83 @@ zip: $(APP)
 # The sandboxed build, without having to remember the variable.
 appstore:
 	@$(MAKE) --no-print-directory VARIANT=appstore
+
+# The App Store package, ready to upload.
+#
+# Every step here can fail while looking like it worked, so every step is
+# followed by a check of what actually landed. That is not caution for its own
+# sake: a package that uploads and is rejected costs a round trip through
+# App Store Connect, and the failures that cause it -- a lost entitlement, a
+# missing profile, an app signed with the wrong certificate -- are all
+# invisible in the artefact unless something reads it back.
+pkg:
+	@$(MAKE) --no-print-directory appstore
+	@test -f "$(STORE_PROFILE)" || { \
+		echo "error: no provisioning profile at $(STORE_PROFILE)"; \
+		echo "       download a Mac App Store profile for $(BUNDLE_ID_STORE) and put it there"; \
+		exit 1; }
+	# That the file exists is not that it is a profile. A text file in its
+	# place passed the existence check, was copied in, and came out the far
+	# end as a signed package -- one that App Store Connect would reject
+	# after the upload, which is the most expensive place to find out. A
+	# profile is CMS-signed, so decoding it is both the format check and the
+	# integrity check.
+	@security cms -D -i "$(STORE_PROFILE)" >/dev/null 2>&1 \
+		|| { echo "error: $(STORE_PROFILE) is not a signed provisioning profile"; exit 1; }
+	@set -e; \
+	plist=$$(mktemp); \
+	trap 'rm -f "$$plist"' EXIT; \
+	security cms -D -i "$(STORE_PROFILE)" > "$$plist" 2>/dev/null; \
+	got=$$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:com.apple.application-identifier' "$$plist" 2>/dev/null); \
+	test "$$got" = "$(TEAM_ID).$(BUNDLE_ID_STORE)" \
+		|| { echo "error: the profile is for '$$got', not $(TEAM_ID).$(BUNDLE_ID_STORE)"; exit 1; }; \
+	expiry=$$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$$plist" 2>/dev/null); \
+	test -n "$$expiry" || { echo "error: the profile has no expiry date"; exit 1; }; \
+	python3 -c "import sys,datetime;e=datetime.datetime.strptime(sys.argv[1],'%a %b %d %H:%M:%S %Z %Y');sys.exit(0 if e>datetime.datetime.utcnow() else 1)" "$$expiry" \
+		|| { echo "error: the profile expired on $$expiry"; exit 1; }; \
+	echo "  profile: $(TEAM_ID).$(BUNDLE_ID_STORE), valid until $$expiry"
+	@security find-identity -v | grep -q "$(STORE_SIGN)" \
+		|| { echo "error: signing identity not in the keychain: $(STORE_SIGN)"; exit 1; }
+	@security find-identity -v | grep -q "$(INSTALLER_SIGN)" \
+		|| { echo "error: signing identity not in the keychain: $(INSTALLER_SIGN)"; exit 1; }
+	@set -e; \
+	work=$$(mktemp -d); \
+	trap 'rm -rf "$$work"' EXIT; \
+	rm -rf "$$work/TYPE.app"; \
+	cp -R .build/appstore/TYPE.app "$$work/TYPE.app"; \
+	cp "$(STORE_PROFILE)" "$$work/TYPE.app/Contents/embedded.provisionprofile"; \
+	test -s "$$work/TYPE.app/Contents/embedded.provisionprofile" \
+		|| { echo "error: the profile did not copy"; exit 1; }; \
+	cp sandbox.entitlements "$$work/store.entitlements"; \
+	/usr/libexec/PlistBuddy -c "Add :com.apple.application-identifier string $(TEAM_ID).$(BUNDLE_ID_STORE)" \
+		"$$work/store.entitlements" >/dev/null; \
+	/usr/libexec/PlistBuddy -c "Add :com.apple.developer.team-identifier string $(TEAM_ID)" \
+		"$$work/store.entitlements" >/dev/null; \
+	codesign --force --options runtime --timestamp \
+		--entitlements "$$work/store.entitlements" \
+		--sign "$(STORE_SIGN)" "$$work/TYPE.app"; \
+	codesign -dvvv "$$work/TYPE.app" 2>&1 | grep -q "Authority=$(STORE_SIGN)" \
+		|| { echo "error: the app is not signed with $(STORE_SIGN)"; exit 1; }; \
+	codesign -d --entitlements :- "$$work/TYPE.app" 2>/dev/null \
+		| grep -q "com.apple.security.app-sandbox" \
+		|| { echo "error: the sandbox entitlement did not survive re-signing"; exit 1; }; \
+	codesign -d --entitlements :- "$$work/TYPE.app" 2>/dev/null \
+		| grep -q "$(TEAM_ID).$(BUNDLE_ID_STORE)" \
+		|| { echo "error: the application-identifier entitlement is absent"; exit 1; }; \
+	codesign -d --entitlements :- "$$work/TYPE.app" 2>/dev/null \
+		| grep -q "get-task-allow" \
+		&& { echo "error: get-task-allow present — the store will refuse this"; exit 1; } \
+		|| true; \
+	mkdir -p dist; \
+	rm -f "$(STORE_PKG)"; \
+	productbuild --component "$$work/TYPE.app" /Applications \
+		--sign "$(INSTALLER_SIGN)" "$(STORE_PKG)"; \
+	pkgutil --check-signature "$(STORE_PKG)" | grep -q "Status: signed" \
+		|| { echo "error: the package is not signed"; exit 1; }; \
+	printf '\n%s\n' "$(STORE_PKG)"; \
+	printf '  version : %s (build %s)\n' "$(DIST_VERSION)" "$(BUILD_NUMBER)"; \
+	printf '  size    : %s\n' "$$(du -h '$(STORE_PKG)' | cut -f1)"; \
+	printf '  sha256  : %s\n' "$$(shasum -a 256 '$(STORE_PKG)' | cut -d' ' -f1)"
 
 version:
 	@printf 'marketing : %s   (Info.plist, edited by hand)\n' \
