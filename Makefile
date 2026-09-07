@@ -309,12 +309,12 @@ icon:
 	trap 'rm -rf "$$work"' EXIT; \
 	swiftc -O Tools/make-icon.swift -o "$$work/make-icon"; \
 	"$$work/make-icon" "$$work/TypeReview.iconset" \
-		"$(ICON_DOC)/Assets/mark.png"; \
+		"$(ICON_DOC)/Assets/mark.svg"; \
 	iconutil -c icns "$$work/TypeReview.iconset" -o Resources/TypeReview.icns; \
-	test -s "$(ICON_DOC)/Assets/mark.png" \
+	test -s "$(ICON_DOC)/Assets/mark.svg" \
 		|| { echo "error: the Liquid Glass layer was not written"; exit 1; }; \
 	echo "wrote Resources/TypeReview.icns ($$(du -h Resources/TypeReview.icns | cut -f1))"; \
-	echo "wrote $(ICON_DOC)/Assets/mark.png"
+	echo "wrote $(ICON_DOC)/Assets/mark.svg"
 
 # Notarised and stapled, so the app passes Gatekeeper on a Mac that has never
 # seen it — offline included. Without a stapled ticket it only passes while the

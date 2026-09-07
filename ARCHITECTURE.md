@@ -276,96 +276,111 @@ the value back to whatever it was built with.
 
 ## The icon set
 
-`keyboard.badge.eye` for the app — a keyboard being watched, which is what
-this does to your typing — and `keyboard.badge.ellipsis` for the menu bar.
-Both are SF Symbols, which means they carry Apple's optical corrections rather
-than a traced approximation of them, and the menu-bar one is a template image
-so macOS inverts it for a dark bar and dims it when the bar is inactive — the
-two things a hand-tinted image gets wrong.
+`keyboard.badge.ellipsis` for the menu bar — an SF Symbol, and a template
+image, so macOS inverts it for a dark bar and dims it when the bar is inactive:
+the two things a hand-tinted image gets wrong.
 
-The menu-bar symbol is sized explicitly. A symbol's default configuration
-sizes by cap height, and `keyboard.badge.ellipsis` is a wide, short mark — at
-the default it drew 19 by 11 points of ink and was the shortest thing in the
-bar, against neighbours running 12 to 15.5. `.large` at 13 points brings it to
-24 by 13.5: as tall as the taller neighbours, two points wider than the widest.
-The numbers come from measuring the rendered menu bar, not from the API.
+It is sized explicitly. A symbol's default configuration sizes by cap height,
+and `keyboard.badge.ellipsis` is a wide, short mark — at the default it drew 19
+by 11 points of ink and was the shortest thing in the bar, against neighbours
+running 12 to 15.5. `.large` at 13 points brings it to 24 by 13.5: as tall as
+the taller neighbours, two points wider than the widest. The numbers come from
+measuring the rendered menu bar, not from the API.
 
-### Two icons, and why neither is derivable from the other
+The app icon is **not** an SF Symbol, and that is the more interesting half.
 
-The app icon ships twice, from one generator.
+### Why the mark is drawn
 
-`Resources/TypeReview.icns` is the whole picture, tile included, for **macOS 14
-and 15**. Those versions draw an app icon exactly as handed over, so the
-artwork has to arrive already shaped: Apple's grid, an 824-point tile on a 1024
-canvas, and its own drop shadow.
+It was `keyboard.badge.eye`, and the shape was wrong for a square frame.
+Measured: that symbol is 1.66 wide to 1 tall, so fitting it by width leaves two
+fifths of the canvas empty above and below; and its badge hangs 87 units off
+the right of the plain keyboard, which pushes the keyboard left of centre. Both
+complaints — the empty band and the off-centre keyboard — are the same defect,
+and no amount of sizing fixes either.
 
-`Resources/AppIcon.icon` is an Icon Composer document — a gradient and the mark
-on nothing — compiled by `actool` into `Assets.car` for **macOS 26**. That
-version draws app icons itself. It shapes them, lights them, and re-lights them
-for light mode, dark mode and tinting, and it can only do that for an icon
-supplied as *contents* rather than as a finished picture.
+`keyboard.macwindow` is the squarest of the family at 1.35 and is the shape
+`Tools/make-icon.swift` follows, redrawn as a true square: a rounded housing,
+three window dots in the title band, three rows of keys under them. Nothing
+hangs off an edge, so the mark is centred because it fills its frame rather
+than because it was nudged.
 
-Handing 26 the `.icns` alone is not a cosmetic compromise, it is a visible
-defect: the system fills the transparent margin around our 80.5% tile with
-white and rounds the result, so the app sat in the Dock as a small blue square
-inside a large cream one. That is what the second file exists to fix, and it is
-why cropping one out of the other would not work — one has a tile the other
-must not have.
+The three dots carry the only colour. They are the real window-button colours,
+sampled from `NSWindow.standardWindowButton` on the running system rather than
+taken from the hex triples that circulate for them — those are from an older
+macOS and this one does not match them.
+
+### Two artworks, one set of numbers
+
+`Mark.geometry` is the single definition. `RasterWriter` draws it with
+`NSBezierPath` for `Resources/TypeReview.icns`; `SVGWriter` emits the same
+numbers as SVG into `Resources/AppIcon.icon`, which `actool` compiles to an
+asset catalogue. Everything is defined on a 1024 grid in SVG's convention, y
+downward, and flipped once at the point of raster drawing — so there is no
+second set of coordinates that can drift.
+
+macOS 14 and 15 draw an app icon exactly as handed over, so the `.icns` arrives
+pre-shaped: Apple's grid, an 824-point tile on a 1024 canvas, its own shadow.
+macOS 26 draws icons itself, and can only do that for an icon supplied as
+*contents*. Given only the `.icns` it fills our transparent margin with white
+and rounds the result, which is how this app came to sit in a cream plate in
+the Dock. Neither file is derivable from the other: one must carry a tile and
+the other must not.
 
 Both `Info.plist` keys ship, which is what Notes and Music do. macOS 26 reads
 `CFBundleIconName` and finds the catalogue; 14 and 15 read `CFBundleIconFile`
-and find the painted tile.
+and find the tile.
 
+The catalogue's layer is SVG, so it compiles to a `Vector` asset exactly as
+Apple's own icons do and the system rasterises it at whatever size it needs.
 `actool` also flattens the document to its own `.icns`, and the build deletes
-it. It carries only four representations against the hand-drawn set's ten, so
-it is not a replacement — measured, not assumed, and unchanged by lowering the
-deployment target from 26.0 to 14.0.
+it: four representations against the drawn set's ten, unchanged by lowering the
+deployment target from 26.0 to 14.0 — tested, because the assumption that it
+would change was wrong.
 
-Three assertions guard the step, because each part can fail while looking like
-it worked: `actool` exits 0 having written nothing if it decides there is no
-icon to compile, a catalogue can exist carrying only flattened bitmaps, and
-PlistBuddy reports success for keys it did not write. The middle one greps the
-compiled catalogue for `IconImageStack` — the structure that *is* the glass.
+### Why the two artworks use different colours
 
-### The flat artwork
+Liquid Glass lights a layer, and lighting only ever adds: every colour handed
+to it comes back lighter and less saturated. So the vector layer is
+pre-compensated and the flat tile is not, and the amounts were measured rather
+than judged. Distance from the system's own window buttons, in RGB units, at
+each stage:
 
-`Tools/make-icon.swift` draws both products; `make icon` runs the first through
-`iconutil` and writes the second into the document. The outputs are committed,
-so an ordinary build needs neither, but the artwork stays reproducible and
-changing it is an edit to code.
+| layer colours | red | yellow | green | total |
+|---|---|---|---|---|
+| the sampled values, used as-is | 0.178 | 0.210 | 0.223 | 0.611 |
+| naively deepened | 0.220 | 0.092 | 0.140 | 0.452 |
+| what ships | 0.077 | 0.092 | 0.049 | **0.217** |
 
-- **The artwork simplifies as it shrinks.** `keyboard.badge.eye`'s badge and
-  its rows of small keys collapse into a smudge well before 16 points. At 32
-  the *filled* badge is still a distinguishable eye, so the eye — which is the
-  mark — survives there; only at 16 does it become a smudge, and the plain
-  keyboard stands alone.
-- **The mark is fitted by rendered width, not point size** — 0.78 of the tile.
-  A symbol's point size is its cap height, so sizing by it makes a wide mark
-  overflow its tile and a narrow one look lost.
-- **The tile is silver, not graphite** — the colour of the keyboard case the
-  app draws, and of the hardware it is a picture of. A light tile needs a dark
-  hairline border where a dark one needs a light one: the first would dissolve
-  into a pale Dock background, the second would read as a hole.
-- **The tile is a superellipse, not a rounded rectangle.** macOS icon tiles
-  use a continuous corner and `NSBezierPath` has none; `|x/a|^5 + |y/b|^5 = 1`
-  is the shape, and sampling it is shorter than faking it with arcs. Apple's
-  grid puts an 824-point tile on a 1024 canvas, and the shadow is part of the
+The middle row is why this is a measurement and not a rule of thumb: deepening
+helped yellow and green and made red *worse*, so red was swept on its own. The
+mark's ink is black on the vector track and graphite on the flat one for the
+same reason — 0.13 graphite comes out of the compositor at 0.46 luminance where
+the flat tile puts it at 0.18, and black is the floor.
+
+Three assertions guard the compile step, because each part fails silently.
+`actool` exits 0 having written nothing if it decides there is no icon to
+compile; a catalogue can exist carrying only flattened bitmaps, which is the
+old icon wearing the new file name; and PlistBuddy reports success for keys it
+did not write. The middle assertion greps the catalogue for `IconImageStack`,
+the structure that *is* the glass.
+
+### The rest of the flat set
+
+- **The artwork simplifies as it shrinks.** At 16 pixels the keys go entirely.
+  Coarsening them to two rows of three was tried first and was worse than
+  dropping them: at that size a key is about a pixel and a half and the gaps
+  are under one, so the grid fuses into vertical bars and takes the housing's
+  outline down with it. A rounded window with three coloured dots is less
+  information and more of it survives.
+- **The tile is near-white, not silver.** The mark now carries three saturated
+  dots and is otherwise black, so the tile's job is to stay out of their way. A
+  tile with a grey of its own defeats that twice: it mutes the dots and leaves
+  the whole icon reading as colourless.
+- **The tile is a superellipse, not a rounded rectangle.** macOS icon tiles use
+  a continuous corner and `NSBezierPath` has none; `|x/a|^5 + |y/b|^5 = 1` is
+  the shape, and sampling it is shorter than faking it with arcs. Apple's grid
+  puts an 824-point tile on a 1024 canvas, and the shadow is part of the
   artwork rather than something the Dock adds.
-
-### The one place the two artworks disagree, and why
-
-The Icon Composer layer is black where the flat tile's mark is graphite, and
-that is the same decision corrected for the renderer rather than a second one.
-
-Liquid Glass lights a layer, and lighting only ever adds. The flat icon's 0.13
-graphite comes out of the compositor at 0.46 luminance against 0.18 on the flat
-tile, so the mark arrives washed out. Measured across three layer values,
-contrast against the tile ran 0.440 at 0.13, 0.499 at 0.07 and 0.545 at black.
-Black is the floor: the flat icon's 0.756 is not reachable through this
-renderer at all, so the layer takes the most of it that exists instead of
-pretending the two can be matched. A mark that reads slightly softer on macOS
-26 than on 15 is a property of the system's icon rendering, not a defect in the
-artwork.
 
 ## The on-screen keyboard
 

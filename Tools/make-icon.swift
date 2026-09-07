@@ -1,18 +1,285 @@
 import AppKit
 
-/// Draws the app icon set.
+/// Draws the app icon, twice, from one set of numbers.
 ///
-/// Run with `make icon`, which pipes the result through `iconutil`. The output
-/// is committed, so a normal build needs neither this nor a Swift toolchain
-/// detour — but the icon stays reproducible, and changing it is an edit here
-/// rather than a trip through a drawing program.
+/// Run with `make icon`. It writes the ten `.iconset` representations that
+/// `iconutil` turns into `Resources/TypeReview.icns`, and the SVG layer inside
+/// `Resources/AppIcon.icon` that `actool` compiles for macOS 26. Both outputs
+/// are committed, so an ordinary build needs neither this nor a Swift
+/// toolchain detour — but the artwork stays reproducible and changing it is an
+/// edit to code.
 ///
-/// Two things make this an icon *set* rather than one picture scaled ten ways.
-/// The artwork simplifies as it shrinks, because `keyboard.badge.eye`'s badge
-/// and its rows of small keys collapse into a grey smudge well before 16
-/// points. Weight is deliberately *not* varied: `.regular` reads at every one
-/// of these sizes, and the earlier plan to thicken the mark as it shrank was
-/// tried and looked heavy at 32 rather than clearer.
+/// ## Why the mark is drawn rather than taken from SF Symbols
+///
+/// It was `keyboard.badge.eye`, and the shape was wrong for a square. Measured:
+/// that symbol is 1.66 wide to 1 tall, so fitting it by width leaves two
+/// fifths of the canvas empty top and bottom; and its badge hangs 87 units off
+/// the right of the plain keyboard, which pushes the keyboard left of centre.
+/// `keyboard.macwindow` is the squarest of the family at 1.35 and is the shape
+/// this follows — redrawn as a true square, so there is nothing left over in
+/// either direction and the mark is centred because it fills its frame.
+///
+/// ## Why two artworks
+///
+/// macOS 14 and 15 draw an app icon exactly as handed over, so the `.icns`
+/// arrives pre-shaped: Apple's grid, an 824-point tile on a 1024 canvas, its
+/// own shadow. macOS 26 draws icons itself — shaping, lighting, and re-lighting
+/// them for dark mode and tinting — and can only do that for an icon supplied
+/// as *contents*. Given only the `.icns` it fills our transparent margin with
+/// white and rounds the result, which is how this app came to sit in a cream
+/// plate in the Dock. Neither file is derivable from the other: one must carry
+/// a tile and the other must not.
+///
+/// ## Why the two artworks use different colours
+///
+/// Liquid Glass lights a layer, and lighting only ever adds. Every colour
+/// handed to it comes back lighter and less saturated, so the vector layer is
+/// pre-compensated and the flat tile is not. The numbers below were not picked
+/// by eye: each was rendered through the real pipeline and measured against
+/// the traffic lights of the running system, and the set that ships is the one
+/// with the smallest total distance.
+enum Palette {
+    /// The window dots as this Mac actually draws them, sampled from
+    /// `NSWindow.standardWindowButton` with the window key — not from the hex
+    /// values that circulate for them, which are from an older macOS and which
+    /// this system does not match.
+    ///
+    /// Taken as the mean of the most-saturated 40% of each button's pixels.
+    /// The centre of a dot carries a specular highlight and its rim carries a
+    /// dark edge, so both a single centre sample and a whole-dot average come
+    /// out wrong; the first attempt read #E3E3E3 three times, which was the
+    /// unfocused state rather than a sampling fault.
+    static let systemDots = ["#F17067", "#F4CD3F", "#64C669"]
+
+    /// What to hand Liquid Glass so that what comes *out* is `systemDots`.
+    ///
+    /// Distance from the system colours, in RGB units, at each stage of
+    /// getting here — smaller is closer:
+    ///
+    ///     layer colours            red    yellow  green   total
+    ///     the sampled values       0.178  0.210   0.223   0.611
+    ///     naively deepened         0.220  0.092   0.140   0.452
+    ///     these                    0.077  0.092   0.049   0.217
+    ///
+    /// The middle row is why this is a measurement and not a rule of thumb:
+    /// deepening helped yellow and green and made red worse, so red was swept
+    /// separately.
+    static let glassDots = ["#EE5A44", "#F0BE00", "#12B92E"]
+
+    /// Black on the vector track, graphite on the flat one, for the same
+    /// reason and by the same measurement: 0.13 graphite comes out of the
+    /// compositor at 0.46 luminance where the flat tile puts it at 0.18.
+    /// Contrast against the tile ran 0.440 at 0.13, 0.499 at 0.07 and 0.545 at
+    /// black, and black is the floor.
+    static let flatInk = "#1C1C1E"
+    static let glassInk = "#000000"
+}
+
+/// The mark's geometry, defined once and rendered twice.
+enum Mark {
+    /// Both renderers work on a 1024 grid in SVG's convention, y downward.
+    /// AppKit's y runs the other way and is flipped at the point of drawing,
+    /// so there is one definition rather than two that can disagree.
+    static let canvas: CGFloat = 1024
+
+    struct Geometry {
+        var box: CGRect
+        var corner: CGFloat
+        var stroke: CGFloat
+        var dots: [CGPoint]
+        var dotRadius: CGFloat
+        var keyRows: [[CGRect]]
+    }
+
+    /// - Parameters:
+    ///   - side: the housing's side, as pixels on the 1024 grid.
+    ///   - bandShare: how much of the interior height the title band takes.
+    ///   - rows: rows of keys. The last is always the spacebar row.
+    ///   - columns: keys per row.
+    static func geometry(
+        side: CGFloat, bandShare: CGFloat, rows: Int, columns: Int
+    ) -> Geometry {
+        let box = CGRect(
+            x: (canvas - side) / 2, y: (canvas - side) / 2, width: side, height: side)
+        let stroke = side * 0.075
+        let corner = side * 0.185
+        let pad = stroke * 1.55
+        let inner = box.insetBy(dx: pad + stroke / 2, dy: pad + stroke / 2)
+
+        // The three dots, left-aligned, where a Mac window puts them and where
+        // `keyboard.macwindow` puts them. The mark still reads as centred
+        // because they sit *inside* a square housing rather than hanging off
+        // an edge, which was the whole problem with a badge.
+        let band = inner.height * bandShare
+        let dotR = band * 0.235
+        let dotGap = dotR * 2.75
+        let dotCY = inner.minY + band * 0.46
+        let dots = (0..<3).map {
+            CGPoint(x: inner.minX + dotR + dotGap * CGFloat($0), y: dotCY)
+        }
+
+        // No keys at all is a real request, not an edge case to guard against:
+        // see `detail(forPixelSize:)`. Everything below divides by `rows`.
+        guard rows > 0 else {
+            return Geometry(
+                box: box, corner: corner, stroke: stroke,
+                dots: dots, dotRadius: dotR, keyRows: [])
+        }
+
+        let keyTop = inner.minY + band + inner.height * 0.055
+        let area = CGRect(
+            x: inner.minX, y: keyTop, width: inner.width, height: inner.maxY - keyTop)
+        let gapY = area.height * 0.16
+        let keyH = (area.height - gapY * CGFloat(rows - 1)) / CGFloat(rows)
+        let gapX = area.width * 0.075
+        let keyW = (area.width - gapX * CGFloat(columns - 1)) / CGFloat(columns)
+
+        var keyRows: [[CGRect]] = []
+        for row in 0..<rows {
+            let y = area.minY + (keyH + gapY) * CGFloat(row)
+            if row == rows - 1 {
+                keyRows.append([
+                    CGRect(x: area.minX, y: y, width: keyW, height: keyH),
+                    CGRect(
+                        x: area.minX + keyW + gapX, y: y,
+                        width: keyW * CGFloat(columns - 2) + gapX * CGFloat(columns - 3),
+                        height: keyH),
+                    CGRect(x: area.maxX - keyW, y: y, width: keyW, height: keyH),
+                ])
+            } else {
+                keyRows.append(
+                    (0..<columns).map {
+                        CGRect(
+                            x: area.minX + (keyW + gapX) * CGFloat($0), y: y,
+                            width: keyW, height: keyH)
+                    })
+            }
+        }
+        return Geometry(
+            box: box, corner: corner, stroke: stroke,
+            dots: dots, dotRadius: dotR, keyRows: keyRows)
+    }
+
+    /// How much detail survives at a given rendered size.
+    ///
+    /// The thresholds come from rendering the candidates and looking, not from
+    /// guessing. A Dock icon is admired at 1024 and *used* at 32, so 32 is the
+    /// size that decides: five columns and three rows still read there, with
+    /// the dots still distinguishable as three colours.
+    ///
+    /// At 16 the keys go entirely. Coarsening them to two rows of three was
+    /// tried first and was worse than dropping them: at that size a key is
+    /// about a pixel and a half and the gaps are under one, so the grid fuses
+    /// into vertical bars and takes the housing's outline down with it. A
+    /// rounded window with three coloured dots is less information and more
+    /// of it survives, which is the whole point of simplifying rather than
+    /// shrinking.
+    static func detail(forPixelSize size: CGFloat) -> (rows: Int, columns: Int, dots: Bool) {
+        switch size {
+        case ..<24: return (0, 0, true)
+        default: return (3, 5, true)
+        }
+    }
+}
+
+/// Fails loudly. `iconutil` and `actool` both run straight after this in the
+/// Makefile, and a swallowed write error produced an iconset missing
+/// representations while the script still reported writing all ten — so the
+/// build carried on and the app shipped with a blurred icon at one size.
+func die(_ message: String) -> Never {
+    FileHandle.standardError.write(Data("make-icon: \(message)\n".utf8))
+    exit(1)
+}
+
+func colour(_ hex: String) -> NSColor {
+    var value: UInt64 = 0
+    Scanner(string: hex.replacingOccurrences(of: "#", with: "")).scanHexInt64(&value)
+    return NSColor(
+        srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+        green: CGFloat((value >> 8) & 0xFF) / 255,
+        blue: CGFloat(value & 0xFF) / 255, alpha: 1)
+}
+
+/// The mark as SVG, for Icon Composer.
+///
+/// Vector, not a bitmap: the compiled catalogue carries it as a `Vector` asset
+/// exactly as Apple's own icons do, so macOS 26 rasterises it at whatever size
+/// it needs rather than resampling ours.
+enum SVGWriter {
+    static func number(_ value: CGFloat) -> String {
+        let rounded = (Double(value) * 100).rounded() / 100
+        return rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
+    }
+
+    static func write(_ g: Mark.Geometry, ink: String, dots: [String]) -> String {
+        let n = number
+        var out = """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" \
+            viewBox="0 0 1024 1024">
+            """
+        let b = g.box.insetBy(dx: g.stroke / 2, dy: g.stroke / 2)
+        out += "\n  <rect x=\"\(n(b.minX))\" y=\"\(n(b.minY))\" width=\"\(n(b.width))\""
+        out += " height=\"\(n(b.height))\" rx=\"\(n(g.corner))\" fill=\"none\""
+        out += " stroke=\"\(ink)\" stroke-width=\"\(n(g.stroke))\"/>"
+        for (index, dot) in g.dots.enumerated() {
+            out += "\n  <circle cx=\"\(n(dot.x))\" cy=\"\(n(dot.y))\""
+            out += " r=\"\(n(g.dotRadius))\" fill=\"\(dots[index])\"/>"
+        }
+        for row in g.keyRows {
+            for key in row {
+                out += "\n  <rect x=\"\(n(key.minX))\" y=\"\(n(key.minY))\""
+                out += " width=\"\(n(key.width))\" height=\"\(n(key.height))\""
+                out += " rx=\"\(n(min(key.width, key.height) * 0.30))\" fill=\"\(ink)\"/>"
+            }
+        }
+        return out + "\n</svg>\n"
+    }
+}
+
+/// The same numbers as pixels, for the flat tile.
+enum RasterWriter {
+    /// The one place the two coordinate conventions meet. Everything else
+    /// works in SVG's, so there is no second definition to drift.
+    static func flip(_ r: CGRect) -> NSRect {
+        NSRect(x: r.minX, y: Mark.canvas - r.maxY, width: r.width, height: r.height)
+    }
+
+    static func draw(_ g: Mark.Geometry, ink: NSColor, dots: [NSColor], scale: CGFloat) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        let transform = NSAffineTransform()
+        transform.scale(by: scale)
+        transform.concat()
+
+        let outline = flip(g.box).insetBy(dx: g.stroke / 2, dy: g.stroke / 2)
+        let housing = NSBezierPath(
+            roundedRect: outline, xRadius: g.corner, yRadius: g.corner)
+        housing.lineWidth = g.stroke
+        ink.setStroke()
+        housing.stroke()
+
+        for (index, dot) in g.dots.enumerated() {
+            dots[index].setFill()
+            let y = Mark.canvas - dot.y
+            NSBezierPath(
+                ovalIn: NSRect(
+                    x: dot.x - g.dotRadius, y: y - g.dotRadius,
+                    width: g.dotRadius * 2, height: g.dotRadius * 2)
+            ).fill()
+        }
+
+        ink.setFill()
+        for row in g.keyRows {
+            for key in row {
+                let r = flip(key)
+                let radius = min(r.width, r.height) * 0.30
+                NSBezierPath(roundedRect: r, xRadius: radius, yRadius: radius).fill()
+            }
+        }
+    }
+}
+
+/// The tile the flat icon sits on, and the composition of the two.
 enum IconArtwork {
     /// Apple's grid: on a 1024 canvas the rounded tile is 824 across.
     static let tileFraction: CGFloat = 824.0 / 1024.0
@@ -40,37 +307,12 @@ enum IconArtwork {
         return path
     }
 
-    /// Which symbol to draw, and how heavy, at a given rendered size.
+    /// Near-white, lit from the top, with a shadow and a hairline edge.
     ///
-    /// `keyboard.badge.eye` is the app's mark — a keyboard being watched,
-    /// which is what this app does to your typing.
-    ///
-    /// It simplifies twice on the way down, and the thresholds come from
-    /// rendering the candidates side by side rather than from guessing. At 32
-    /// pixels the *filled* badge is still a distinguishable eye, so the eye —
-    /// which is the mark — survives there; the outlined variant at that size
-    /// is a grey smear. Only at 16 does the badge become a smudge that makes
-    /// the keyboard beside it harder to read, and there the plain keyboard
-    /// stands alone. The weight is `.regular` throughout — see the note at
-    /// the top of this file.
-    ///
-    /// `width` is the share of the tile the glyph should span, measured on the
-    /// *rendered* image rather than set as a point size. A symbol's point size
-    /// is its cap height, so sizing by it makes a wide mark overflow and a
-    /// narrow one look lost.
-    static func symbol(forPixelSize size: CGFloat) -> (name: String, weight: NSFont.Weight, width: CGFloat) {
-        switch size {
-        case ..<24: return ("keyboard.fill", .regular, 0.74)
-        case ..<80: return ("keyboard.badge.eye.fill", .regular, 0.78)
-        default: return ("keyboard.badge.eye", .regular, 0.78)
-        }
-    }
-
-    /// The rounded silver tile: shadow, gradient and hairline border.
-    ///
-    /// Split out of `render`, which was doing this as well as bitmap setup and
-    /// symbol placement in one 75-line block, with its graphics-state saves
-    /// and restores separated by forty lines of unrelated drawing.
+    /// White rather than the silver this used to be: the mark now carries
+    /// three saturated dots and is otherwise black, so the tile's job is to
+    /// stay out of their way. A tile with its own grey defeats that twice — it
+    /// mutes the dots and it leaves the whole icon reading as colourless.
     static func drawTile(_ path: NSBezierPath, in tile: NSRect, pixelSize: CGFloat) {
         // The shadow is part of the artwork on macOS, not something the Dock
         // adds. Skipped under 64 pixels, where it is a smudge on an already
@@ -79,8 +321,8 @@ enum IconArtwork {
             NSGraphicsContext.saveGraphicsState()
             defer { NSGraphicsContext.restoreGraphicsState() }
             let shadow = NSShadow()
-            shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.32)
-            shadow.shadowBlurRadius = pixelSize * 0.02
+            shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.30)
+            shadow.shadowBlurRadius = pixelSize * 0.020
             shadow.shadowOffset = NSSize(width: 0, height: -pixelSize * 0.012)
             shadow.set()
             NSColor.black.setFill()
@@ -88,24 +330,27 @@ enum IconArtwork {
         }
         NSGradient(
             colors: [
-                NSColor(calibratedWhite: 0.99, alpha: 1),
-                NSColor(calibratedWhite: 0.86, alpha: 1),
+                NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1),
+                NSColor(srgbRed: 0.918, green: 0.925, blue: 0.937, alpha: 1),
             ])?.draw(in: path, angle: -90)
 
-        // A hairline border. A dark tile needs a light edge to stop it reading
-        // as a hole; a light one needs a dark edge to stop it dissolving into
-        // a pale Dock background. Below 64 pixels it is thinner than a pixel
-        // and only muddies the outline, so it is left off.
+        // A hairline border. A light tile needs a dark edge to stop it
+        // dissolving into a pale Dock background. Below 64 pixels it is
+        // thinner than a pixel and only muddies the outline, so it is left off.
         if pixelSize >= 64 {
             NSGraphicsContext.saveGraphicsState()
             defer { NSGraphicsContext.restoreGraphicsState() }
             path.setClip()
             let border = squircle(in: tile.insetBy(dx: pixelSize * 0.004, dy: pixelSize * 0.004))
             border.lineWidth = pixelSize * 0.007
-            NSColor(calibratedWhite: 0, alpha: 0.14).setStroke()
+            NSColor(calibratedWhite: 0, alpha: 0.13).setStroke()
             border.stroke()
         }
     }
+
+    /// The mark's side, as a share of the *canvas*, so that it lands at a
+    /// consistent share of the tile inside it.
+    static let markShare: CGFloat = 0.560
 
     static func render(pixelSize: CGFloat) -> NSBitmapImageRep {
         let rep = NSBitmapImageRep(
@@ -119,126 +364,30 @@ enum IconArtwork {
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         NSGraphicsContext.current?.imageInterpolation = .high
 
-        let canvas = NSRect(x: 0, y: 0, width: pixelSize, height: pixelSize)
         let tileSide = pixelSize * tileFraction
         let tile = NSRect(
             x: (pixelSize - tileSide) / 2, y: (pixelSize - tileSide) / 2,
             width: tileSide, height: tileSide)
-
-        // Silver, lit from the top — the colour of the keyboard case the app
-        // draws, and of the hardware it is a picture of.
         drawTile(squircle(in: tile), in: tile, pixelSize: pixelSize)
 
-        let choice = symbol(forPixelSize: pixelSize)
-        let configuration = NSImage.SymbolConfiguration(
-            pointSize: tileSide * 0.5, weight: choice.weight
-        ).applying(
-            NSImage.SymbolConfiguration(
-                paletteColors: [NSColor(calibratedWhite: 0.13, alpha: 1)]))
-        // Fails loudly. An `if let` here meant a symbol that could not be
-        // found or configured was simply not drawn: the script still wrote ten
-        // PNGs and reported success, and the app shipped a blank silver tile.
-        guard let symbol = NSImage(systemSymbolName: choice.name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(configuration)
-        else {
-            die("could not render \(choice.name) at \(Int(pixelSize))px")
-        }
-        // Scale the rendered mark to the wanted share of the tile.
-        let natural = symbol.size
-        let target = tileSide * choice.width
-        let scale = target / max(natural.width, 1)
-        let drawn = NSSize(width: natural.width * scale, height: natural.height * scale)
-        symbol.draw(
-            in: NSRect(
-                x: canvas.midX - drawn.width / 2, y: canvas.midY - drawn.height / 2,
-                width: drawn.width, height: drawn.height))
-
+        // The geometry is always built on the 1024 grid and scaled down at the
+        // point of drawing, so a 16-pixel icon is the same drawing as a 1024
+        // one rather than a second set of numbers that has to be kept in step.
+        let detail = Mark.detail(forPixelSize: pixelSize)
+        let geometry = Mark.geometry(
+            side: Mark.canvas * markShare, bandShare: 0.26,
+            rows: detail.rows, columns: detail.columns)
+        RasterWriter.draw(
+            geometry, ink: colour(Palette.flatInk),
+            dots: detail.dots
+                ? Palette.systemDots.map(colour)
+                : [NSColor.clear, NSColor.clear, NSColor.clear],
+            scale: pixelSize / Mark.canvas)
         return rep
     }
 }
 
-/// The mark on its own, for Icon Composer.
-///
-/// macOS 26 does not want a picture of an icon. It wants the *contents* — the
-/// mark, on nothing — and supplies the tile, the lighting and the shadow
-/// itself, live, so the icon can answer to light mode, dark mode and tinting.
-/// Handing it the finished `.icns` instead is what put a cream plate behind
-/// this app in the Dock: the system filled the transparent margin around our
-/// own 80.5% tile with white and rounded the result, so the icon became a
-/// small tile sitting inside a big white one.
-///
-/// So the same mark ships twice, and deliberately. `Resources/TypeReview.icns`
-/// is the whole picture, tile included, for macOS 14 and 15, which draw an app
-/// icon exactly as given and expect it to arrive pre-shaped. This layer is the
-/// mark alone, for macOS 26, which shapes it. Neither is derivable from the
-/// other by cropping: one must carry a tile and the other must not.
-func writeLiquidGlassLayer(to path: String) {
-    let pixelSize: CGFloat = 1024
-    let rep = NSBitmapImageRep(
-        bitmapDataPlanes: nil, pixelsWide: Int(pixelSize), pixelsHigh: Int(pixelSize),
-        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-    NSGraphicsContext.saveGraphicsState()
-    defer { NSGraphicsContext.restoreGraphicsState() }
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    NSGraphicsContext.current?.imageInterpolation = .high
-
-    // The outlined variant, and black rather than the flat tile's graphite.
-    //
-    // Not a different design decision — the same one, corrected for what the
-    // system does to it. Liquid Glass lights a layer, and lighting only ever
-    // adds: the graphite the flat icon uses (0.13) comes out of the compositor
-    // at 0.46 luminance, against 0.18 on the flat tile, so the mark arrives
-    // washed out. Measured across three layer values, contrast against the
-    // tile went 0.440 at 0.13, 0.499 at 0.07, 0.545 at black — and black is
-    // the floor. The flat icon's 0.756 is simply not reachable through this
-    // renderer, so this takes the most of it that exists rather than pretending
-    // the two can be matched.
-    //
-    // This layer is only ever rendered large — the system derives every small
-    // size from it — so the size-dependent simplification that
-    // `symbol(forPixelSize:)` exists for does not apply here.
-    let configuration = NSImage.SymbolConfiguration(pointSize: pixelSize * 0.40, weight: .regular)
-        .applying(
-            NSImage.SymbolConfiguration(paletteColors: [NSColor(calibratedWhite: 0, alpha: 1)]))
-    guard let mark = NSImage(systemSymbolName: "keyboard.badge.eye", accessibilityDescription: nil)?
-        .withSymbolConfiguration(configuration)
-    else {
-        die("could not render the Liquid Glass layer")
-    }
-    // Smaller than the share the mark takes on the `.icns`, and not by taste.
-    // There the mark sits inside a tile that is itself 80.5% of the canvas;
-    // here the system's tile is the whole canvas, so the same optical size
-    // needs a smaller number. 0.63 of the canvas is 0.78 of the tile, which is
-    // where the flat icon already puts it.
-    let target = pixelSize * 0.63
-    let scale = target / max(mark.size.width, 1)
-    let drawn = NSSize(width: mark.size.width * scale, height: mark.size.height * scale)
-    mark.draw(
-        in: NSRect(
-            x: pixelSize / 2 - drawn.width / 2, y: pixelSize / 2 - drawn.height / 2,
-            width: drawn.width, height: drawn.height))
-
-    guard let data = rep.representation(using: .png, properties: [:]) else {
-        die("could not encode the Liquid Glass layer as PNG")
-    }
-    do {
-        try data.write(to: URL(fileURLWithPath: path))
-    } catch {
-        die("could not write \(path): \(error.localizedDescription)")
-    }
-}
-
 let outputDirectory = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
-
-/// Fails loudly. `iconutil` runs straight after this in the Makefile, and a
-/// swallowed write error produced an iconset missing representations while the
-/// script still reported writing all ten — so the build carried on and the app
-/// shipped with a blurred icon at one size.
-func die(_ message: String) -> Never {
-    FileHandle.standardError.write(Data("make-icon: \(message)\n".utf8))
-    exit(1)
-}
 
 do {
     try FileManager.default.createDirectory(
@@ -271,6 +420,16 @@ print("wrote \(representations.count) representations to \(outputDirectory)")
 // The second product, when a path for it is given. Optional because the
 // iconset alone is still useful on its own — `make icon` asks for both.
 if CommandLine.arguments.count > 2 {
-    writeLiquidGlassLayer(to: CommandLine.arguments[2])
-    print("wrote the Liquid Glass layer to \(CommandLine.arguments[2])")
+    let path = CommandLine.arguments[2]
+    // Full detail, always: the system rasterises this itself at every size, so
+    // the size-dependent simplification the flat set needs does not apply.
+    let geometry = Mark.geometry(
+        side: Mark.canvas * 0.68, bandShare: 0.26, rows: 3, columns: 5)
+    let svg = SVGWriter.write(geometry, ink: Palette.glassInk, dots: Palette.glassDots)
+    do {
+        try svg.write(toFile: path, atomically: true, encoding: .utf8)
+    } catch {
+        die("could not write \(path): \(error.localizedDescription)")
+    }
+    print("wrote the Liquid Glass layer to \(path)")
 }
