@@ -142,11 +142,22 @@ final class KeyboardDrawer {
     /// Set while an open or close animation is running, so a parent move
     /// during one does not snap the drawer to its finished frame.
     private var transition: Int = 0
+    /// Guards against the move notification this method's own move produces.
+    private var isMakingRoom = false
+
+    /// Puts the drawer on screen beneath its parent, if it should be there.
+    ///
+    /// The full-screen test lives here rather than at each call site, so
+    /// nothing can attach a drawer to a window that has no room below it.
+    private func attach() {
+        guard let parent, !isFullScreen, window.parent == nil else { return }
+        parent.addChildWindow(window, ordered: .above)
+    }
 
     private func present() {
-        guard let parent, !isFullScreen else { return }
+        guard !isFullScreen else { return }
         reframe()
-        parent.addChildWindow(window, ordered: .above)
+        attach()
     }
 
     /// Re-lays the drawer against the window it hangs from. Called whenever
@@ -155,11 +166,6 @@ final class KeyboardDrawer {
     func reframe() {
         keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
         guard isOpen, !isFullScreen else { return }
-        // Put back if it was hidden for a full-screen transition that then did
-        // not happen. `willEnterFullScreen` orders the drawer out before the
-        // system has committed, and a failed entry sends nothing afterwards —
-        // but it does move the window, which is what calls this.
-        if window.parent == nil { present() }
         // Not while an animation is running. `reframe` is called from the
         // parent's move and resize notifications, and moving the window is
         // exactly what `makeRoomBelow` does at the start of an opening — so
@@ -171,6 +177,15 @@ final class KeyboardDrawer {
         // taller, which can push it below the screen with nothing to notice.
         if let parent { makeRoomBelow(parent, animated: false) }
         window.setFrame(frame(open: true), display: true)
+        // Put back if it was hidden for a full-screen transition that then did
+        // not happen. `willEnterFullScreen` orders the drawer out before the
+        // system has committed, and a failed entry sends nothing afterwards —
+        // but it does move the window, which is what calls this.
+        //
+        // `attach()`, not `present()`. Calling `present()` from here was
+        // mutual recursion — it calls `reframe()`, which called it back — and
+        // any detached drawer would have run the stack out.
+        attach()
     }
 
     /// Puts the drawer back after its parent has been closed and reopened.
@@ -191,7 +206,7 @@ final class KeyboardDrawer {
             // Ordered in shut, then grown: appearing at full size and then
             // animating would show the finished state for one frame first.
             window.setFrame(frame(open: false), display: false)
-            parent.addChildWindow(window, ordered: .above)
+            attach()
         }
 
         let duration = AppPreferences.drawerSeconds.value
@@ -238,7 +253,11 @@ final class KeyboardDrawer {
     /// screen. What Apple's own drawers did, and the alternative is a drawer
     /// the user cannot see and has no way to discover.
     private func makeRoomBelow(_ parent: NSWindow, animated: Bool) {
-        guard let screen = parent.screen else { return }
+        // Moving or resizing the parent is exactly what the observers in
+        // `attach(to:)` listen for, and they call `reframe`, which calls this.
+        guard !isMakingRoom, let screen = parent.screen else { return }
+        isMakingRoom = true
+        defer { isMakingRoom = false }
         let drawerHeight = keyboard.naturalHeight(forWidth: drawerWidth)
         let needed = gap + drawerHeight
         // Moving the window up cannot help when the window and the drawer

@@ -282,12 +282,17 @@ final class PracticeViewController: NSViewController {
     /// backspace, on the main thread, to redraw a keyboard whose input only
     /// changes when a run finishes. The cost grew with the profile: the more
     /// someone practises, the slower their typing surface gets.
-    private var cachedPerKey: (count: Int, stats: OrderedMap<PerKeyStat>)?
+    private var cachedPerKey: (token: Int, stats: OrderedMap<PerKeyStat>)?
 
     private func perKeyStats(for results: [RunResult]) -> OrderedMap<PerKeyStat> {
-        if let cachedPerKey, cachedPerKey.count == results.count { return cachedPerKey.stats }
+        // Keyed on the newest run's index, not on how many runs there are.
+        // History is trimmed at `maxHistory`, so past 500 runs the count stops
+        // changing and a count-keyed cache would have frozen the keyboard's
+        // statistics for good. The index is monotonic and never reused.
+        let token = results.last?.index ?? -1
+        if let cachedPerKey, cachedPerKey.token == token { return cachedPerKey.stats }
         let stats = aggregatePerKey(results)
-        cachedPerKey = (results.count, stats)
+        cachedPerKey = (token, stats)
         return stats
     }
 
@@ -334,7 +339,6 @@ final class PracticeViewController: NSViewController {
         }
     }
 
-    /// The passage on screen. Used by `--selftest`, which drives the real
     /// Runs recorded in memory. `--selftest` compares this against what
     /// reached disk, so a save failure is distinguishable from a run that
     /// never completed.
@@ -367,7 +371,13 @@ final class PracticeViewController: NSViewController {
                 try session.updateSettings(validated)
                 entryBox.commit()
             } catch {
+                // Putting the settings back restarts the run again, which
+                // sources a fresh passage — so the screen has to be brought
+                // back into step with it, or it goes on showing the passage
+                // from the attempt that failed.
                 try? session.updateSettings(previous)
+                entryBox.commit()
+                refresh(resetPassage: true)
                 hintLabel.stringValue = "could not apply: \(error.localizedDescription)"
                 return false
             }
@@ -457,9 +467,6 @@ final class PracticeViewController: NSViewController {
 }
 
 extension PracticeViewController {
-    /// Pushes the stored sound preferences into the player. Called at load and
-    /// again whenever the Settings window changes them, so a pack or volume
-    /// picked mid-run takes effect on the very next keystroke rather than at
     /// Caret shape and whitespace marks. Both are pure presentation — the
     /// view redraws and nothing about the run changes — so they apply live
     /// rather than at the next passage.

@@ -38,8 +38,19 @@ CORPUS  := $(shell find Sources/TypeReviewKit/Resources -type f)
 # was written to fix, surviving because `make -n` cannot show it.
 INPUT_STAMP := .build/inputs-stamp
 INPUT_SIG   := $(CONFIG)|$(sort $(SOURCES))
+# Only when this invocation is actually going to build the app, and never on a
+# dry run. The check removes a mismatched bundle, and doing that at parse time
+# meant `make test CONFIG=debug` — or even `make -n` — destroyed a perfectly
+# good release build without replacing it.
+GOALS      := $(or $(MAKECMDGOALS),all)
+BUILDS_APP := $(filter all run selftest $(APP),$(GOALS))
+DRY_RUN    := $(findstring n,$(firstword -$(MAKEFLAGS)))
+ifneq ($(BUILDS_APP),)
+ifeq ($(DRY_RUN),)
 _ := $(shell mkdir -p .build; \
         [ "$$(cat $(INPUT_STAMP) 2>/dev/null)" = "$(INPUT_SIG)" ] || rm -rf $(APP) $(INPUT_STAMP))
+endif
+endif
 
 .PHONY: all run selftest test icon clean
 

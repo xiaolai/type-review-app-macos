@@ -200,46 +200,63 @@ public enum BundledCorpus {
     /// generated words instead. Even an explicitly chosen channel does. The
     /// reason is recorded here so `--selftest` and the diagnose path can say
     /// *which* resource is missing rather than reporting an empty list.
-    public private(set) nonisolated(unsafe) static var loadFailures: [String] = []
+    /// Every reason a bundled resource could not be loaded.
+    ///
+    /// Computed from the two `let`s below rather than accumulated into a
+    /// shared `var`. A mutable static written from two lazy initialisers is a
+    /// data race — they can run concurrently, and `nonisolated(unsafe)` says
+    /// only that the compiler has stopped asking.
+    public static var loadFailures: [String] {
+        // The parentheses matter: `??` binds looser than `+`, so without them
+        // a failed quotes load returned only its own reason and swallowed
+        // every code failure.
+        (quotesFailure.map { [$0] } ?? []) + codeFailures
+    }
 
-    public static let quotes: StaticCorpusSource = {
+    private static let quotesFailure: String? = quotesLoad.failure
+    private static let codeFailures: [String] = codeLoad.failures
+
+    public static var quotes: StaticCorpusSource { quotesLoad.source }
+    public static var code: StaticCorpusSource { codeLoad.source }
+
+    private static let quotesLoad: (source: StaticCorpusSource, failure: String?) = {
         guard let url = resourceBundle.url(forResource: "Resources/quotes", withExtension: "json")
         else {
-            loadFailures.append("Resources/quotes.json: not in the bundle")
-            return StaticCorpusSource(raw: [], kind: .quote)
+            return (StaticCorpusSource(raw: [], kind: .quote), "Resources/quotes.json: not in the bundle")
         }
         do {
             let data = try Data(contentsOf: url)
             let file = try JSONDecoder().decode(QuotesFile.self, from: data)
-            return StaticCorpusSource(raw: file.entries, kind: .quote)
+            return (StaticCorpusSource(raw: file.entries, kind: .quote), nil)
         } catch {
-            loadFailures.append("Resources/quotes.json: \(error)")
-            return StaticCorpusSource(raw: [], kind: .quote)
+            return (StaticCorpusSource(raw: [], kind: .quote), "Resources/quotes.json: \(error)")
         }
     }()
 
     /// Code keeps its indentation, so `preserveLayout` is on: collapsing the
     /// whitespace would turn a Python snippet into one unreadable line and
     /// remove exactly the keys that make code hard to type.
-    public static let code: StaticCorpusSource = {
+    private static let codeLoad: (source: StaticCorpusSource, failures: [String]) = {
         guard let directory = resourceBundle.url(forResource: "Resources/code", withExtension: nil),
             let files = try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil)
         else {
-            loadFailures.append("Resources/code: not in the bundle")
-            return StaticCorpusSource(raw: [], kind: .code, preserveLayout: true)
+            return (
+                StaticCorpusSource(raw: [], kind: .code, preserveLayout: true),
+                ["Resources/code: not in the bundle"])
         }
+        var failures: [String] = []
         let raw = files.filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
             .compactMap { url -> RawStaticEntry? in
                 do {
                     return try JSONDecoder().decode(
                         RawStaticEntry.self, from: try Data(contentsOf: url))
                 } catch {
-                    loadFailures.append("\(url.lastPathComponent): \(error)")
+                    failures.append("\(url.lastPathComponent): \(error)")
                     return nil
                 }
             }
-        return StaticCorpusSource(raw: raw, kind: .code, preserveLayout: true)
+        return (StaticCorpusSource(raw: raw, kind: .code, preserveLayout: true), failures)
     }()
 }
 

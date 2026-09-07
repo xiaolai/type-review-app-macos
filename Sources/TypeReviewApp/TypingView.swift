@@ -746,6 +746,12 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
+        // Checked *before* the composition is cleared. `isReplaceable`
+        // compares the requested range against `markedRange()`, and clearing
+        // first made that range `NSNotFound` — so an input method committing
+        // its composition by naming the range it occupies was refused, and the
+        // text was lost.
+        guard isReplaceable(replacementRange) else { return }
         markedText = ""
         markedSelection = NSRange(location: 0, length: 0)
         let text = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
@@ -755,7 +761,6 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         // appending was the wrong answer: an input method asking to replace
         // two characters got two *extra* ones, and the run's statistics
         // counted keystrokes the user never made.
-        guard isReplaceable(replacementRange) else { return }
         // One code unit at a time, because that is the engine's coordinate
         // system. A committed CJK character is one unit and arrives whole.
         //

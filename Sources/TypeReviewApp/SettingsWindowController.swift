@@ -396,6 +396,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         } else {
             popup.menu?.addItem(.separator())
             popup.addItem(withTitle: String(format: "Custom (%.2fs)", current))
+            // Shown, not choosable. Left enabled it could be selected, and the
+            // handler ignores it — so picking Normal and then Custom displayed
+            // 0.33s over a preference that still said 0.26.
+            popup.lastItem?.isEnabled = false
             popup.selectItem(at: popup.numberOfItems - 1)
         }
         bind(popup) {

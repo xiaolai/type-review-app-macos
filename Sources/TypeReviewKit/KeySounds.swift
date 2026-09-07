@@ -253,7 +253,11 @@ public enum SynthRenderer {
     public static func envelope(
         frame: Int, frames: Int, peak: Double, attackSeconds: Double, sampleRate: Double
     ) -> Double {
-        guard frames > 0, frame >= 0, peak > 0 else { return 0 }
+        // `decayFloor / peak` is the ramp's ratio, so a peak at or below the
+        // floor would divide into something at or above one — and a denormal
+        // like 1e-313 overflows it to infinity. Below the floor there is no
+        // decay to describe: the voice is already quieter than silence.
+        guard frames > 0, frame >= 0, peak > decayFloor else { return 0 }
         let attackFrames = max(1, Int(attackSeconds * sampleRate))
         if frame < attackFrames {
             return peak * (Double(frame) / Double(attackFrames))

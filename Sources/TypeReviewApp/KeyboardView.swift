@@ -591,10 +591,12 @@ final class KeyboardView: NSView {
         guard key.types, !found.isEmpty else { return nil }
         let hits = found.reduce(0) { $0 + $1.hits }
         guard hits >= 5 else { return nil }
-        let attempts = found.reduce(0) { $0 + $1.hits + $1.misses }
-        let errorRate = attempts > 0
-            ? found.reduce(0.0) { $0 + $1.errorRate * Double($1.hits + $1.misses) }
-                / Double(attempts)
+        // Weighted by `hits`, because that is `errorRate`'s own denominator —
+        // the engine computes it as `misses / hits`. Weighting by
+        // `hits + misses` mixed two different scales and skewed the colour of
+        // any key whose two characters are typed at different rates.
+        let errorRate = hits > 0
+            ? found.reduce(0.0) { $0 + $1.errorRate * Double($1.hits) } / Double(hits)
             : 0
         // Hit-weighted, so a key typed mostly unshifted is coloured mostly by
         // that. Untimed entries contribute no weight rather than a zero.

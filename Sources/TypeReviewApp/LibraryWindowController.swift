@@ -21,7 +21,10 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     /// What sanitising did to a passage, when it did anything worth saying.
     private static func note(for result: SanitizeResult) -> String {
         var parts: [String] = []
-        if result.truncated { parts.append("truncated to the \(maxUserPassageLength)-character cap") }
+        // `maxPassageChars`, which is what `sanitize` actually enforces.
+        // `maxUserPassageLength` is the *file* read cap and is ten times
+        // larger, so the note used to name a limit nothing had applied.
+        if result.truncated { parts.append("truncated to the \(maxPassageChars)-character cap") }
         if result.droppedChars > 0 { parts.append("\(result.droppedChars) unusable characters removed") }
         return parts.isEmpty ? "" : " (" + parts.joined(separator: ", ") + ")"
     }
@@ -235,8 +238,21 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
                 do {
                     let handle = try FileHandle(forReadingFrom: url)
                     defer { try? handle.close() }
-                    let data = try handle.read(upToCount: limit) ?? Data()
-                    guard let raw = String(data: data, encoding: .utf8) else {
+                    var data = try handle.read(upToCount: limit) ?? Data()
+                    // A byte cap can land in the middle of a multi-byte
+                    // character, and the decode then fails for a file that is
+                    // perfectly good UTF-8. A sequence is at most four bytes,
+                    // so dropping up to three from the tail is enough to find
+                    // the boundary — and only a file that is genuinely not
+                    // UTF-8 survives all four attempts.
+                    var decoded = String(data: data, encoding: .utf8)
+                    var trimmed = 0
+                    while decoded == nil, trimmed < 3, !data.isEmpty {
+                        data.removeLast()
+                        trimmed += 1
+                        decoded = String(data: data, encoding: .utf8)
+                    }
+                    guard let raw = decoded else {
                         return Ingested(
                             name: name, title: title, text: nil,
                             failure: "\(name): not readable as UTF-8")
