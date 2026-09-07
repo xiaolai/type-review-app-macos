@@ -59,6 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // this is a property of the event being handled right now, and there
         // is no way to ask again later.
         let atLogin = LoginItem.launchedAtLogin
+        // A login launch never opens a window; the setting says whether an
+        // ordinary launch does either. Read once, so the two branches below
+        // cannot disagree about it.
+        let menuBarOnly = atLogin || AppPreferences.startInMenuBar.value
         let practice = PracticeViewController()
         self.practice = practice
 
@@ -134,16 +138,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // still has a chance to arrange it, so "Open TYPE" later shows the
         // keyboard the user left out rather than a window missing half of
         // itself.
-        if !atLogin { window.makeKeyAndOrderFront(nil) }
+        if !menuBarOnly { window.makeKeyAndOrderFront(nil) }
         // Without animation: the drawer should already be out when the app
         // appears, not slide out at launch.
         let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
         drawer.setOpen(showKeyboard, animated: false)
         markKeyboardMenus(showKeyboard)
-        if atLogin {
+        if menuBarOnly {
             window.orderOut(nil)
             retreatToMenuBar()
         } else {
+            // Before activating, or a window asked to come forward under the
+            // wrong policy arrives without a menu bar and looks half-launched.
+            applyDockPolicy()
             NSApp.activate(ignoringOtherApps: true)
         }
 
@@ -174,6 +181,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.practice?.applyTypingPreferences()
                 if changed == nil || changed == AppPreferences.soundShortcut.keyCodeKey {
                     self.registerSoundShortcut()
+                }
+                if changed == nil || changed == AppPreferences.showInDock.key {
+                    self.applyDockPolicy()
                 }
             }
         }
@@ -217,6 +227,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         retreatToMenuBar()
     }
 
+    /// Any window someone is actually looking at.
+    ///
+    /// `canBecomeMain` filters out the keyboard drawer, which is a child
+    /// window and never a reason to keep a Dock tile — and counts Settings,
+    /// Library and Statistics, which are. An earlier version of the policy
+    /// check read the practice window alone, which would have pulled the Dock
+    /// icon out from under an open Settings window.
+    private var hasVisibleWindow: Bool {
+        NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+    }
+
+    /// The activation policy TYPE should be in right now.
+    ///
+    /// Two independent reasons to be `.accessory`, and either is sufficient:
+    /// nothing on screen, or the user asking for no Dock icon. One function
+    /// rather than a flag each caller flips, because the bug this replaces
+    /// was `showMainWindow` forcing `.regular` — which put the Dock icon back
+    /// the moment the window opened, and made the setting look broken.
+    private func desiredPolicy(windowVisible: Bool) -> NSApplication.ActivationPolicy {
+        if !AppPreferences.showInDock.value { return .accessory }
+        return windowVisible ? .regular : .accessory
+    }
+
+    /// Reconciles the Dock tile with the setting and with what is on screen.
+    func applyDockPolicy() {
+        let policy = desiredPolicy(windowVisible: hasVisibleWindow)
+        guard NSApp.activationPolicy() != policy else { return }
+        NSApp.setActivationPolicy(policy)
+        // Changing policy while the app is active drops it behind whatever
+        // was behind it. Re-activate, but do not touch which window is key:
+        // the user checked a box in Settings and should still be in Settings.
+        if hasVisibleWindow { NSApp.activate(ignoringOtherApps: true) }
+    }
+
     /// Drops the Dock icon and the menu bar, leaving only the status item.
     ///
     /// `.accessory` is what makes this a menu-bar app rather than a windowed
@@ -229,11 +273,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func showMainWindow(_ sender: Any?) {
-        // Back to a normal app first. Ordering a window front while the policy
-        // is still `.accessory` gives a window with no menu bar and no Dock
-        // tile, which looks like the app half-launched.
-        if NSApp.activationPolicy() != .regular {
-            NSApp.setActivationPolicy(.regular)
+        // Set the policy before ordering the window front: arriving under
+        // `.accessory` when it should be `.regular` gives a window with no
+        // menu bar and no Dock tile, which looks like the app half-launched.
+        // Which policy that is depends on the Dock setting — this used to
+        // force `.regular` and silently undid "Show in Dock: off".
+        let policy = desiredPolicy(windowVisible: true)
+        if NSApp.activationPolicy() != policy {
+            NSApp.setActivationPolicy(policy)
         }
         // A new colour for the mark, but only when the window was actually
         // away. "Open TYPE" on a window that is already up is a no-op, and
@@ -503,6 +550,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func toggleKeyboard(_ sender: Any?) {
         guard let drawer else { return }
+        // The keyboard is a drawer under the main window, so it cannot be on
+        // screen without one. Chosen from the status menu with the window
+        // away, this used to set the state, tick the checkmark and show
+        // nothing — and if the drawer had been left open, the checkmark said
+        // "on" so the click meant "off", which was a second way to do
+        // nothing. From out there the command can only mean "show me the
+        // keyboard", and opening the window is the only way to honour it.
+        if window?.isVisible != true {
+            showMainWindow(nil)
+            drawer.setOpen(true, animated: true)
+            markKeyboardMenus(true)
+            UserDefaults.standard.set(true, forKey: "ShowKeyboard")
+            return
+        }
         let visible = !drawer.isOpen
         drawer.setOpen(visible, animated: true)
         markKeyboardMenus(visible)

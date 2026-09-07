@@ -49,9 +49,12 @@ extension AppDelegate {
             withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "")
         keyboard.target = self
         statusKeyboardItem = keyboard
-        let newText = menu.addItem(
-            withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "")
-        newText.target = self
+        // No "New Text" here, though the menu bar and the toolbar both offer
+        // it. From the status item the window is usually away, and starting a
+        // fresh passage would silently discard a run in progress with nothing
+        // on screen to show for it — a destructive command whose effect is
+        // invisible at the moment it is given. When the window *is* up, the
+        // toolbar button and ⌘N are both already in reach.
         // A submenu, because the packs are a list and a list of four does not
         // belong inline in a menu this short. The toggle sits at its top with
         // the shortcut printed beside it, which is also how someone discovers

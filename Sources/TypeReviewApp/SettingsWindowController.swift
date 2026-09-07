@@ -129,6 +129,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         buildPracticePane()
         buildAppearancePane()
         buildSoundPane()
+        buildGeneralPane()
         buildDataPane()
     }
 
@@ -219,12 +220,35 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Silent in", self.mutedAppsControl(),
                 hint: "Password managers are never watched. Password fields never sound.")
             self.addRow(
+                grid, "Shortcut", self.shortcutRecorder(),
+                hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
+        }
+    }
+
+    /// How TYPE starts and where it lives on the Mac.
+    ///
+    /// Fourth rather than first, against the usual habit of putting General at
+    /// the front. The first pane is the one Settings opens on, and that should
+    /// stay Practice — the reason people come here. A convention about
+    /// ordering is not worth a worse landing.
+    ///
+    /// "Start at login" moved here from Sound, where it had been put because
+    /// system-wide keystroke sound was the reason it was added. That was
+    /// filing it by motive rather than by what it is, and it cost exactly what
+    /// you would expect: it was asked for again by someone who had the
+    /// Settings window open.
+    private func buildGeneralPane() {
+        addPane(title: "General", symbol: "gearshape") { grid in
+            self.addRow(
                 grid, "Start at login", self.loginItemToggle(),
                 hint: "TYPE waits in the menu bar, ready before you type.")
             self.addLoginNoteRow(grid)
             self.addRow(
-                grid, "Shortcut", self.shortcutRecorder(),
-                hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
+                grid, "Start in the menu bar", self.startInMenuBarToggle(),
+                hint: "Launch without a window. Opening TYPE again brings it back.")
+            self.addRow(
+                grid, "Show in Dock", self.showInDockToggle(),
+                hint: "Off takes the menu bar with it — macOS ties the two.")
         }
     }
 
@@ -529,6 +553,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Reads `SMAppService` rather than a preference of its own: the user can
     /// revoke this in System Settings, and a mirrored copy would go on saying
     /// the app starts at login after they had turned it off.
+    private func startInMenuBarToggle() -> NSControl {
+        let toggle = NSSwitch()
+        toggle.identifier = .init("startInMenuBar")
+        controls["startInMenuBar"] = toggle
+        bind(toggle) { AppPreferences.startInMenuBar.value = toggle.state == .on }
+        return toggle
+    }
+
+    /// Stated positively, matching the preference. A switch labelled for the
+    /// thing it removes is read wrong by half the people who see it.
+    private func showInDockToggle() -> NSControl {
+        let toggle = NSSwitch()
+        toggle.identifier = .init("showInDock")
+        controls["showInDock"] = toggle
+        // No work here beyond the write: the app delegate watches this
+        // preference and reconciles the activation policy, so the Dock tile
+        // appears and disappears while the window stays where it is.
+        bind(toggle) { AppPreferences.showInDock.value = toggle.state == .on }
+        return toggle
+    }
+
     private func loginItemToggle() -> NSControl {
         let toggle = NSSwitch()
         toggle.identifier = .init("loginItem")
@@ -540,7 +585,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             } catch {
                 self?.loginError = error.localizedDescription
             }
-            self?.refreshSoundScope()
+            self?.refreshGeneralPane()
         }
         return toggle
     }
@@ -605,11 +650,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         permissionLabel?.stringValue = "Accessibility is off — other apps are not heard."
         for row in permissionRows { row.isHidden = !blocked }
 
+        resizePanes()
+    }
+
+    /// The General pane's live state.
+    ///
+    /// Split from `refreshSoundScope` when the login item moved out of Sound.
+    /// Both end in `resizePanes()`, which is idempotent — `refresh()` calling
+    /// it twice costs one extra grid measurement, and is worth more than a
+    /// direct caller that forgets it and leaves a pane the wrong height.
+    private func refreshGeneralPane() {
         // Awaiting approval counts as on. It is a registration the user has
         // asked for, so showing it off invited a second `register()` — and
         // left no way to cancel the pending one, because switching an
         // already-off switch off does nothing.
         (controls["loginItem"] as? NSSwitch)?.state = LoginItem.isRequested ? .on : .off
+        (controls["startInMenuBar"] as? NSSwitch)?.state =
+            AppPreferences.startInMenuBar.value ? .on : .off
+        (controls["showInDock"] as? NSSwitch)?.state =
+            AppPreferences.showInDock.value ? .on : .off
         let note = loginNote
         loginNoteLabel?.stringValue = note ?? ""
         for row in loginNoteRows { row.isHidden = note == nil }
@@ -841,6 +900,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         for row in rows["testDurationSec"] ?? [] { row.isHidden = settings.testMode != .time }
         for row in rows["wordCount"] ?? [] { row.isHidden = settings.testMode != .words }
         refreshSoundScope()
+        refreshGeneralPane()
     }
 
     /// Selects a preset, or adds a `Custom (600)` item for a value that has

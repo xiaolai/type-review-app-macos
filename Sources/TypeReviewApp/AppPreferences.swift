@@ -98,6 +98,36 @@ enum AppPreferences {
         }
     }
 
+    /// Whether launching TYPE puts a window on screen.
+    ///
+    /// Off, so a double-click does what a double-click does. On, the app goes
+    /// straight to the menu bar — which is the right shape for someone whose
+    /// reason for running it is the keystroke sound rather than the drills.
+    ///
+    /// Launching at login ignores this and never opens a window either way.
+    /// A login launch is the machine starting up, not a request to be shown
+    /// something, and an app that threw a window across whatever you were
+    /// about to do every morning would be uninstalled by Thursday.
+    ///
+    /// `applicationShouldHandleReopen` is what makes this safe: opening TYPE
+    /// again from the Finder while it is already running brings the window
+    /// back, so the setting cannot leave someone with no way in.
+    static let startInMenuBar = Flag(key: "StartInMenuBar")
+
+    /// Whether TYPE has a Dock tile.
+    ///
+    /// On by default, and stored positively rather than as `hideDockIcon` so
+    /// that the switch, the preference and the code all say the same thing.
+    /// An inverted checkbox is a bug waiting for whoever reads it next.
+    ///
+    /// Turning it off costs the menu bar as well, and that is macOS rather
+    /// than a decision here: `.accessory` means no Dock tile, no ⌘-Tab entry
+    /// and no menu bar of its own. The status item is unaffected, which is
+    /// why it is safe to offer — there is always a way back to the window.
+    /// Key equivalents still reach the main menu, since AppKit dispatches
+    /// them through `NSApp.mainMenu` whether or not it is drawn.
+    static let showInDock = Flag(key: "ShowInDock", default: true)
+
     /// Whether keystroke sounds are heard everywhere or only while typing
     /// here.
     ///
