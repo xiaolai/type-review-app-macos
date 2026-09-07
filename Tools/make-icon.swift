@@ -257,6 +257,65 @@ enum IconArtwork {
     }
 }
 
+/// The mark on its own, for Icon Composer.
+///
+/// macOS 26 does not want a picture of an icon. It wants the *contents* — the
+/// mark, on nothing — and supplies the tile, the glass, the lighting and the
+/// shadow itself, live, so the icon can answer to light mode, dark mode and
+/// tinting. Handing it the finished `.icns` instead is what put a cream plate
+/// behind this app in the Dock: the system filled the transparent margin
+/// around our own 80.5% tile with white and rounded the result, so the icon
+/// became a small blue square sitting inside a big white one.
+///
+/// So the same artwork ships twice, and deliberately. `Resources/TypeReview.icns`
+/// is the whole picture, tile included, for macOS 14 and 15, which draw an app
+/// icon exactly as given and expect it to arrive pre-shaped. This layer is the
+/// mark alone, for macOS 26, which shapes it. Neither is derivable from the
+/// other by cropping.
+func writeLiquidGlassLayer(to path: String) {
+    let pixelSize: CGFloat = 1024
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: Int(pixelSize), pixelsHigh: Int(pixelSize),
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current?.imageInterpolation = .high
+
+    // The outlined variant, always. This layer is only ever rendered large —
+    // the system derives every small size from it — so the size-dependent
+    // simplification that `symbol(forPixelSize:)` exists for does not apply.
+    let configuration = NSImage.SymbolConfiguration(pointSize: pixelSize * 0.40, weight: .medium)
+        .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(white: 1, alpha: 1)]))
+    guard let mark = NSImage(systemSymbolName: "keyboard.badge.eye", accessibilityDescription: nil)?
+        .withSymbolConfiguration(configuration)
+    else {
+        die("could not render the Liquid Glass layer")
+    }
+    // Smaller than the share the mark takes on the `.icns`, and not by taste.
+    // There the mark sits inside a tile that is itself 80.5% of the canvas;
+    // here the system's tile is the whole canvas, so the same optical size
+    // needs a smaller number. 0.62 of the canvas is 0.77 of the tile, which is
+    // where the flat icon already puts it.
+    let target = pixelSize * 0.62
+    let scale = target / max(mark.size.width, 1)
+    let drawn = NSSize(width: mark.size.width * scale, height: mark.size.height * scale)
+    mark.draw(
+        in: NSRect(
+            x: pixelSize / 2 - drawn.width / 2, y: pixelSize / 2 - drawn.height / 2,
+            width: drawn.width, height: drawn.height))
+
+    guard let data = rep.representation(using: .png, properties: [:]) else {
+        die("could not encode the Liquid Glass layer as PNG")
+    }
+    do {
+        try data.write(to: URL(fileURLWithPath: path))
+    } catch {
+        die("could not write \(path): \(error.localizedDescription)")
+    }
+}
+
 let outputDirectory = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
 
 /// Fails loudly. `iconutil` runs straight after this in the Makefile, and a
@@ -295,3 +354,10 @@ for (name, size) in representations {
     }
 }
 print("wrote \(representations.count) representations to \(outputDirectory)")
+
+// The second product, when a path for it is given. Optional because the
+// iconset alone is still useful on its own — `make icon` asks for both.
+if CommandLine.arguments.count > 2 {
+    writeLiquidGlassLayer(to: CommandLine.arguments[2])
+    print("wrote the Liquid Glass layer to \(CommandLine.arguments[2])")
+}

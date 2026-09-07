@@ -276,7 +276,8 @@ the value back to whatever it was built with.
 
 ## The icon set
 
-`keyboard.macwindow` for the app, `keyboard.badge.ellipsis` for the menu bar.
+`keyboard.badge.eye` for the app — a keyboard being watched, which is what
+this does to your typing — and `keyboard.badge.ellipsis` for the menu bar.
 Both are SF Symbols, which means they carry Apple's optical corrections rather
 than a traced approximation of them, and the menu-bar one is a template image
 so macOS inverts it for a dark bar and dims it when the bar is inactive — the
@@ -289,29 +290,75 @@ bar, against neighbours running 12 to 15.5. `.large` at 13 points brings it to
 24 by 13.5: as tall as the taller neighbours, two points wider than the widest.
 The numbers come from measuring the rendered menu bar, not from the API.
 
-`Tools/make-icon.swift` draws the app icon; `make icon` runs it through
-`iconutil`. The `.icns` is committed, so an ordinary build needs neither, but
-the artwork stays reproducible and changing it is an edit to code.
+### Two icons, and why neither is derivable from the other
 
-Three things make it a *set* rather than one picture scaled ten ways:
+The app icon ships twice, from one generator.
 
-- **The artwork simplifies below 64 pixels.** `keyboard.macwindow`'s window
-  frame and its rows of small keys fall under a pixel apiece there, so the
-  plain `keyboard` stands in, and `keyboard.fill` below 40 — the same
-  silhouette, minus the detail that has stopped being detail.
-- **The mark is fitted by rendered width, not point size** — 0.74 of the
-  tile. A symbol's point size is its cap height, so sizing by it makes a wide
-  mark like `keyboard.macwindow` overflow its tile and a narrow one look lost.
-  0.80 crowds the edges; 0.60 leaves the tile looking empty.
-- **The tile is silver, not graphite** — the colour of the keyboard case the
-  app draws, and of the hardware it is a picture of. A light tile needs a dark
-  hairline border where a dark one needs a light one: the first would dissolve
-  into a pale Dock background, the second would read as a hole.
+`Resources/TypeReview.icns` is the whole picture, tile included, for **macOS 14
+and 15**. Those versions draw an app icon exactly as handed over, so the
+artwork has to arrive already shaped: Apple's grid, an 824-point tile on a 1024
+canvas, and its own drop shadow.
+
+`Resources/AppIcon.icon` is an Icon Composer document — a gradient and the mark
+on nothing — compiled by `actool` into `Assets.car` for **macOS 26**. That
+version draws app icons itself. It shapes them, lights them, and re-lights them
+for light mode, dark mode and tinting, and it can only do that for an icon
+supplied as *contents* rather than as a finished picture.
+
+Handing 26 the `.icns` alone is not a cosmetic compromise, it is a visible
+defect: the system fills the transparent margin around our 80.5% tile with
+white and rounds the result, so the app sat in the Dock as a small blue square
+inside a large cream one. That is what the second file exists to fix, and it is
+why cropping one out of the other would not work — one has a tile the other
+must not have.
+
+Both `Info.plist` keys ship, which is what Notes and Music do. macOS 26 reads
+`CFBundleIconName` and finds the catalogue; 14 and 15 read `CFBundleIconFile`
+and find the painted tile.
+
+`actool` also flattens the document to its own `.icns`, and the build deletes
+it. It carries only four representations against the hand-drawn set's ten, so
+it is not a replacement — measured, not assumed, and unchanged by lowering the
+deployment target from 26.0 to 14.0.
+
+Three assertions guard the step, because each part can fail while looking like
+it worked: `actool` exits 0 having written nothing if it decides there is no
+icon to compile, a catalogue can exist carrying only flattened bitmaps, and
+PlistBuddy reports success for keys it did not write. The middle one greps the
+compiled catalogue for `IconImageStack` — the structure that *is* the glass.
+
+### The flat artwork
+
+`Tools/make-icon.swift` draws both products; `make icon` runs the first through
+`iconutil` and writes the second into the document. The outputs are committed,
+so an ordinary build needs neither, but the artwork stays reproducible and
+changing it is an edit to code.
+
+- **The artwork simplifies as it shrinks.** `keyboard.badge.eye`'s badge and
+  its rows of small keys collapse into a smudge well before 16 points, so the
+  filled badge stands in below 80 pixels and the plain `keyboard.fill` below
+  24.
+- **The mark is fitted by rendered width, not point size** — 0.84 of the tile
+  at full size, 0.90 at 32. A symbol's point size is its cap height, so sizing
+  by it makes a wide mark overflow and a narrow one look lost. The widths came
+  from rendering candidates side by side: at 32 pixels the badge holds together
+  at 0.90 and loses the eye at 0.80, and 32 is the size that decides, because a
+  Dock icon is admired at 1024 and used at 32.
+- **The tile is blue glass, and the mark is cut out of it.** Five passes, each
+  one something glass does: shadow, body, specular, bounce, rim. The rim is the
+  one that matters — body alone is paint and body plus specular is plastic. The
+  mark is punched through with `.destinationOut`, so the desktop shows through
+  it; the pale edge around every cut is a shadow laid down before the punch and
+  left behind by it, which is what keeps the shape readable on a dark wallpaper
+  where a hole has no colour of its own.
+- **Weight rose with the colour.** A shape cut out of a dark ground reads
+  thinner than the same shape painted on a light one, because light bleeds
+  across the cut. `.medium` on blue lands where `.regular` landed on silver.
 - **The tile is a superellipse, not a rounded rectangle.** macOS icon tiles
   use a continuous corner and `NSBezierPath` has none; `|x/a|^5 + |y/b|^5 = 1`
   is the shape, and sampling it is shorter than faking it with arcs. Apple's
-  grid puts an 824-point tile on a 1024 canvas with a 185.4 corner, and the
-  shadow is part of the artwork rather than something the Dock adds.
+  grid puts an 824-point tile on a 1024 canvas, and the shadow is part of the
+  artwork rather than something the Dock adds.
 
 ## The on-screen keyboard
 

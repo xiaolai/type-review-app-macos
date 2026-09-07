@@ -91,6 +91,12 @@ CONTENTS := $(STAGE)/Contents
 
 SOURCES := $(shell find Sources -name '*.swift')
 CORPUS  := $(shell find Sources/TypeReviewKit/Resources -type f)
+# The Icon Composer document, and every file in it. Listed as prerequisites so
+# that editing the layer or the gradient rebuilds the bundle; a catalogue that
+# silently kept yesterday's icon would be indistinguishable from one that
+# recompiled.
+ICON_DOC    := Resources/AppIcon.icon
+ICON_SOURCE := $(shell find $(ICON_DOC) -type f 2>/dev/null)
 
 # What the app is built *from*, beyond the files listed as prerequisites.
 #
@@ -160,7 +166,7 @@ endif
 all: $(APP)
 
 $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
-        Resources/TypeReview.icns Resources/typewriter.m4a
+        Resources/TypeReview.icns Resources/typewriter.m4a $(ICON_SOURCE)
 	swift build -c $(CONFIG) --product $(BIN)
 	@rm -rf "$(STAGE)"
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
@@ -183,6 +189,44 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
 		= "$(BUNDLE_ID)" \
 		|| { echo "error: CFBundleIdentifier did not take"; exit 1; }
 	@cp Resources/TypeReview.icns $(CONTENTS)/Resources/TypeReview.icns
+	# The same mark a second time, as an Icon Composer document compiled to
+	# an asset catalogue. macOS 26 draws app icons itself — it shapes them,
+	# lights them, and re-lights them for dark mode and tinting — and it can
+	# only do that for an icon supplied as contents rather than as a
+	# finished picture. Given only the .icns it fills our transparent margin
+	# with white and rounds the result, which is how this app came to sit in
+	# a cream plate in the Dock.
+	#
+	# Both keys ship. macOS 26 reads CFBundleIconName and gets the glass;
+	# 14 and 15 read CFBundleIconFile and get the painted tile, which is
+	# what those versions expect, because they draw an icon exactly as
+	# handed over.
+	# The partial plist goes beside the bundle, not inside it: $(STAGE) is
+	# the .app itself, and anything left in a bundle's root that signing was
+	# not told about is "unsealed contents" and fails codesign outright.
+	@xcrun actool --compile $(CONTENTS)/Resources --app-icon AppIcon \
+		--output-partial-info-plist $(dir $(STAGE))icon-partial.plist \
+		--platform macosx --minimum-deployment-target 14.0 --target-device mac \
+		--errors --warnings $(ICON_DOC) >/dev/null
+	# actool also flattens the document to an .icns. We do not use it —
+	# CFBundleIconFile points at the hand-drawn tile, which is the whole
+	# reason both files exist — and an unreferenced 50 KB in a shipped
+	# bundle is just weight.
+	@rm -f $(CONTENTS)/Resources/AppIcon.icns
+	@/usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" \
+		$(CONTENTS)/Info.plist >/dev/null
+	# Three assertions, because every step above can fail while looking like
+	# it worked. actool exits 0 having written nothing if it decides there
+	# is no icon to compile; a catalogue can exist and carry only flattened
+	# bitmaps, which is the old icon wearing the new file name; and
+	# PlistBuddy reports success for keys it did not write.
+	@test -s "$(CONTENTS)/Resources/Assets.car" \
+		|| { echo "error: actool wrote no Assets.car"; exit 1; }
+	@xcrun assetutil --info $(CONTENTS)/Resources/Assets.car 2>/dev/null \
+		| grep -q 'IconImageStack' \
+		|| { echo "error: Assets.car has no IconImageStack — no Liquid Glass"; exit 1; }
+	@test "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' $(CONTENTS)/Info.plist)" \
+		= "AppIcon" || { echo "error: CFBundleIconName did not take"; exit 1; }
 	# The typewriter sound pack's recording. Loaded through `Bundle.main`,
 	# so it goes straight into Contents/Resources rather than through a
 	# SwiftPM resource bundle — which is also why it sidesteps the
@@ -264,9 +308,13 @@ icon:
 	work=$$(mktemp -d); \
 	trap 'rm -rf "$$work"' EXIT; \
 	swiftc -O Tools/make-icon.swift -o "$$work/make-icon"; \
-	"$$work/make-icon" "$$work/TypeReview.iconset"; \
+	"$$work/make-icon" "$$work/TypeReview.iconset" \
+		"$(ICON_DOC)/Assets/mark.png"; \
 	iconutil -c icns "$$work/TypeReview.iconset" -o Resources/TypeReview.icns; \
-	echo "wrote Resources/TypeReview.icns ($$(du -h Resources/TypeReview.icns | cut -f1))"
+	test -s "$(ICON_DOC)/Assets/mark.png" \
+		|| { echo "error: the Liquid Glass layer was not written"; exit 1; }; \
+	echo "wrote Resources/TypeReview.icns ($$(du -h Resources/TypeReview.icns | cut -f1))"; \
+	echo "wrote $(ICON_DOC)/Assets/mark.png"
 
 # Notarised and stapled, so the app passes Gatekeeper on a Mac that has never
 # seen it — offline included. Without a stapled ticket it only passes while the
