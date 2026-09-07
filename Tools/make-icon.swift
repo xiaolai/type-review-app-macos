@@ -10,13 +10,12 @@ import AppKit
 /// Two things make this an icon *set* rather than one picture scaled ten ways.
 /// The artwork simplifies as it shrinks, because `keyboard.badge.eye`'s badge
 /// and its rows of small keys collapse into a grey smudge well before 16
-/// points; and the symbol's optical weight rises as it shrinks, because a
-/// hairline that reads at 512 disappears at 16.
+/// points. Weight is deliberately *not* varied: `.regular` reads at every one
+/// of these sizes, and the earlier plan to thicken the mark as it shrank was
+/// tried and looked heavy at 32 rather than clearer.
 enum IconArtwork {
     /// Apple's grid: on a 1024 canvas the rounded tile is 824 across.
     static let tileFraction: CGFloat = 824.0 / 1024.0
-    /// And its corner is 185.4 of that 824.
-    static let cornerFraction: CGFloat = 185.4 / 824.0
 
     /// A superellipse, not a rounded rectangle.
     ///
@@ -52,7 +51,8 @@ enum IconArtwork {
     /// which is the mark — survives there; the outlined variant at that size
     /// is a grey smear. Only at 16 does the badge become a smudge that makes
     /// the keyboard beside it harder to read, and there the plain keyboard
-    /// stands alone. Weight climbs as size falls for the same reason.
+    /// stands alone. The weight is `.regular` throughout — see the note at
+    /// the top of this file.
     ///
     /// `width` is the share of the tile the glyph should span, measured on the
     /// *rendered* image rather than set as a point size. A symbol's point size
@@ -66,29 +66,18 @@ enum IconArtwork {
         }
     }
 
-    static func render(pixelSize: CGFloat) -> NSBitmapImageRep {
-        let rep = NSBitmapImageRep(
-            bitmapDataPlanes: nil, pixelsWide: Int(pixelSize), pixelsHigh: Int(pixelSize),
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-        NSGraphicsContext.current?.imageInterpolation = .high
-
-        let canvas = NSRect(x: 0, y: 0, width: pixelSize, height: pixelSize)
-        let tileSide = pixelSize * tileFraction
-        let tile = NSRect(
-            x: (pixelSize - tileSide) / 2, y: (pixelSize - tileSide) / 2,
-            width: tileSide, height: tileSide)
-
-        // Silver, lit from the top — the colour of the keyboard case the app
-        // draws, and of the hardware it is a picture of.
-        let path = squircle(in: tile)
+    /// The rounded silver tile: shadow, gradient and hairline border.
+    ///
+    /// Split out of `render`, which was doing this as well as bitmap setup and
+    /// symbol placement in one 75-line block, with its graphics-state saves
+    /// and restores separated by forty lines of unrelated drawing.
+    static func drawTile(_ path: NSBezierPath, in tile: NSRect, pixelSize: CGFloat) {
         // The shadow is part of the artwork on macOS, not something the Dock
         // adds. Skipped under 64 pixels, where it is a smudge on an already
         // small mark.
         if pixelSize >= 64 {
             NSGraphicsContext.saveGraphicsState()
+            defer { NSGraphicsContext.restoreGraphicsState() }
             let shadow = NSShadow()
             shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.32)
             shadow.shadowBlurRadius = pixelSize * 0.02
@@ -96,7 +85,6 @@ enum IconArtwork {
             shadow.set()
             NSColor.black.setFill()
             path.fill()
-            NSGraphicsContext.restoreGraphicsState()
         }
         NSGradient(
             colors: [
@@ -110,13 +98,36 @@ enum IconArtwork {
         // and only muddies the outline, so it is left off.
         if pixelSize >= 64 {
             NSGraphicsContext.saveGraphicsState()
+            defer { NSGraphicsContext.restoreGraphicsState() }
             path.setClip()
             let border = squircle(in: tile.insetBy(dx: pixelSize * 0.004, dy: pixelSize * 0.004))
             border.lineWidth = pixelSize * 0.007
             NSColor(calibratedWhite: 0, alpha: 0.14).setStroke()
             border.stroke()
-            NSGraphicsContext.restoreGraphicsState()
         }
+    }
+
+    static func render(pixelSize: CGFloat) -> NSBitmapImageRep {
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(pixelSize), pixelsHigh: Int(pixelSize),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        NSGraphicsContext.saveGraphicsState()
+        // Paired with the setup rather than left to a `restore` at the far end
+        // of the function, which every later early exit would have to remember.
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+
+        let canvas = NSRect(x: 0, y: 0, width: pixelSize, height: pixelSize)
+        let tileSide = pixelSize * tileFraction
+        let tile = NSRect(
+            x: (pixelSize - tileSide) / 2, y: (pixelSize - tileSide) / 2,
+            width: tileSide, height: tileSide)
+
+        // Silver, lit from the top — the colour of the keyboard case the app
+        // draws, and of the hardware it is a picture of.
+        drawTile(squircle(in: tile), in: tile, pixelSize: pixelSize)
 
         let choice = symbol(forPixelSize: pixelSize)
         let configuration = NSImage.SymbolConfiguration(
@@ -124,21 +135,24 @@ enum IconArtwork {
         ).applying(
             NSImage.SymbolConfiguration(
                 paletteColors: [NSColor(calibratedWhite: 0.13, alpha: 1)]))
-        if let symbol = NSImage(systemSymbolName: choice.name, accessibilityDescription: nil)?
+        // Fails loudly. An `if let` here meant a symbol that could not be
+        // found or configured was simply not drawn: the script still wrote ten
+        // PNGs and reported success, and the app shipped a blank silver tile.
+        guard let symbol = NSImage(systemSymbolName: choice.name, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration)
-        {
-            // Scale the rendered mark to the wanted share of the tile.
-            let natural = symbol.size
-            let target = tileSide * choice.width
-            let scale = target / max(natural.width, 1)
-            let drawn = NSSize(width: natural.width * scale, height: natural.height * scale)
-            symbol.draw(
-                in: NSRect(
-                    x: canvas.midX - drawn.width / 2, y: canvas.midY - drawn.height / 2,
-                    width: drawn.width, height: drawn.height))
+        else {
+            die("could not render \(choice.name) at \(Int(pixelSize))px")
         }
+        // Scale the rendered mark to the wanted share of the tile.
+        let natural = symbol.size
+        let target = tileSide * choice.width
+        let scale = target / max(natural.width, 1)
+        let drawn = NSSize(width: natural.width * scale, height: natural.height * scale)
+        symbol.draw(
+            in: NSRect(
+                x: canvas.midX - drawn.width / 2, y: canvas.midY - drawn.height / 2,
+                width: drawn.width, height: drawn.height))
 
-        NSGraphicsContext.restoreGraphicsState()
         return rep
     }
 }
