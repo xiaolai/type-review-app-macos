@@ -30,6 +30,39 @@ enum Channel {
         }
     }
 
+    /// Another running copy of *this same build*, if there is one.
+    ///
+    /// Distinct from `runningSibling`, which is the other channel. Two copies
+    /// of one build is a defect; two channels is a choice.
+    static var duplicate: NSRunningApplication? {
+        guard let mine = Bundle.main.bundleIdentifier else { return nil }
+        return NSWorkspace.shared.runningApplications.first {
+            $0.bundleIdentifier == mine && $0 != NSRunningApplication.current
+        }
+    }
+
+    /// Hands over to a copy that is already running, and says whether it did.
+    ///
+    /// `LSMultipleInstancesProhibited` covers this for anything LaunchServices
+    /// launches — `open`, the Dock, Spotlight — and measured, it does: `open
+    /// -n` yields one process with the key and two without. It does not cover
+    /// running the executable inside the bundle directly, which bypasses
+    /// LaunchServices entirely and was measured at two.
+    ///
+    /// That path is mostly a developer's, but the symptom is not: two
+    /// processes mean two event taps and every keystroke heard twice, with
+    /// nothing on screen to explain it. Whether a login-item launch and a
+    /// manual one can collide the same way has not been ruled out, and this
+    /// closes it either way.
+    ///
+    /// Activate-and-exit rather than an error, because that is exactly what
+    /// `open` already does for the same build. Nothing new to understand.
+    static func deferToRunningCopy() -> Bool {
+        guard let existing = duplicate else { return false }
+        existing.activate()
+        return true
+    }
+
     /// Whether this copy should stay quiet because the other one is already
     /// doing the job.
     ///
