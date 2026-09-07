@@ -132,10 +132,11 @@ enum AboutPane {
                 + "dealing, and each is credited on screen while it is being typed."
         ),
         (
-            "The engine",
-            "Ported from the TypeScript that runs type.review, and checked against "
-                + "it by golden vectors — so a score earned here means the same thing "
-                + "as one earned in the browser."
+            "Mechvibes",
+            "The idea that a keyboard can wear a different sound, and the name of "
+                + "the pack below Off. Its packs are recordings; every synthesised "
+                + "pack here is built from scratch, so none of its audio or code "
+                + "ships in this app. MIT licensed."
         ),
     ]
 
