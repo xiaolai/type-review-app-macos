@@ -310,6 +310,12 @@ final class GlobalKeySound {
         return mask
     }
 
+    /// Whether this process has already put the permission question to the
+    /// user. Asked once per run, not once per attempt: the tap is reinstalled
+    /// on every application switch, and a prompt on each of those would be
+    /// unusable.
+    private var hasAskedForPermission = false
+
     /// Starts or stops to match `wanted`, and reports whether sound is now
     /// running. Idempotent, because it is called from every place the setting
     /// can change and from the launch path as well.
@@ -317,6 +323,17 @@ final class GlobalKeySound {
     func setRunning(_ wanted: Bool, soundsModifiers modifiers: Bool, soundsRelease release: Bool)
         -> Bool
     {
+        // Asking is what registers the app in Input Monitoring and puts the
+        // prompt on screen. The old `NSEvent` monitors got that for free —
+        // installing one was itself the act that listed the app under
+        // Accessibility — and moving to a tap lost it, because `tapCreate`
+        // registers nothing. Without this, someone who had switched the
+        // setting on and never opened Settings again got silence, no prompt,
+        // and no entry in the list to switch on.
+        if wanted, !hasAskedForPermission, !Self.isPermitted {
+            hasAskedForPermission = true
+            Self.requestPermission()
+        }
         // A change of scope needs new monitors: which event kinds they watch
         // is fixed when they are installed.
         if isRunning, modifiers != soundsModifiers || release != soundsRelease { stop() }
