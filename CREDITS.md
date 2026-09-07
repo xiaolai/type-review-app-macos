@@ -1,5 +1,12 @@
 # Third-party assets
 
+> The app carries a shorter, user-facing version of this in **Settings ▸
+> About** (`Sources/TypeReviewApp/AboutPane.swift`). This file is the long
+> form for whoever maintains the app — the conversion command, the recording
+> chain, the per-entry licence fields. Change one and check the other: they
+> state the same facts at two different lengths, deliberately, and only the
+> facts have to agree.
+
 ## Audio
 
 ### `Resources/typewriter.m4a`

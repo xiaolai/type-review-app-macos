@@ -133,6 +133,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         buildSoundPane()
         buildGeneralPane()
         buildDataPane()
+        buildAboutPane()
     }
 
     private func buildPracticePane() {
@@ -301,6 +302,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             pathRow.yPlacement = .center
             let revealRow = grid.addRow(with: [NSGridCell.emptyContentView, reveal])
             revealRow.topPadding = 10
+        }
+    }
+
+    /// Who made this and what it stands on.
+    ///
+    /// Last, where an About belongs. Its content is one block rather than a
+    /// column of label-and-control rows, so the row spans both columns —
+    /// merged, or the centred block would sit in the right-hand column with
+    /// the label column's width empty beside it.
+    private func buildAboutPane() {
+        addPane(title: "About", symbol: "info.circle") { grid in
+            let content = AboutPane.makeContent()
+            let row = grid.addRow(with: [content])
+            row.mergeCells(in: NSRange(location: 0, length: 2))
+            grid.cell(for: content)?.xPlacement = .center
         }
     }
 
