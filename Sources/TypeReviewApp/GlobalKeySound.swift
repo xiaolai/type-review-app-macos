@@ -20,22 +20,30 @@ import Carbon.HIToolbox
 /// what was typed without knowing the layout, and a sound has no business
 /// knowing the letter in the first place. Keep it that way.
 ///
-/// ## Two monitors, not one
+/// ## One tap, not two monitors
 ///
-/// A global monitor is delivered only *other* applications' events — that is
-/// what makes it global. On its own it would go silent the moment TYPE came
-/// to the front, which is the app someone is most likely to be looking at
-/// while deciding whether the setting works. The local monitor covers this
-/// app's own windows; between them a keystroke is heard exactly once.
+/// This used to be a pair of `NSEvent` monitors — a global one for other
+/// applications and a local one for this app's own windows, because a global
+/// monitor is never delivered its own process's events. A session `CGEventTap`
+/// sees the whole login session, so one of it replaces both, and `.listenOnly`
+/// means it cannot alter or swallow the keystroke it sounds.
 ///
-/// ## What is not covered
+/// The move was forced by the App Store: `addGlobalMonitorForEvents` is gated
+/// on Accessibility, and Accessibility is not available to sandboxed apps. It
+/// turned out to be the better trade anyway, and the note that used to sit
+/// here had it exactly backwards — it called a tap "a heavier permission".
+/// A tap is gated on **Input Monitoring**, which can only listen, where
+/// Accessibility can drive other applications. The narrower permission was the
+/// one available all along.
 ///
-/// Keys consumed inside a nested event-tracking loop of *this* app — while a
-/// menu is open, or a window is being dragged — reach neither monitor: the
-/// local one is bypassed by the tracking loop and the global one excludes its
-/// own application. Those keystrokes are silent. It is a small hole (menus do
-/// not stay open long) and closing it would mean an event tap, which is a
-/// heavier permission and a worse trade for a sound.
+/// ## What a tap has that a monitor did not
+///
+/// It can fail to enable. `CGEvent.tapCreate` hands back a usable port without
+/// permission and only the enable fails, so `installGlobalMonitor` checks
+/// `tapIsEnabled` rather than trusting a non-nil port. And the system switches
+/// off a tap whose callback ran too slowly, which `tapCallback` handles by
+/// turning it back on — a path that has never fired in testing and is
+/// therefore written but unproven.
 @MainActor
 final class GlobalKeySound {
     /// Called for each physical key press, with the code and nothing else.
@@ -94,10 +102,27 @@ final class GlobalKeySound {
         self.play = play
     }
 
-    var isRunning: Bool { tap != nil }
+    /// Whether this monitor owns the shared slot — started, whether or not a
+    /// tap could actually be installed.
+    ///
+    /// Separate from `isListening`, and the separation is the fix for a crash.
+    /// This used to be `tap != nil`, which was safe while the old `NSEvent`
+    /// monitors always installed: `start()` guards on it, and a monitor that
+    /// had started always looked started. A tap can fail — no Input Monitoring
+    /// yet is the ordinary case — leaving `KeySoundMonitors.shared` set with no
+    /// tap. `start()` then passed its own guard and hit the ownership
+    /// precondition, so the app died on the next preference change: switch the
+    /// setting on before granting the permission, nudge the volume, crash.
+    private(set) var isRunning = false
+
+    /// Whether a tap is actually installed and hearing keys. What the caller
+    /// of `setRunning` wants to know: "on" and "heard" are not the same thing
+    /// while the permission is missing or another copy holds the tap.
+    var isListening: Bool { tap != nil }
 
     func start() {
         guard !isRunning else { return }
+        isRunning = true
         // One owner at a time, enforced rather than assumed. The monitor
         // callbacks reach back through a single shared reference, so a second
         // instance installed its own pair and then redirected *both* pairs to
@@ -297,16 +322,45 @@ final class GlobalKeySound {
     static func declaresCredentialProvider(_ bundleID: String) -> Bool {
         if let known = credentialProviders[bundleID] { return known }
         var found = false
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
-            let plugins = try? FileManager.default.contentsOfDirectory(
-                at: url.appendingPathComponent("Contents/PlugIns"),
-                includingPropertiesForKeys: nil)
-        {
+        // Only a *confirmed* answer is remembered. Caching a failed lookup as
+        // `false` turned any transient problem — the app being replaced
+        // mid-read, a directory that could not be listed — into "this is not a
+        // password manager" for the rest of the process's life. Of the two
+        // ways to be wrong here, that is the one that costs something.
+        var confirmed = false
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let dir = url.appendingPathComponent("Contents/PlugIns")
+            let plugins: [URL]
+            do {
+                plugins = try FileManager.default.contentsOfDirectory(
+                    at: dir, includingPropertiesForKeys: nil)
+                confirmed = true
+            } catch let error as CocoaError
+                where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile
+            {
+                // No PlugIns directory is an answer, and a confirmed one: this
+                // application ships no extensions at all.
+                plugins = []
+                confirmed = true
+            } catch {
+                plugins = []
+            }
             for plugin in plugins where plugin.pathExtension == "appex" {
                 guard
                     let info = NSDictionary(
-                        contentsOf: plugin.appendingPathComponent("Contents/Info.plist")),
-                    let extensionInfo = info["NSExtension"] as? [String: Any],
+                        contentsOf: plugin.appendingPathComponent("Contents/Info.plist"))
+                else {
+                    // Listing the directory worked but this extension could not
+                    // be read, so nothing was established about it. Folded in
+                    // with "read it and it is not a credential provider", the
+                    // unread one would be remembered as absence — the same
+                    // mistake as caching a failed lookup, one level down.
+                    confirmed = false
+                    continue
+                }
+                // Read, and simply not a credential provider. That is an
+                // answer, and it is safe to remember.
+                guard let extensionInfo = info["NSExtension"] as? [String: Any],
                     let point = extensionInfo["NSExtensionPointIdentifier"] as? String
                 else { continue }
                 if point.contains("credential-provider") {
@@ -315,7 +369,7 @@ final class GlobalKeySound {
                 }
             }
         }
-        credentialProviders[bundleID] = found
+        if confirmed { credentialProviders[bundleID] = found }
         return found
     }
 
@@ -331,10 +385,11 @@ final class GlobalKeySound {
         }
         siblingObservers = []
         removeGlobalMonitor()
+        isRunning = false
         if KeySoundMonitors.shared === self { KeySoundMonitors.shared = nil }
     }
 
-    /// Tears the monitors down and puts them straight back.
+    /// Tears the tap down and puts it straight back.
     ///
     /// For the moment Input Monitoring is granted while the app is already
     /// running. A tap created before the grant cannot be enabled and is
@@ -362,6 +417,13 @@ final class GlobalKeySound {
     /// unusable.
     private var hasAskedForPermission = false
 
+    /// Lets the next `setRunning(true, …)` ask again.
+    ///
+    /// For deliberate acts — the Settings switch, the menu item. The latch is
+    /// there so the app does not nag; someone reaching for the control is not
+    /// the app.
+    func askAgainOnNextStart() { hasAskedForPermission = false }
+
     /// Starts or stops to match `wanted`, and reports whether sound is now
     /// running. Idempotent, because it is called from every place the setting
     /// can change and from the launch path as well.
@@ -380,20 +442,36 @@ final class GlobalKeySound {
             hasAskedForPermission = true
             Self.requestPermission()
         }
+        // One place asks, and this is it. The Settings switch and the menu item
+        // used to call `requestPermission` themselves as well, which meant a
+        // single toggle asked twice — harmless, since the system answers from
+        // cache, and still two code paths for one decision. They call
+        // `askAgainOnNextStart()` instead: the latch exists to ration the
+        // *app* asking, not to ignore someone pressing a control.
         // A change of scope needs new monitors: which event kinds they watch
         // is fixed when they are installed.
         if isRunning, modifiers != soundsModifiers || release != soundsRelease { stop() }
         soundsModifiers = modifiers
         soundsRelease = release
         if wanted { start() } else { stop() }
-        return isRunning
+        return isListening
     }
 
     /// Events from another application, which arrive whether or not the
     /// permission exists. Silent until all of them do, and silent in the
     /// places sound does not belong.
     private func handleGlobal(_ event: NSEvent) {
-        guard Self.isPermitted, !isMutedHere else { return }
+        guard Self.isPermitted else { return }
+        // Muted means "make no sound", not "stop watching". The modifier
+        // tracker infers press from release by comparing against the flags it
+        // saw last, so an event dropped here leaves it believing a key is
+        // still held: release shift inside a password manager, come back out,
+        // press shift, and the transition test sees no change and stays
+        // silent. Keeping the state current costs one assignment.
+        if isMutedHere {
+            if event.type == .flagsChanged { lastRawFlags = event.modifierFlags.rawValue }
+            return
+        }
         handle(event)
     }
 
@@ -556,11 +634,12 @@ final class GlobalKeySound {
 
 /// The one monitor currently installed.
 ///
-/// `NSEvent`'s monitor handlers are `@Sendable` and outlive the call that
-/// registered them, so they cannot capture a main-actor object directly. A
+/// A `CGEventTap` callback is a C function pointer and cannot capture at all,
+/// which is a stronger version of the same problem the `NSEvent` handlers had.
+/// A
 /// single main-actor-isolated reference is the cheapest way to get back to it
 /// without weakening the isolation of `GlobalKeySound` itself — and "one at a
-/// time" is not a limitation here, it is the requirement: two monitors would
+/// time" is not a limitation here, it is the requirement: two taps would
 /// mean two clicks per keystroke.
 @MainActor
 enum KeySoundMonitors {

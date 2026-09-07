@@ -34,7 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// neither menu is open.
     var soundMenus: [NSMenu] = []
     private var soundHotKey: GlobalHotKey?
-    private var summonHotKey: GlobalHotKey?
+    /// Not private: the menu extension reads it to decide whether to print the
+    /// shortcut beside "Open TYPE". An extension in another file is outside a
+    /// private member's scope, and nothing is more exposed in practice.
+    var summonHotKey: GlobalHotKey?
 
     /// The one keystroke player, at app scope rather than inside the practice
     /// screen. Sound outlives that window now — the whole point of the global
@@ -257,8 +260,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Reconciles the Dock tile with the setting and with what is on screen.
-    func applyDockPolicy() {
-        let policy = desiredPolicy(windowVisible: hasVisibleWindow)
+    func applyDockPolicy(windowComing: Bool = false) {
+        // `windowComing` because the caller knows something `NSApp.windows`
+        // does not yet: a window is about to be ordered front. Asking only
+        // what is visible *now* answers for the moment before, which is how
+        // an auxiliary window used to arrive with no Dock tile.
+        let policy = desiredPolicy(windowVisible: hasVisibleWindow || windowComing)
         guard NSApp.activationPolicy() != policy else { return }
         NSApp.setActivationPolicy(policy)
         // Changing policy while the app is active drops it behind whatever
@@ -449,7 +456,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             keyCode: UInt32(shortcut.keyCode), modifiers: shortcut.modifiers.carbon,
             action: action)
         if key == nil {
-            print("TYPE: \(shortcut.displayString) is taken by another app — \(what) shortcut is off")
+            // "Taken by another app" was the only explanation offered, and it
+            // is one of three: the handler may have failed to install, or
+            // TYPE's own two shortcuts may collide with each other. Saying the
+            // likely cause is fine; asserting the wrong one is not.
+            let sameAsOther =
+                what == "summon"
+                ? shortcut == AppPreferences.soundShortcut.value
+                : shortcut == AppPreferences.summonShortcut.value
+            print(
+                sameAsOther
+                    ? "TYPE: \(shortcut.displayString) is assigned to both shortcuts — "
+                        + "\(what) is off"
+                    : "TYPE: \(shortcut.displayString) could not be registered — "
+                        + "\(what) is off (most likely another app owns it)")
         }
         return key
     }
@@ -479,7 +499,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// window on screen and TYPE in the background.
     @objc func toggleSound(_ sender: Any?) {
         AppPreferences.toggleSound()
-        markSoundMenus()
         // Switching sound *on* silently would leave the user unsure it
         // worked — the shortcut is usable from another app, where there is no
         // window and no menu to look at. One click is the answer. Switching
@@ -513,7 +532,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // claiming the setting is doing something. Guarding both behind the
         // grant left "Sound in Every App" without its warning until some
         // unrelated preference happened to change.
-        if permitted, AppPreferences.globalSound.value { globalSound.reinstall() }
+        if permitted, AppPreferences.globalSound.value {
+            globalSound.reinstall()
+            // And re-decide who makes the sound. The practice window keeps its
+            // own callbacks while the monitor is not listening, so the moment
+            // the monitor recovers both would fire and every keystroke in this
+            // window would sound twice. Routing is a function of whether the
+            // tap is live, so it has to be recomputed wherever that changes.
+            applySoundPreferences()
+        }
         markSoundMenus()
     }
 
@@ -546,16 +573,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let global = AppPreferences.globalSound.value
         globalSound.mutedApps = Set(AppPreferences.mutedApps.value)
-        globalSound.setRunning(
+        // What came back, not what was asked for. `setRunning` reports whether
+        // a tap is actually listening, and it can fail for ordinary reasons —
+        // no Input Monitoring yet, or the other channel holding the tap.
+        // Handing the practice window's own sound over to a monitor that never
+        // started left the app silent in both places at once, which reads as
+        // the feature being broken rather than as a permission not granted.
+        let heard = globalSound.setRunning(
             global, soundsModifiers: AppPreferences.modifierSound.value,
             soundsRelease: AppPreferences.releaseSound.value)
-        practice?.onKeyStruck = global ? nil : { [weak self] code in self?.playKey(code) }
+        // Silent here when *anything* is already sounding these keys — this
+        // app's own tap, or the other channel's. `heard` alone was not enough:
+        // a copy that stood down for its sibling reports "not listening" and
+        // would have added the window's own click on top of the sibling's,
+        // which is the doubling the standing-down exists to prevent.
+        // `global &&` matters. Standing down only means something when this
+        // copy would otherwise have been listening; with the setting off, the
+        // sibling's presence says nothing about this window at all, and
+        // treating it as coverage silenced the practice window in the most
+        // ordinary case of both — two copies, neither using global sound.
+        //
+        // What is left is the case this cannot see: the sibling listening
+        // while this copy has the setting off, where the window's own click
+        // lands on top of the sibling's. Choosing that over silencing the core
+        // feature is deliberate — one is audible and diagnosable, the other
+        // looks like the app is broken. Knowing which needs the eligibility
+        // exchange noted in dev-docs.
+        let coveredElsewhere = heard || (global && Channel.shouldYieldToSibling)
+        practice?.onKeyStruck = coveredElsewhere ? nil : { [weak self] code in self?.playKey(code) }
         // The release rides the same switch as the press: while the system-wide
         // monitor is running it sounds every key in every application, this one
         // included, and routing the window's own releases as well would play
         // each of them twice.
         practice?.onKeyReleased =
-            global || !AppPreferences.releaseSound.value
+            coveredElsewhere || !AppPreferences.releaseSound.value
             ? nil : { [weak self] code in self?.playKey(code, .release) }
         markSoundMenus()
     }
@@ -576,7 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// carries the second door for everyone past that.
     @objc func toggleGlobalSound(_ sender: Any?) {
         let wanted = !AppPreferences.globalSound.value
-        if wanted, !GlobalKeySound.isPermitted { GlobalKeySound.requestPermission() }
+        if wanted { globalSound.askAgainOnNextStart() }
         AppPreferences.globalSound.value = wanted
         // Switching on with no window in front and no keystroke yet made is
         // silent in a way that reads as broken. One click says it took.
@@ -626,6 +677,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The Library gets its own window for the same reason Statistics does:
     /// managing documents alongside the practice screen beats replacing it.
     @objc func showLibrary(_ sender: Any?) {
+        // Opening a window from menu-bar-only mode has to put the Dock tile
+        // back, exactly as `showMainWindow` does. Without this, Library or
+        // Statistics opened from the status item left the app accessory-only
+        // with "Show in Dock" switched on.
+        applyDockPolicy(windowComing: true)
         guard let practice else { return }
         let controller = libraryWindow ?? LibraryWindowController(store: practice.library)
         libraryWindow = controller
@@ -633,6 +689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func showSettings(_ sender: Any?) {
+        applyDockPolicy(windowComing: true)
         let controller = settings ?? SettingsWindowController()
         settings = controller
         controller.read = { [weak self] in self?.practice?.currentSettings ?? .default }
@@ -641,6 +698,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.suspendHotKey = { [weak self] suspended in
             self?.setShortcutsSuspended(suspended)
         }
+        controller.profileReplaced = { [weak self] reason in
+            self?.practice?.holdProfileUntilRelaunch(reason)
+        }
+        controller.askForKeyPermission = { [weak self] in
+            self?.globalSound.askAgainOnNextStart()
+        }
         controller.present()
     }
 
@@ -648,6 +711,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// is the Mac answer to "show me this alongside" — it can sit next to the
     /// practice window instead of replacing it.
     @objc func showStats(_ sender: Any?) {
+        // Opening a window from menu-bar-only mode has to put the Dock tile
+        // back, exactly as `showMainWindow` does. Without this, Library or
+        // Statistics opened from the status item left the app accessory-only
+        // with "Show in Dock" switched on.
+        applyDockPolicy(windowComing: true)
         let controller = stats ?? StatsViewController()
         stats = controller
         controller.history = { [weak self] in self?.practice?.history ?? [] }

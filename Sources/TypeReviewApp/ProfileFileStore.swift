@@ -79,10 +79,19 @@ struct ProfileFileStore {
         // question is about the file, and `String(contentsOf:)` reports
         // several unrelated failures through codes that would each have to be
         // enumerated correctly for the answer to be right.
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return .absent }
+        // Read first and let the error say what happened, rather than asking
+        // `fileExists`. That call answers false both for "no such file" and
+        // for "cannot tell" — a permissions problem, a stalled network volume
+        // — and only one of those is safe to read as a clean first run. The
+        // other became an empty writable profile that the next completed run
+        // would save over history that was there all along.
         let json: String
         do {
             json = try String(contentsOf: fileURL, encoding: .utf8)
+        } catch let error as CocoaError where error.code == .fileNoSuchFile
+            || error.code == .fileReadNoSuchFile
+        {
+            return .absent
         } catch {
             // `.corrupt` is what makes the store read-only, which is the whole
             // point: the file stays on disk, untouched and recoverable.
@@ -91,7 +100,17 @@ struct ProfileFileStore {
         // Straight through the ported validator: a file edited by hand, or
         // half-written by a crash, is caught here rather than becoming
         // impossible statistics later.
-        return deserializeProfile(json)
+        //
+        // One translation on the way out. The validator answers `.absent` for
+        // content it finds empty — a bare `null`, say — but bytes were read
+        // here, so the file exists and is wrong rather than missing. Passing
+        // that through as `.absent` would hand back a writable empty profile
+        // and lose whatever the file was.
+        let result = deserializeProfile(json)
+        if case .absent = result {
+            return .corrupt(reason: "profile file holds no profile")
+        }
+        return result
     }
 
     /// Atomic *and* durable — see `writeDurably`, which both stores share.

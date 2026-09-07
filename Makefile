@@ -84,7 +84,9 @@ endef
 # straight into $(APP) meant a failure half way through left a bundle that was
 # incomplete *and* newer than its sources — so the next `make`, `run` or
 # `selftest` considered it up to date and ran it.
-STAGE    := .build/stage/$(APP)
+# Per variant, and flat. Both variants staged through one path, so two
+# builds in flight could publish each other's half-assembled bundle.
+STAGE    := .build/stage-$(VARIANT)/TYPE.app
 CONTENTS := $(STAGE)/Contents
 
 SOURCES := $(shell find Sources -name '*.swift')
@@ -109,14 +111,29 @@ CORPUS  := $(shell find Sources/TypeReviewKit/Resources -type f)
 # newer than the stamp again, and `make CONFIG=debug` followed by `make` left
 # the debug bundle in place while reporting nothing to do — the very defect it
 # was written to fix, surviving because `make -n` cannot show it.
-INPUT_STAMP := .build/inputs-stamp
-INPUT_SIG   := $(CONFIG)|$(sort $(SOURCES))
+# Per variant: the two produce different bundles from identical sources,
+# so one stamp let a variant switch leave the other's bundle looking current.
+INPUT_STAMP := .build/inputs-stamp-$(VARIANT)
+# Everything that decides the bundle's contents. Sources and configuration
+# were here; the identifier, entitlements, build number and signing identity
+# were not, and each changes the output while every source file stays put.
+# The entitlements file is hashed, not merely named: editing it changes what
+# the signature grants while its path stays the same.
+ENTITLEMENTS_SIG := $(if $(ENTITLEMENTS),$(shell shasum -a 256 $(ENTITLEMENTS) 2>/dev/null | cut -d' ' -f1),none)
+INPUT_SIG   := $(CONFIG)|$(BUNDLE_ID)|$(ENTITLEMENTS_SIG)|$(BUILD_NUMBER)|$(SIGN_ID)|$(sort $(SOURCES))
 # Only when this invocation is actually going to build the app, and never on a
 # dry run. The check removes a mismatched bundle, and doing that at parse time
 # meant `make test CONFIG=debug` — or even `make -n` — destroyed a perfectly
 # good release build without replacing it.
 GOALS      := $(or $(MAKECMDGOALS),all)
-BUILDS_APP := $(filter all run selftest $(APP),$(GOALS))
+# Every goal that ends up building the app. `zip` and `notarize` do, and
+# were missing, so a configuration change could be packaged from a stale
+# bundle — the one place a stale bundle actually leaves the machine.
+# `appstore` is deliberately absent: it re-invokes make with VARIANT set, and
+# the inner invocation does its own invalidation with the right signature.
+# Listing it here ran the check in the *outer* process, where VARIANT is still
+# `direct` — so `make appstore` deleted the direct bundle on its way past.
+BUILDS_APP := $(filter all run selftest zip notarize $(APP),$(GOALS))
 DRY_RUN    := $(findstring n,$(firstword -$(MAKEFLAGS)))
 ifneq ($(BUILDS_APP),)
 ifeq ($(DRY_RUN),)
@@ -130,13 +147,19 @@ endif
 # checking password managers, instead of building the app. Both times the
 # build looked like it succeeded. Make's rule is "the first target in the
 # file", which is a property of where a line was pasted rather than of intent.
+# Recipes here assemble, sign, notarize and archive one bundle through shared
+# paths; none of it is safe to interleave, and `make -j notarize zip` could
+# archive while stapling was still running. Saying so is cheaper than making
+# every step independently parallel-safe for a build that takes seconds.
+.NOTPARALLEL:
+
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore zip
+.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release
 
 all: $(APP)
 
-$(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist \
+$(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
         Resources/TypeReview.icns Resources/typewriter.m4a
 	swift build -c $(CONFIG) --product $(BIN)
 	@rm -rf "$(STAGE)"
@@ -273,7 +296,19 @@ icon:
 # Notarize before archiving, not after: stapling writes a ticket into the
 # bundle, and an archive made first would ship without it.
 DIST_VERSION := $(shell /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
-ZIP          := dist/TYPE-$(DIST_VERSION).zip
+# Named per variant, for the reason the input stamp is: the two archives are
+# different files that were about to share one name, and whichever was built
+# last would have been the one shipped. Not a finding from the audit — it
+# followed from fixing the stamp, which is the same mistake one layer down.
+ZIP          := dist/TYPE-$(DIST_VERSION)-$(VARIANT).zip
+
+# Notarize, then archive, in that order and in one target. The ordering was
+# a comment before, which `make -j notarize zip` was free to ignore — and
+# an archive made mid-stapling ships without the ticket, which only shows
+# up on someone else's Mac.
+release:
+	@$(MAKE) --no-print-directory notarize
+	@$(MAKE) --no-print-directory zip
 
 zip: $(APP)
 	@mkdir -p dist
@@ -283,7 +318,7 @@ zip: $(APP)
 	# matters is "the app inside this file still verifies", and asserting it
 	# costs a second — cheaper than any argument about which archiver keeps
 	# what, and it stays true if the archiver ever changes.
-	@work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; 		ditto -x -k "$(ZIP)" "$$work"; 		codesign --verify --strict "$$work/$(APP)" 			|| { echo "error: the archived app does not verify"; exit 1; }
+	@work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; 		ditto -x -k "$(ZIP)" "$$work"; 		codesign --verify --strict "$$work/$(notdir $(APP))" 			|| { echo "error: the archived app does not verify"; exit 1; }
 	@printf '\n%s\n' "$(ZIP)"
 	@printf '  version : %s (build %s)\n' "$(DIST_VERSION)" "$(BUILD_NUMBER)"
 	@printf '  size    : %s\n' "$$(du -h '$(ZIP)' | cut -f1)"
@@ -298,7 +333,7 @@ version:
 		"$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
 	@printf 'build     : %s   (git rev-list --count HEAD)\n' "$(BUILD_NUMBER)"
 	@printf 'tree      : %s\n' \
-		"$$(git diff --quiet 2>/dev/null && echo clean || echo 'DIRTY — a build from this is not reproducible')"
+		"$$(test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo 'DIRTY — a build from this is not reproducible')"
 
 # Re-check the password-manager list against Homebrew and the App Store.
 #
@@ -316,8 +351,16 @@ password-managers:
 notarize: $(APP)
 	@security find-identity -v -p codesigning | grep -q "$(SIGN_ID)" \
 		|| { echo "FAIL: signing identity not in the keychain: $(SIGN_ID)"; exit 1; }
-	codesign --force --options runtime --timestamp --sign "$(SIGN_ID)" $(APP)
+	codesign --force --options runtime --timestamp $(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS),) --sign "$(SIGN_ID)" $(APP)
 	codesign --verify --strict --verbose=2 $(APP)
+	# The entitlement has to survive the re-sign, and its absence is invisible:
+	# the app runs here either way and the difference only shows up as a
+	# rejected submission, or an accepted one that is not sandboxed.
+	@if [ -n "$(ENTITLEMENTS)" ]; then \
+		codesign -d --entitlements - $(APP) 2>/dev/null | grep -q 'app-sandbox' \
+			|| { echo "FAIL: sandbox entitlement lost in re-signing"; exit 1; }; \
+		echo "  sandbox entitlement survived re-signing"; \
+	fi
 	# `get-task-allow` lets a debugger attach, and the notary service refuses
 	# any binary carrying it. Checked here so the refusal arrives in a second
 	# rather than after an upload.

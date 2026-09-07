@@ -27,6 +27,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// fires its action instead of being captured — making the one shortcut
     /// you most want to change the one you cannot.
     var suspendHotKey: (Bool) -> Void = { _ in }
+    /// Told when the profile on disk has been replaced, so the running session
+    /// stops saving a copy that is now older than the file.
+    var profileReplaced: (String) -> Void = { _ in }
+    /// Lets the next start ask for Input Monitoring again. Switching the
+    /// setting on is a deliberate act, and the monitor's once-per-run latch is
+    /// there to stop the *app* nagging, not to ignore a control being pressed.
+    var askForKeyPermission: () -> Void = {}
 
     private let tabs = SettingsTabViewController()
     private var controls: [String: NSControl] = [:]
@@ -119,6 +126,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// rather than trusted from when it was built.
     func windowDidBecomeKey(_ notification: Notification) {
         refreshSoundScope()
+        // The login item is the other thing System Settings can change behind
+        // this window's back, and it lives in General. Refreshing only Sound
+        // left that row showing what it read when the window opened.
+        refreshGeneralPane()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -563,7 +574,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         controls["globalSound"] = toggle
         bind(toggle) { [weak self] in
             let on = toggle.state == .on
-            if on, !GlobalKeySound.isPermitted { GlobalKeySound.requestPermission() }
+            if on { self?.askForKeyPermission() }
             AppPreferences.globalSound.value = on
             self?.refreshSoundScope()
         }
@@ -1085,7 +1096,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// this window that can lose a year of someone's history, and a rename
     /// costs nothing.
     @objc private func importProfile(_ sender: Any?) {
-        guard let store = try? ProfileFileStore.standard() else { return }
+        let store: ProfileFileStore
+        do {
+            store = try ProfileFileStore.standard()
+        } catch {
+            // Swallowed with `try?` before, which left an enabled button that
+            // did nothing at all — the worst of the three possible behaviours.
+            present(error: "The profile store is unavailable.", detail: error.localizedDescription)
+            return
+        }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
@@ -1128,27 +1147,49 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         confirm.addButton(withTitle: "Cancel")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
-        // Renamed rather than overwritten, and before anything is written, so
-        // a failure half way leaves the old profile on disk under a name that
-        // says what it is.
+        // Copy the old one aside, write the new one beside it, then swap. The
+        // first attempt renamed the original out of the way and wrote in its
+        // place, which meant a failed write left *no* profile — and the next
+        // launch would read that as a clean first run, losing the history the
+        // rename existed to protect. Restoring on failure patched that; this
+        // removes it, because the original never leaves its own path until a
+        // complete replacement is already on disk.
+        let folder = store.fileURL.deletingLastPathComponent()
+        var kept: URL?
         if FileManager.default.fileExists(atPath: store.fileURL.path) {
             let stamp = ISO8601DateFormatter().string(from: Date())
                 .replacingOccurrences(of: ":", with: "-")
-            let kept = store.fileURL.deletingLastPathComponent()
-                .appendingPathComponent("profile-replaced-\(stamp).json")
+            let destination = folder.appendingPathComponent("profile-replaced-\(stamp).json")
             do {
-                try FileManager.default.moveItem(at: store.fileURL, to: kept)
+                try FileManager.default.copyItem(at: store.fileURL, to: destination)
+                kept = destination
             } catch {
-                present(error: "The current profile could not be set aside.", detail: error.localizedDescription)
+                present(
+                    error: "The current profile could not be copied aside.",
+                    detail: error.localizedDescription + " Nothing was changed.")
                 return
             }
         }
+        // Through the store, not around it. Writing the bytes here by hand was
+        // atomic but not durable: `writeDurably` does the temp-file-and-rename
+        // *and* an `F_FULLFSYNC`, which is the difference between surviving a
+        // crash and surviving the power going out. Replacing the store's write
+        // path with a hand-rolled one quietly dropped half of that.
+        //
+        // Failure is safe because the copy above already exists and the store
+        // only renames its temp file over the original once the write
+        // succeeded — so the profile on disk is either the old one or the new
+        // one, never neither.
         do {
             try store.save(incoming)
         } catch {
-            present(error: "The imported profile could not be written.", detail: error.localizedDescription)
+            present(
+                error: "The imported profile could not be written.",
+                detail: error.localizedDescription
+                    + (kept == nil ? " Nothing was changed." : " The existing profile is intact."))
             return
         }
+        profileReplaced("imported profile — reopen TYPE before this session saves")
 
         // Every view that shows history read it at launch, so saying "it is
         // in" while the window still shows the old numbers would be a lie the

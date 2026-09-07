@@ -78,6 +78,12 @@ extension AppDelegate {
         item.menu = menu
         statusItem = item
     }
+    /// The digit each corpus source answers to, by name rather than by
+    /// position. Anything not listed gets no shortcut.
+    static let sourceShortcuts: [String: String] = [
+        "auto": "4", "quotes": "5", "code": "6", "user": "7", "generated": "8",
+    ]
+
     /// Prints the summon shortcut beside "Open TYPE".
     ///
     /// A global shortcut nobody can see is one nobody uses, and the status
@@ -90,7 +96,11 @@ extension AppDelegate {
     /// a state anyone reaches this menu from — and of the two, showing is the
     /// harmless direction to be wrong in.
     func markSummonShortcut() {
-        let shortcut = AppPreferences.summonShortcut.value
+        // What registered, not what is stored. A combination another app owns
+        // is refused by `RegisterEventHotKey`, and printing it beside the item
+        // promised something that does nothing — the one thing a menu should
+        // never do.
+        let shortcut = summonHotKey == nil ? nil : AppPreferences.summonShortcut.value
         statusOpenItem?.keyEquivalent = shortcut?.keyEquivalentString ?? ""
         statusOpenItem?.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
     }
@@ -150,10 +160,16 @@ extension AppDelegate {
         viewMenu.addItem(.separator())
         let sourceItem = NSMenuItem(title: "Source", action: nil, keyEquivalent: "")
         let sourceMenu = NSMenu(title: "Source")
-        for (index, channel) in CorpusChannel.allCases.enumerated() {
+        for channel in CorpusChannel.allCases {
+            // Stated per channel, not derived from declaration order. `index +
+            // 4` meant reordering the enum silently moved everyone's shortcuts,
+            // and a seventh channel would have produced the two-character
+            // equivalent "10", which is not a shortcut at all. A channel with
+            // no entry here simply has none, which is the honest outcome for
+            // one added later.
             let item = sourceMenu.addItem(
                 withTitle: channel.label, action: #selector(chooseSource(_:)),
-                keyEquivalent: String(index + 4))
+                keyEquivalent: Self.sourceShortcuts[channel.rawValue] ?? "")
             item.target = self
             item.representedObject = channel.rawValue
         }
@@ -216,6 +232,13 @@ extension AppDelegate {
     /// walks into the room.
     func makeSoundMenu() -> NSMenu {
         let menu = NSMenu(title: "Sound")
+        // This menu's enabled state is decided in `markSoundMenus`, from
+        // whether a foreign app is known and whether global sound is on.
+        // AppKit's automatic validation, which only asks whether the target
+        // responds to the action, would re-enable "Mute in …" over the top of
+        // that — and it responds, always. Two rules for one property is one
+        // too many.
+        menu.autoenablesItems = false
         // Not "Sound" — the submenu is already called that, and "Sound ▸
         // Sound" reads like a mistake. A verb phrase with a checkmark, the
         // same shape as "Show Keyboard" two items up.

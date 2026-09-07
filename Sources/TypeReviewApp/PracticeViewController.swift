@@ -322,6 +322,15 @@ final class PracticeViewController: NSViewController {
         }
     }
 
+    /// Stops this session writing over a profile that was replaced underneath
+    /// it. The in-memory profile is now older than the file, so saving it
+    /// would undo the import — and "Later" in the import dialog is exactly the
+    /// path where that happens quietly.
+    func holdProfileUntilRelaunch(_ reason: String) {
+        profileIsReadOnly = true
+        pendingSaveError = reason
+    }
+
     /// Saves the profile unless the file on disk is one we promised not to
     /// touch. Returns a message to show the user, or nil when the save went
     /// through.

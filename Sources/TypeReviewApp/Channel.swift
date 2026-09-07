@@ -59,7 +59,27 @@ enum Channel {
     /// `open` already does for the same build. Nothing new to understand.
     static func deferToRunningCopy() -> Bool {
         guard let existing = duplicate else { return false }
-        existing.activate()
+        // Not "someone else is there, so I go". Two copies started together
+        // each see the other and each would leave, which is worse than the
+        // duplication it prevents. The same total order the channels use
+        // settles it: the newer process defers, and with no usable dates the
+        // lower process identifier stays — arbitrary, and decided identically
+        // on both sides, which is the only property that matters.
+        let mine = NSRunningApplication.current.launchDate
+        let theirs = existing.launchDate
+        let iAmNewer: Bool
+        if let mine, let theirs, mine != theirs {
+            iAmNewer = mine > theirs
+        } else {
+            iAmNewer = ProcessInfo.processInfo.processIdentifier > existing.processIdentifier
+        }
+        guard iAmNewer else { return false }
+        // #9: activation can fail, and reporting success either way would exit
+        // this copy while nothing came forward — the app would look as though
+        // it simply refused to open. Staying is the safe direction: a second
+        // copy that keeps running is visible and fixable; one that vanishes is
+        // neither.
+        guard existing.activate() else { return false }
         return true
     }
 
@@ -84,17 +104,19 @@ enum Channel {
     /// needed.
     static var shouldYieldToSibling: Bool {
         guard let other = runningSibling else { return false }
-        guard let theirs = other.launchDate,
-            let mine = NSRunningApplication.current.launchDate
-        else {
-            // No dates to compare. Yield: one copy sounding is a working app,
-            // and two is a broken-sounding one.
-            return true
+        if let theirs = other.launchDate,
+            let mine = NSRunningApplication.current.launchDate,
+            mine != theirs
+        {
+            return mine > theirs
         }
-        if mine != theirs { return mine > theirs }
-        // Launched in the same instant, which is not realistic and is still
-        // cheaper to settle than to leave to chance. Any total order will do
-        // as long as both copies compute it identically.
+        // No usable dates, or the same instant. Yielding here was the first
+        // answer and it was wrong in the worst way: `launchDate` is nil for a
+        // process not started through LaunchServices, and *both* copies would
+        // then read nil, both yield, and the machine go silent — precisely the
+        // outcome the tie-break exists to prevent, reached by the path meant
+        // to be the safe one. Identifier order is arbitrary and, unlike
+        // yielding, it is a total order: exactly one side of any pair loses.
         return (Bundle.main.bundleIdentifier ?? "") > (sibling ?? "")
     }
 
