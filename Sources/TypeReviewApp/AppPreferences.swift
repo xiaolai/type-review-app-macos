@@ -110,6 +110,22 @@ enum AppPreferences {
     /// global shortcut mutes the whole machine without this having to know.
     static let globalSound = Flag(key: "GlobalSound")
 
+    /// Whether shift, control, option, command, fn and caps lock click too.
+    ///
+    /// Off, and the default is the interesting part. A real keyboard does
+    /// click when you press shift, so the faithful answer would be yes — but
+    /// the two places this app makes sound are not doing the same job. In the
+    /// practice window sound is *feedback about typing*, and a capital letter
+    /// is one keystroke of intent producing one character; clicking twice for
+    /// it puts noise in the channel that is supposed to be carrying the
+    /// signal. System-wide, sound is texture, and there every physical press
+    /// belongs.
+    ///
+    /// One rule beats two, and when they disagree the core feature wins. It
+    /// also means that by default the app watches strictly fewer keyboard
+    /// events: with this off, `flagsChanged` is not monitored at all.
+    static let modifierSound = Flag(key: "ModifierSound")
+
     /// Whether keystrokes make any sound at all.
     static var soundIsOn: Bool { soundPack.value != .off }
 

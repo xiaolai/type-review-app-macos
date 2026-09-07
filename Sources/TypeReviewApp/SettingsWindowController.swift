@@ -212,6 +212,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 hint: "Clicks wherever you type, not only in this window.")
             self.addPermissionRow(grid)
             self.addRow(
+                grid, "Modifier keys", self.modifierSoundToggle(),
+                hint: "⇧ ⌃ ⌥ ⌘ fn ⇪ click too. A capital stays one sound here.")
+            self.addRow(
                 grid, "Start at login", self.loginItemToggle(),
                 hint: "TYPE waits in the menu bar, ready before you type.")
             self.addLoginNoteRow(grid)
@@ -487,6 +490,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
+    /// Whether the modifier keys click.
+    ///
+    /// One switch rather than six. "Should shift click?" has one answer per
+    /// person, not one per key, and a six-row matrix would be handing the
+    /// design decision back to the user.
+    private func modifierSoundToggle() -> NSControl {
+        let toggle = NSSwitch()
+        toggle.identifier = .init("modifierSound")
+        controls["modifierSound"] = toggle
+        bind(toggle) { [weak self] in
+            AppPreferences.modifierSound.value = toggle.state == .on
+            self?.refreshSoundScope()
+        }
+        return toggle
+    }
+
     /// Whether TYPE starts with the Mac.
     ///
     /// Reads `SMAppService` rather than a preference of its own: the user can
@@ -557,6 +576,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
         let global = AppPreferences.globalSound.value
         (controls["globalSound"] as? NSSwitch)?.state = global ? .on : .off
+        (controls["modifierSound"] as? NSSwitch)?.state =
+            AppPreferences.modifierSound.value ? .on : .off
+        // Modifiers are only heard through the system-wide monitor, so the row
+        // means nothing while that is off — disabled rather than hidden, so it
+        // does not appear and disappear as the switch above it is used.
+        (controls["modifierSound"] as? NSSwitch)?.isEnabled = global
         let blocked = global && !GlobalKeySound.isPermitted
         permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
         for row in permissionRows { row.isHidden = !blocked }

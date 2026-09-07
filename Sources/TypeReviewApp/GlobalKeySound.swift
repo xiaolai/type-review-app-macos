@@ -45,6 +45,8 @@ final class GlobalKeySound {
     /// Modifier state as of the last `.flagsChanged`, as the *raw* mask, so a
     /// press can be told from a release for each physical key.
     private var lastRawFlags: UInt = 0
+    /// Whether modifier keys click. See `AppPreferences.modifierSound`.
+    private(set) var soundsModifiers = false
 
     init(play: @escaping (UInt16) -> Void) {
         self.play = play
@@ -75,15 +77,17 @@ final class GlobalKeySound {
         // the monitor left off, "on but not permitted" simply behaves like
         // "off outside this app", and the Settings pane and the menu both say
         // why.
+        // `.flagsChanged` only when modifiers are wanted, so the default
+        // configuration observes fewer kinds of keyboard event rather than
+        // observing them and throwing the result away.
+        let matching: NSEvent.EventTypeMask =
+            soundsModifiers ? [.keyDown, .flagsChanged] : [.keyDown]
         if Self.isPermitted {
-            globalMonitor = NSEvent.addGlobalMonitorForEvents(
-                matching: [.keyDown, .flagsChanged]
-            ) { event in
+            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
                 MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
             }
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) {
-            event in
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) { event in
             MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
             // Returned unchanged. A local monitor that swallowed the event
             // would make the sound and eat the keystroke with it.
@@ -117,7 +121,11 @@ final class GlobalKeySound {
     /// running. Idempotent, because it is called from every place the setting
     /// can change and from the launch path as well.
     @discardableResult
-    func setRunning(_ wanted: Bool) -> Bool {
+    func setRunning(_ wanted: Bool, soundsModifiers modifiers: Bool) -> Bool {
+        // A change of scope needs new monitors: which event kinds they watch
+        // is fixed when they are installed.
+        if isRunning, modifiers != soundsModifiers { stop() }
+        soundsModifiers = modifiers
         if wanted { start() } else { stop() }
         return isRunning
     }
@@ -137,6 +145,7 @@ final class GlobalKeySound {
             guard !event.isARepeat else { return }
             play(event.keyCode)
         case .flagsChanged:
+            guard soundsModifiers else { return }
             handleModifier(event)
         default:
             break

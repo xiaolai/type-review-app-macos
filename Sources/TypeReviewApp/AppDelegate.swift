@@ -452,7 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sounds.setVolume(AppPreferences.soundVolume.value)
 
         let global = AppPreferences.globalSound.value
-        globalSound.setRunning(global)
+        globalSound.setRunning(global, soundsModifiers: AppPreferences.modifierSound.value)
         practice?.onKeyStruck = global ? nil : { [weak self] code in self?.playKey(code) }
         markSoundMenus()
     }
