@@ -39,22 +39,48 @@ final class KeySoundPlayer {
     /// Both halves, not just the category. Keyed by category alone, the
     /// release of a key would have been served the press's buffer — the cache
     /// silently answering a question it had not been asked, which is the same
-    /// shape of bug as the single `sample` below.
+    /// shape of bug as the recording cache below.
     private struct Rendered: Hashable {
         let category: SoundCategory
         let stroke: Stroke
     }
 
-    /// Rendered audio per category and stroke, built lazily and thrown away
-    /// when the pack changes.
-    private var rendered: [Rendered: AVAudioPCMBuffer] = [:]
-    /// For the sample pack: the whole recording, plus the onsets found in it.
-    private var sample: AVAudioPCMBuffer?
-    private var onsets: [Int] = []
-    /// Why the recording could not be loaded, if it could not. Also stops the
-    /// load being retried on every keystroke.
-    private(set) var loadFailure: String?
-    private var isLoadingSample = false
+    /// Everything that belongs to the pack currently chosen.
+    ///
+    /// One value rather than five properties, and the difference is not
+    /// tidiness. These were reset one by one in `setPack`, and `loadFailure`
+    /// was the one it forgot: a recording that failed to decode left the flag
+    /// set for every pack after it, so the next sample pack was silenced
+    /// permanently without being tried once. That is the second thing this
+    /// state has got wrong — the render cache was keyed too coarsely before
+    /// it — so the fix is the class rather than the case. Replacing the whole
+    /// value makes forgetting a piece impossible rather than unlikely.
+    private struct PackState {
+        /// Rendered audio per category and stroke, built lazily.
+        var rendered: [Rendered: AVAudioPCMBuffer] = [:]
+        /// The decoded recording, and which resource it came from.
+        ///
+        /// Keyed rather than held bare. A bare buffer was correct, but only
+        /// because `setPack` cleared it — and a cache whose correctness lives
+        /// in another method stops being correct the moment somebody adds a
+        /// path that forgets. With the resource beside it, "is this the
+        /// recording I was asked for" is answered where it is asked.
+        var sample: (resource: String, buffer: AVAudioPCMBuffer)?
+        /// Where the strikes begin in that recording.
+        var onsets: [Int] = []
+        /// Why the recording could not be loaded, if it could not. Also stops
+        /// the load being retried on every keystroke.
+        var loadFailure: String?
+        /// A decode already in flight, so a burst of keystrokes starts one.
+        var isLoading = false
+    }
+
+    private var state = PackState()
+
+    /// Why the current pack's recording could not be loaded. Read by
+    /// `--soundcheck`, which is the only thing that can tell whether the
+    /// recording actually shipped inside the built app.
+    var loadFailure: String? { state.loadFailure }
 
     /// Resamples a decoded recording into the engine's format.
     private nonisolated static func converted(
@@ -112,9 +138,8 @@ final class KeySoundPlayer {
     func setPack(_ pack: KeySoundPack) {
         guard pack != self.pack else { return }
         self.pack = pack
-        rendered.removeAll()
-        sample = nil
-        onsets = []
+        // Wholesale. See `PackState`.
+        state = PackState()
         if case .silent = pack.kind { teardown() }
     }
 
@@ -155,7 +180,7 @@ final class KeySoundPlayer {
         -> AVAudioPCMBuffer?
     {
         let key = Rendered(category: category, stroke: stroke)
-        if let cached = rendered[key] { return cached }
+        if let cached = state.rendered[key] { return cached }
         let built: AVAudioPCMBuffer?
         switch pack.kind {
         case .silent:
@@ -173,7 +198,7 @@ final class KeySoundPlayer {
                     pack.sliceMs(for: category).flatMap(slice)
                 }
         }
-        if let built { rendered[key] = built }
+        if let built { state.rendered[key] = built }
         return built
     }
 
@@ -268,7 +293,7 @@ final class KeySoundPlayer {
     /// onsets are scanned once, and every slice starts on one.
     @discardableResult
     private func loadSample(_ resource: String, _ ext: String) -> AVAudioPCMBuffer? {
-        if let sample { return sample }
+        if let sample = state.sample, sample.resource == resource { return sample.buffer }
         // One attempt, and it does not happen here. Decoding the recording is
         // 83 seconds of audio and about four million samples to scan, and it
         // used to run synchronously on the main actor at the first typewriter
@@ -277,24 +302,24 @@ final class KeySoundPlayer {
         //
         // Started once and installed when it lands. Until then this pack is
         // silent, which is a far better failure than a stalled app.
-        guard loadFailure == nil, !isLoadingSample else { return nil }
-        isLoadingSample = true
+        guard state.loadFailure == nil, !state.isLoading else { return nil }
+        state.isLoading = true
         let wanted = pack
         Task.detached(priority: .userInitiated) {
             let loaded = Self.decodeSample(resource: resource, ext: ext)
             await MainActor.run {
-                self.isLoadingSample = false
+                self.state.isLoading = false
                 // Only if it is still the pack the user has chosen. Switching
                 // away while this was in flight would otherwise install a
                 // recording nothing is going to play.
                 guard self.pack == wanted else { return }
                 switch loaded {
                 case .loaded(let box):
-                    self.sample = box.buffer
-                    self.onsets = box.onsets
-                    self.rendered.removeAll()
+                    self.state.sample = (resource, box.buffer)
+                    self.state.onsets = box.onsets
+                    self.state.rendered.removeAll()
                 case .failed(let reason):
-                    self.loadFailure = reason
+                    self.state.loadFailure = reason
                 }
             }
         }
@@ -354,12 +379,13 @@ final class KeySoundPlayer {
     /// schedule, which is what keeps fast typing from stuttering. The onset
     /// is still random per app run, so two sessions do not sound identical.
     private func slice(_ sliceMs: Double) -> AVAudioPCMBuffer? {
-        guard let sample, let source = sample.floatChannelData?[0], !onsets.isEmpty
+        guard let sample = state.sample?.buffer, let source = sample.floatChannelData?[0],
+            !state.onsets.isEmpty
         else { return nil }
         let rate = sample.format.sampleRate
         let frames = min(Int((sliceMs / 1000) * rate), Int(sample.frameLength))
         guard frames > 0,
-            let start = onsets.randomElement(),
+            let start = state.onsets.randomElement(),
             let buffer = AVAudioPCMBuffer(
                 pcmFormat: Self.format, frameCapacity: AVAudioFrameCount(frames))
         else { return nil }
