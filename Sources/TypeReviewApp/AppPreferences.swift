@@ -111,7 +111,13 @@ enum AppPreferences {
     /// `UserDefaults` key in three places, with its default spelled out at one
     /// of them. As a `Flag` the default lives once and the write announces
     /// itself like every other preference does.
-    static let showKeyboard = Flag(key: "ShowKeyboard")
+    ///
+    /// On by default, and the one setting deliberately *not* taken from real
+    /// use when the rest were. Someone who has been using this for months has
+    /// long since stopped needing the keyboard on screen; someone opening it
+    /// for the first time has no way to find out it exists. A default is for
+    /// the second person.
+    static let showKeyboard = Flag(key: "ShowKeyboard", default: true)
 
     /// Whether launching TYPE puts a window on screen.
     ///

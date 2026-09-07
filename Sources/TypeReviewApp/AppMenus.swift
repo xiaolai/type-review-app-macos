@@ -113,10 +113,17 @@ extension AppDelegate {
         statusOpenItem?.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
     }
 
-    /// Two menus offer the keyboard toggle, so both carry the checkmark.
+    /// Three surfaces offer the keyboard toggle, so all three show its state.
+    ///
+    /// The toolbar button was the one that did not, for as long as it existed:
+    /// the two menus carried a checkmark while the button in the title bar
+    /// offered to "show or hide" without saying which. One function, called
+    /// from the three places that change the drawer, is what keeps them from
+    /// disagreeing.
     func markKeyboardMenus(_ visible: Bool) {
         keyboardMenuItem?.state = visible ? .on : .off
         statusKeyboardItem?.state = visible ? .on : .off
+        toolbarController?.markKeyboard(visible)
     }
     /// Every key equivalent carries Command.
     ///

@@ -283,13 +283,18 @@ what this app was actually left set to after months of use, adopted wholesale:
 |---|---|---|
 | `CaretStyle` | bar | **block** |
 | `DrawerGap` | 10 | **2** |
-| `ShowKeyboard` | on | **off** |
 | `SoundPack` | off | **mechvibe** |
 
 `DrawerWidthPercent`, `PassageColumns`, `PassageRows` and `ShowWhitespace` were
 already at the values in use, so nothing moved.
 
-Three things in that same domain were deliberately *not* adopted.
+Four things in that same domain were deliberately *not* adopted.
+
+**`ShowKeyboard` stays on.** It was off in real use and was briefly adopted as
+off, which was a mistake worth naming: someone who has typed here for months
+has long since stopped needing the keyboard on screen, while someone opening
+the app for the first time has no way to learn that it exists. A default is
+written for the second person.
 
 **The window frames and `SettingsLastPane` are session state, not settings.**
 A default screen position taken from one 2560-wide display is wrong on every

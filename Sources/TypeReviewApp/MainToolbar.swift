@@ -46,7 +46,19 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
         sourceItem.menu = sourceMenu()
     }
 
+    /// Shows whether the keyboard drawer is out.
+    ///
+    /// Driven from `markKeyboardMenus`, which is the one place that already
+    /// knew, so the toolbar cannot disagree with the two menus that carry the
+    /// same checkmark. A toggle kept in step by three separate callers is a
+    /// toggle that is eventually wrong in one of them.
+    func markKeyboard(_ visible: Bool) {
+        keyboardButton?.state = visible ? .on : .off
+    }
+
     // MARK: - Items
+
+    private weak var keyboardButton: NSButton?
 
     private static let source = NSToolbarItem.Identifier("source")
     private static let newText = NSToolbarItem.Identifier("newText")
@@ -88,9 +100,17 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
                 identifier, label: "New Text", symbol: "shuffle",
                 tip: "Fresh passage (⇥)", action: #selector(newTextPressed))
         case Self.keyboard:
-            return button(
+            let (item, button) = ToolbarItems.toggle(
                 identifier, label: "Keyboard", symbol: "keyboard",
-                tip: "Show or hide the on-screen keyboard", action: #selector(keyboardPressed))
+                tip: "Show or hide the on-screen keyboard",
+                target: self, action: #selector(keyboardPressed))
+            keyboardButton = button
+            // Seeded from the preference rather than left off. The toolbar is
+            // built after the drawer has already been opened or not, so a
+            // button that started off would have been wrong on every launch
+            // where the keyboard is showing — which is the default one.
+            button.state = AppPreferences.showKeyboard.value ? .on : .off
+            return item
         case Self.library:
             return button(
                 identifier, label: "Library", symbol: "books.vertical",

@@ -653,7 +653,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func toggleKeyboard(_ sender: Any?) {
-        guard let drawer else { return }
+        guard let drawer else {
+            // Not a bare `return`. The toolbar's toggle is a `pushOnPushOff`
+            // button, which is the only button type that actually draws its
+            // own on-state — measured against `momentaryChange` and `toggle`,
+            // both of which render identically in both states — and AppKit
+            // flips such a button *before* the action runs. Leaving here
+            // without re-asserting would strand it showing the opposite of
+            // what is true, with nothing to correct it until the next toggle.
+            markKeyboardMenus(AppPreferences.showKeyboard.value)
+            return
+        }
         // The keyboard is a drawer under the main window, so it cannot be on
         // screen without one. Chosen from the status menu with the window
         // away, this used to set the state, tick the checkmark and show
