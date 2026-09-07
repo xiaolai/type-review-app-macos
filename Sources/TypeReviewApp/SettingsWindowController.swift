@@ -66,18 +66,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
         window.toolbarStyle = .preference
-        // Five things AppKit will not do for a hand-rolled settings window,
+        // Four things AppKit will not do for a hand-rolled settings window,
         // each silent when omitted: the default collectionBehavior is 0, and
         // without .auxiliary this window displaces the main one in Stage
         // Manager; tabbingMode defaults to .automatic, and this window has been
-        // seen absorbed into another window's tab group; transitionOptions
-        // reads 4096 in practice though the header documents 4097, so panes
-        // hard-cut without an explicit crossfade; the frame is not remembered
-        // without an autosave name; and the last-viewed pane is not restored,
-        // which the HIG asks for.
+        // seen absorbed into another window's tab group; the frame is not
+        // remembered without an autosave name; and the last-viewed pane is not
+        // restored, which the HIG asks for.
         window.collectionBehavior = [.auxiliary, .fullScreenNone]
         window.tabbingMode = .disallowed
-        tabs.transitionOptions = [.crossfade, .allowUserInteraction]
+        // No transition options, deliberately. `SettingsTabViewController`
+        // swaps the panes with no animation and then fades the arriving one
+        // itself, in the same animation group as the height — see the note
+        // there for what AppKit's own crossfade costs on a pane that shrinks.
+        tabs.transitionOptions = []
         window.setFrameAutosaveName("TypeReviewSettings")
         // The tab strip is already visually distinct from the pane below it, so
         // the rule between them is a second boundary doing the first one's job.
@@ -1061,11 +1063,27 @@ private final class StackControl: NSControl {
 /// title bar downward is what every other one on the system does — letting
 /// macOS keep the bottom edge instead would walk the title bar up the screen
 /// on every click.
+/// Resizes the window and brings the new pane in, as one movement.
+///
+/// ## Why it is not AppKit's crossfade
+///
+/// A pane that shrinks cannot resize *during* a crossfade. Traced with both
+/// panes in the hierarchy, the window runs down to the new height and then
+/// jumps back to the outgoing pane's — 594 → 204 with a full frame at 594 in
+/// between, three runs out of three. It is the outgoing grid that does it:
+/// with empty panes the same trace is clean, which is why an earlier probe
+/// missed it entirely. Levelling `preferredContentSize` across the two
+/// controllers does not help, and neither does relaxing `contentMinSize`.
+///
+/// Working around it meant waiting for the crossfade to finish and resizing
+/// afterwards, which is two movements, and looks like two.
+///
+/// So the content is swapped with no animation at all — which puts AppKit's
+/// resize where it belongs, before anything moves — and the fade is done here
+/// instead, in the same animation group as the height. One movement: the
+/// window finds its new height while the pane that arrived comes up inside it.
 final class SettingsTabViewController: NSTabViewController {
-    /// Long enough to read as one movement rather than a jump. 0.2 was the
-    /// crossfade's own default and it made the height change look abrupt; the
-    /// crossfade is now driven from the same figure, so the two halves cannot
-    /// drift apart when this is tuned.
+    /// Long enough to read as one movement rather than a jump.
     private static let duration: TimeInterval = 0.3
 
     /// Prompt at the start, unhurried at the end. `easeInEaseOut` eases into
@@ -1084,63 +1102,45 @@ final class SettingsTabViewController: NSTabViewController {
         // three call sites downstream.
         completionHandler completion: (@Sendable () -> Void)? = nil
     ) {
-        guard let window = view.window else {
+        let target = toViewController.preferredContentSize
+        guard let window = view.window, target.height > 0 else {
+            // Nothing to animate against. Hand it back whole, and leave the
+            // arriving pane opaque — the fade below is the only thing that
+            // ever makes it otherwise, and skipping it here without this would
+            // leave a pane at whatever alpha it was last interrupted at.
+            toViewController.view.alphaValue = 1
             super.transition(
                 from: fromViewController, to: toViewController, options: options,
                 completionHandler: completion)
             return
         }
 
-        let target = toViewController.preferredContentSize
-        guard target.height > 0 else {
-            super.transition(
-                from: fromViewController, to: toViewController, options: options,
-                completionHandler: completion)
-            return
-        }
+        // The top edge stays put. Growing or shrinking from the title bar
+        // downwards is what a settings window does; moving both edges reads
+        // as the window jumping.
         let content = window.contentRect(forFrameRect: window.frame)
         var frame = window.frameRect(
             forContentRect: NSRect(origin: content.origin, size: target))
         frame.origin.y = window.frame.maxY - frame.height
 
-        // Order depends on the direction, and getting it wrong is visible.
-        //
-        // Both panes are in the view hierarchy while the crossfade runs, so
-        // the window cannot shrink below the taller one: animating a shrink
-        // first ran the window down to the new height and then let it snap
-        // straight back to the old one — measurably, 554 → 191 → 554. Growing
-        // has no such conflict.
-        //
-        // So: grow before the crossfade, shrink after it. Either way the
-        // window is never asked to be smaller than what it currently holds.
-        let isGrowing = frame.height >= window.frame.height
-        if isGrowing { animate(to: frame) }
-        // The crossfade takes its duration from the surrounding animation
-        // context, so wrapping it is what keeps it in step with the frame
-        // animation above rather than running at AppKit's own default.
+        // Content first and instantly, so AppKit's own resize — the jump back
+        // to the outgoing pane's height — happens before the eye is on
+        // anything. `completion` rides with it: with no animation the
+        // transition really has finished by the time it is called.
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.duration
-            context.timingFunction = Self.timing
-            // Only Sendable values cross into the completion handler — a
-            // `CGRect`, a `Bool`, and `self` weakly. Capturing a local closure
-            // there is what the compiler objects to, and rightly.
+            context.duration = 0
             super.transition(
-                from: fromViewController, to: toViewController, options: options
-            ) { [weak self] in
-                MainActor.assumeIsolated {
-                    if !isGrowing { self?.animate(to: frame) }
-                    completion?()
-                }
-            }
+                from: fromViewController, to: toViewController, options: [],
+                completionHandler: completion)
         }
-    }
 
-    private func animate(to frame: NSRect) {
-        guard let window = view.window else { return }
+        let arriving = toViewController.view
+        arriving.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.duration
             context.timingFunction = Self.timing
             window.animator().setFrame(frame, display: true)
+            arriving.animator().alphaValue = 1
         }
     }
 }
