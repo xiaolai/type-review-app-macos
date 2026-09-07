@@ -67,4 +67,16 @@ public struct KeyboardShortcut: Sendable, Equatable, Codable {
     /// would be theft from every other app.
     public static let defaultSoundToggle = KeyboardShortcut(
         keyCode: 1, modifiers: [.control, .option, .command])  // kVK_ANSI_S
+
+    /// ⌃⌥⌘T, on the same reasoning and with the same prefix: the two things
+    /// TYPE claims system-wide are recognisably a pair, and neither is a
+    /// combination another app is likely to want.
+    ///
+    /// It has a default rather than starting empty, because a summon shortcut
+    /// nobody knows about is one nobody uses — and the cost of being wrong is
+    /// small in both directions. `kEventHotKeyExclusive` returns nil rather
+    /// than stealing anything if the combination is already spoken for, and
+    /// the recorder clears it in one keystroke.
+    public static let defaultSummon = KeyboardShortcut(
+        keyCode: 17, modifiers: [.control, .option, .command])  // kVK_ANSI_T
 }

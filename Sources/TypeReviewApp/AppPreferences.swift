@@ -98,6 +98,14 @@ enum AppPreferences {
         }
     }
 
+    /// Whether the keyboard drawer is out.
+    ///
+    /// The last preference that was still being read and written as a raw
+    /// `UserDefaults` key in three places, with its default spelled out at one
+    /// of them. As a `Flag` the default lives once and the write announces
+    /// itself like every other preference does.
+    static let showKeyboard = Flag(key: "ShowKeyboard", default: true)
+
     /// Whether launching TYPE puts a window on screen.
     ///
     /// Off, so a double-click does what a double-click does. On, the app goes
@@ -330,25 +338,37 @@ enum AppPreferences {
 
     private static let lastAudibleKey = "LastAudibleSoundPack"
 
-    /// The system-wide combination that toggles sound.
+    /// A system-wide key combination, stored as its parts.
     ///
-    /// Stored as its two parts rather than as an encoded blob, so it stays
-    /// legible in `defaults read` and a wrong value written by hand degrades
-    /// to "no shortcut" instead of to a decoding crash. `nil` means the user
-    /// cleared it and no global hot key is registered at all.
-    enum soundShortcut {
-        static let keyCodeKey = "SoundShortcutKeyCode"
-        static let modifiersKey = "SoundShortcutModifiers"
+    /// Two numbers and a flag rather than an encoded blob, so it stays legible
+    /// in `defaults read` and a value written by hand degrades to "no
+    /// shortcut" instead of to a decoding crash. `nil` means the user cleared
+    /// it and no global hot key is registered at all.
+    ///
+    /// A type rather than a second copy of forty lines, once there was a
+    /// second shortcut to store. The keys are derived from `name`, which
+    /// reproduces `SoundShortcutKeyCode` and its two siblings exactly —
+    /// renaming them would have silently discarded a shortcut someone had set.
+    struct ShortcutPreference {
+        let keyCodeKey: String
+        let modifiersKey: String
         /// Distinguishes "never set, use the default" from "deliberately
         /// cleared", which look identical if only the two keys above exist.
-        static let setKey = "SoundShortcutSet"
+        let setKey: String
+        /// What an untouched installation gets.
+        let fallback: KeyboardShortcut?
 
-        static var value: KeyboardShortcut? {
+        init(name: String, fallback: KeyboardShortcut?) {
+            keyCodeKey = "\(name)KeyCode"
+            modifiersKey = "\(name)Modifiers"
+            setKey = "\(name)Set"
+            self.fallback = fallback
+        }
+
+        var value: KeyboardShortcut? {
             get {
                 let defaults = UserDefaults.standard
-                guard defaults.object(forKey: setKey) != nil else {
-                    return .defaultSoundToggle
-                }
+                guard defaults.object(forKey: setKey) != nil else { return fallback }
                 guard defaults.bool(forKey: setKey) else { return nil }
                 // Present, numeric and in range — all three checked. Truncation
                 // turned 65536 into 0, and a missing or non-numeric value into
@@ -367,7 +387,7 @@ enum AppPreferences {
                 // `defaults write` does not go through the recorder.
                 return candidate.isValid ? candidate : nil
             }
-            set {
+            nonmutating set {
                 let defaults = UserDefaults.standard
                 defaults.set(newValue != nil, forKey: setKey)
                 if let newValue {
@@ -378,6 +398,18 @@ enum AppPreferences {
             }
         }
     }
+
+    /// The combination that toggles keystroke sound, from anywhere.
+    static let soundShortcut = ShortcutPreference(
+        name: "SoundShortcut", fallback: .defaultSoundToggle)
+
+    /// The combination that brings TYPE's window up, and puts it away again.
+    ///
+    /// The one way in that does not involve aiming at a small icon. It earns
+    /// its keep most when the Dock icon is off — ⌘-Tab cannot reach an
+    /// accessory app either, so without this the status item is the only door.
+    static let summonShortcut = ShortcutPreference(
+        name: "SummonShortcut", fallback: .defaultSummon)
 
     /// Fired when any of these change, so the window can take its new shape
     /// without being reopened.

@@ -44,6 +44,7 @@ extension AppDelegate {
         let show = menu.addItem(
             withTitle: "Open TYPE", action: #selector(showMainWindow(_:)), keyEquivalent: "")
         show.target = self
+        statusOpenItem = show
         menu.addItem(.separator())
         let keyboard = menu.addItem(
             withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "")
@@ -77,6 +78,23 @@ extension AppDelegate {
         item.menu = menu
         statusItem = item
     }
+    /// Prints the summon shortcut beside "Open TYPE".
+    ///
+    /// A global shortcut nobody can see is one nobody uses, and the status
+    /// menu is where someone looks when the window is away — which is exactly
+    /// when the shortcut is worth knowing. Whatever is actually registered,
+    /// so a combination another app has taken is never advertised as working.
+    ///
+    /// The item's action stays `showMainWindow` rather than the toggle. The
+    /// two only differ when a window is already up and frontmost, which is not
+    /// a state anyone reaches this menu from — and of the two, showing is the
+    /// harmless direction to be wrong in.
+    func markSummonShortcut() {
+        let shortcut = AppPreferences.summonShortcut.value
+        statusOpenItem?.keyEquivalent = shortcut?.keyEquivalentString ?? ""
+        statusOpenItem?.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
+    }
+
     /// Two menus offer the keyboard toggle, so both carry the checkmark.
     func markKeyboardMenus(_ visible: Bool) {
         keyboardMenuItem?.state = visible ? .on : .off

@@ -220,7 +220,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Silent in", self.mutedAppsControl(),
                 hint: "Password managers are never watched. Password fields never sound.")
             self.addRow(
-                grid, "Shortcut", self.shortcutRecorder(),
+                grid, "Shortcut", self.shortcutRecorder(AppPreferences.soundShortcut),
                 hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
         }
     }
@@ -245,10 +245,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addLoginNoteRow(grid)
             self.addRow(
                 grid, "Start in the menu bar", self.startInMenuBarToggle(),
-                hint: "Launch without a window. Opening TYPE again brings it back.")
+                hint: "Only for launches you start. Opening TYPE again brings the window back.")
             self.addRow(
                 grid, "Show in Dock", self.showInDockToggle(),
                 hint: "Off takes the menu bar with it — macOS ties the two.")
+            // Last, and directly under the Dock switch, because it answers the
+            // question that switch raises: with no Dock tile there is no
+            // ⌘-Tab entry either, and this is the way back that does not
+            // involve aiming at a small icon.
+            self.addRow(
+                grid, "Show TYPE", self.shortcutRecorder(AppPreferences.summonShortcut),
+                hint: "Brings the window up from any app, and puts it away again.")
         }
     }
 
@@ -708,14 +715,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// The global shortcut, as a recorder. Held so nothing else has to know
     /// how it stores itself.
-    private func shortcutRecorder() -> NSControl {
-        let recorder = ShortcutRecorder(shortcut: AppPreferences.soundShortcut.value)
+    /// One recorder, told which preference it edits.
+    ///
+    /// The struct is captured by value and its setter is `nonmutating`, so
+    /// the closure writes through to `UserDefaults` rather than to a copy.
+    private func shortcutRecorder(_ preference: AppPreferences.ShortcutPreference) -> NSControl {
+        let recorder = ShortcutRecorder(shortcut: preference.value)
         recorder.onRecordingChanged = { [weak self] recording in self?.suspendHotKey(recording) }
         recorder.onChange = { shortcut in
             // Writing the preference posts `didChange`, which is what makes
             // the app re-register the hot key and relabel both menus. The
             // recorder itself knows none of that.
-            AppPreferences.soundShortcut.value = shortcut
+            preference.value = shortcut
         }
         return recorder
     }

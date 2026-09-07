@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var windowCloseObserver: NSObjectProtocol?
     var statusItem: NSStatusItem?
     var statusKeyboardItem: NSMenuItem?
+    /// The status menu's "Open TYPE", kept so the summon shortcut can be
+    /// printed beside it whenever the registration changes.
+    var statusOpenItem: NSMenuItem?
     var sourceMenuItems: [NSMenuItem] = []
     var toolbarController: MainToolbarController?
     /// Every Sound submenu built — the menu bar's and the status item's. Both
@@ -31,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// neither menu is open.
     var soundMenus: [NSMenu] = []
     private var soundHotKey: GlobalHotKey?
+    private var summonHotKey: GlobalHotKey?
 
     /// The one keystroke player, at app scope rather than inside the practice
     /// screen. Sound outlives that window now — the whole point of the global
@@ -141,7 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !menuBarOnly { window.makeKeyAndOrderFront(nil) }
         // Without animation: the drawer should already be out when the app
         // appears, not slide out at launch.
-        let showKeyboard = UserDefaults.standard.object(forKey: "ShowKeyboard") as? Bool ?? true
+        let showKeyboard = AppPreferences.showKeyboard.value
         drawer.setOpen(showKeyboard, animated: false)
         markKeyboardMenus(showKeyboard)
         if menuBarOnly {
@@ -174,13 +178,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // notification — so a pack or volume changed in Settings is
                 // live on the next keystroke rather than at the next launch.
                 // `applySoundPreferences` marks the menus itself, and
-                // `registerSoundShortcut` marks them again after registering —
+                // `registerShortcuts` marks them again after registering —
                 // so the explicit call that used to sit here was the third
                 // mark for one notification.
                 self.applySoundPreferences()
                 self.practice?.applyTypingPreferences()
-                if changed == nil || changed == AppPreferences.soundShortcut.keyCodeKey {
-                    self.registerSoundShortcut()
+                if changed == nil || changed == AppPreferences.soundShortcut.keyCodeKey
+                    || changed == AppPreferences.summonShortcut.keyCodeKey
+                {
+                    self.registerShortcuts()
                 }
                 if changed == nil || changed == AppPreferences.showInDock.key {
                     self.applyDockPolicy()
@@ -189,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         observeWindowClosing()
-        registerSoundShortcut()
+        registerShortcuts()
         // Pack, volume and — the new part — scope. This is what starts the
         // system-wide monitor when the setting says so, and what decides
         // whether the typing surface makes its own sound or leaves it to the
@@ -400,34 +406,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// below the Cocoa event stream, so the recorder's local monitor never
     /// sees it. Re-recording the shortcut you already have fired the sound
     /// toggle instead of being captured.
-    private func setSoundShortcutSuspended(_ suspended: Bool) {
+    private func setShortcutsSuspended(_ suspended: Bool) {
         if suspended {
+            // Both, not just the one being edited. The recorder does not say
+            // which row it belongs to, and a summon shortcut that fired while
+            // the sound shortcut was being re-recorded would have thrown the
+            // window across the Settings sheet mid-keystroke.
             soundHotKey?.unregister()
             soundHotKey = nil
+            summonHotKey?.unregister()
+            summonHotKey = nil
         } else {
-            registerSoundShortcut()
+            registerShortcuts()
         }
     }
 
-    private func registerSoundShortcut() {
+    private func registerShortcuts() {
         soundHotKey?.unregister()
-        soundHotKey = nil
-        guard let shortcut = AppPreferences.soundShortcut.value else {
-            markSoundMenus()
-            return
-        }
-        soundHotKey = GlobalHotKey(
-            keyCode: UInt32(shortcut.keyCode), modifiers: shortcut.modifiers.carbon
-        ) { [weak self] in
+        summonHotKey?.unregister()
+        soundHotKey = register(AppPreferences.soundShortcut.value, "sound") { [weak self] in
             self?.toggleSound(nil)
         }
-        if soundHotKey == nil {
-            // Another app already owns it. The menu item still works, so this
-            // is worth saying once rather than raising a dialog the user can
-            // do nothing about from here.
-            print("TYPE: \(shortcut.displayString) is taken by another app — menu only")
+        summonHotKey = register(AppPreferences.summonShortcut.value, "summon") { [weak self] in
+            self?.toggleMainWindow(nil)
         }
         markSoundMenus()
+        markSummonShortcut()
+    }
+
+    /// Claims one combination, or says why it could not.
+    ///
+    /// Returns nil for "cleared" and for "already owned by another app"
+    /// alike, because nothing here treats them differently — both mean no hot
+    /// key. Only the second is worth a line on the console: the menu bar and
+    /// the status item still reach everything either way, so a dialog the
+    /// user can do nothing about from here would be worse than a log.
+    private func register(
+        _ shortcut: KeyboardShortcut?, _ what: String, action: @escaping () -> Void
+    ) -> GlobalHotKey? {
+        guard let shortcut else { return nil }
+        let key = GlobalHotKey(
+            keyCode: UInt32(shortcut.keyCode), modifiers: shortcut.modifiers.carbon,
+            action: action)
+        if key == nil {
+            print("TYPE: \(shortcut.displayString) is taken by another app — \(what) shortcut is off")
+        }
+        return key
+    }
+
+    /// Brings TYPE up, or puts it away when it is already up.
+    ///
+    /// A summon that only summons is half a shortcut — the same keys have to
+    /// undo it, or the window has to be dismissed some other way every time.
+    /// "Away" is `hideToMenuBar`, which is also what ⌘Q does here: one verb
+    /// for putting the app down rather than two that differ in ways nobody
+    /// can predict.
+    ///
+    /// `NSApp.isActive` is part of the test, not just window visibility. A
+    /// window that is on screen behind three others is not one the user is
+    /// looking at, and pressing the shortcut then means "bring it here".
+    @objc func toggleMainWindow(_ sender: Any?) {
+        if NSApp.isActive, hasVisibleWindow {
+            hideToMenuBar(nil)
+        } else {
+            showMainWindow(nil)
+        }
     }
 
 
@@ -561,13 +604,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showMainWindow(nil)
             drawer.setOpen(true, animated: true)
             markKeyboardMenus(true)
-            UserDefaults.standard.set(true, forKey: "ShowKeyboard")
+            AppPreferences.showKeyboard.value = true
             return
         }
         let visible = !drawer.isOpen
         drawer.setOpen(visible, animated: true)
         markKeyboardMenus(visible)
-        UserDefaults.standard.set(visible, forKey: "ShowKeyboard")
+        AppPreferences.showKeyboard.value = visible
     }
 
     /// The Library gets its own window for the same reason Statistics does:
@@ -586,7 +629,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.write = { [weak self] next in self?.practice?.applySettings(next) ?? false }
         controller.previewSound = { [weak self] in self?.previewSound() }
         controller.suspendHotKey = { [weak self] suspended in
-            self?.setSoundShortcutSuspended(suspended)
+            self?.setShortcutsSuspended(suspended)
         }
         controller.present()
     }
