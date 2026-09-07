@@ -7,6 +7,21 @@
 APP      := TYPE.app
 BIN      := TypeReviewApp
 CONFIG   := release
+
+# A real identity, not ad-hoc, and the reason is Input Monitoring.
+#
+# TCC does not remember "this app"; it remembers a *code requirement*. For a
+# Developer ID signature that requirement names the team and the bundle
+# identifier, both of which survive a rebuild. An ad-hoc signature has no
+# identity to name, so its requirement falls back to the cdhash — which changes
+# whenever a byte of the binary does. Every `make all` therefore produced an
+# app macOS considered a stranger, and the system-wide keystroke sound had to
+# be permitted again after every single build.
+#
+# Overridable, and honoured only if the certificate is actually in the
+# keychain: a clone on another Mac still builds, ad hoc, with a warning that
+# says what it costs.
+SIGN_ID ?= Developer ID Application: HANDO K.K. (Y53RSUA3SM)
 # Assembled here and published only when every check has passed. Writing
 # straight into $(APP) meant a failure half way through left a bundle that was
 # incomplete *and* newer than its sources — so the next `make`, `run` or
@@ -93,7 +108,25 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist \
 		|| { echo "error: typewriter sample missing from $(APP)" >&2; exit 1; }
 	# stdout silenced, stderr kept. Sending both to /dev/null left a signing
 	# failure showing as make's generic "Error 1" with nothing to act on.
-	@codesign --force --sign - --timestamp=none "$(STAGE)" >/dev/null
+	#
+	# `--options runtime` because that is how the app would ship, and a
+	# hardened runtime is worth discovering at build time rather than at
+	# notarisation. `--timestamp=none` because a secure timestamp needs
+	# Apple's server: it is required to notarise and pointless for a local
+	# build, and requiring it would make `make` fail on a train.
+	@if security find-identity -v -p codesigning | grep -q "$(SIGN_ID)"; then \
+		codesign --force --options runtime --timestamp=none \
+			--sign "$(SIGN_ID)" "$(STAGE)" >/dev/null; \
+	else \
+		echo "warning: signing identity not in the keychain: $(SIGN_ID)"; \
+		echo "         falling back to ad hoc — macOS will treat each build as a"; \
+		echo "         different app, so Input Monitoring must be granted again"; \
+		echo "         after every one."; \
+		codesign --force --sign - --timestamp=none "$(STAGE)" >/dev/null; \
+	fi
+	# Proved, not assumed. A signature that does not verify is worse than none:
+	# the app launches until Gatekeeper decides otherwise.
+	@codesign --verify --strict "$(STAGE)"
 	# Published only now, and by rename, so $(APP) is either the previous
 	# good bundle or this one — never a half-built mixture of the two.
 	@rm -rf $(APP)
