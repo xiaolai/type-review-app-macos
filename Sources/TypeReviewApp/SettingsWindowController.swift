@@ -249,8 +249,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Show in Dock", self.showInDockToggle(),
                 hint: "Off takes the menu bar with it — macOS ties the two.")
-            // Last, and directly under the Dock switch, because it answers the
-            // question that switch raises: with no Dock tile there is no
+            // Last, and directly under the Dock row, because it answers the
+            // question that setting raises: with no Dock tile there is no
             // ⌘-Tab entry either, and this is the way back that does not
             // involve aiming at a small icon.
             self.addRow(
@@ -470,7 +470,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// Whether spaces, tabs and line ends are marked.
     private func whitespaceToggle() -> NSControl {
-        let toggle = NSSwitch()
+        let toggle = checkbox()
         toggle.state = AppPreferences.showWhitespace.value ? .on : .off
         bind(toggle) { AppPreferences.showWhitespace.value = toggle.state == .on }
         return toggle
@@ -521,10 +521,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     ///
     /// Asks for Accessibility as part of switching on rather than leaving
     /// it as a second step to discover. Without the permission the monitor
-    /// installs cleanly and is never called — the switch would read "on" over
+    /// installs cleanly and is never called — the box would read ticked over
     /// a keyboard that stayed silent.
     private func globalSoundToggle() -> NSControl {
-        let toggle = NSSwitch()
+        let toggle = checkbox()
         toggle.identifier = .init("globalSound")
         controls["globalSound"] = toggle
         bind(toggle) { [weak self] in
@@ -538,11 +538,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// Whether the modifier keys click.
     ///
-    /// One switch rather than six. "Should shift click?" has one answer per
+    /// One box rather than six. "Should shift click?" has one answer per
     /// person, not one per key, and a six-row matrix would be handing the
     /// design decision back to the user.
     private func modifierSoundToggle() -> NSControl {
-        let toggle = NSSwitch()
+        let toggle = checkbox()
         toggle.identifier = .init("modifierSound")
         controls["modifierSound"] = toggle
         bind(toggle) { [weak self] in
@@ -568,17 +568,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// revoke this in System Settings, and a mirrored copy would go on saying
     /// the app starts at login after they had turned it off.
     private func startInMenuBarToggle() -> NSControl {
-        let toggle = NSSwitch()
+        let toggle = checkbox()
         toggle.identifier = .init("startInMenuBar")
         controls["startInMenuBar"] = toggle
         bind(toggle) { AppPreferences.startInMenuBar.value = toggle.state == .on }
         return toggle
     }
 
-    /// Stated positively, matching the preference. A switch labelled for the
+    /// Stated positively, matching the preference. A box labelled for the
     /// thing it removes is read wrong by half the people who see it.
     private func showInDockToggle() -> NSControl {
-        let toggle = NSSwitch()
+        let toggle = checkbox()
         toggle.identifier = .init("showInDock")
         controls["showInDock"] = toggle
         // No work here beyond the write: the app delegate watches this
@@ -589,7 +589,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private func loginItemToggle() -> NSControl {
-        let toggle = NSSwitch()
+        let toggle = checkbox()
         toggle.identifier = .init("loginItem")
         controls["loginItem"] = toggle
         bind(toggle) { [weak self] in
@@ -652,13 +652,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             popup.selectItem(at: KeySoundPack.all.firstIndex(of: AppPreferences.soundPack.value) ?? 0)
         }
         let global = AppPreferences.globalSound.value
-        (controls["globalSound"] as? NSSwitch)?.state = global ? .on : .off
-        (controls["modifierSound"] as? NSSwitch)?.state =
+        (controls["globalSound"] as? NSButton)?.state = global ? .on : .off
+        (controls["modifierSound"] as? NSButton)?.state =
             AppPreferences.modifierSound.value ? .on : .off
         // Modifiers are only heard through the system-wide monitor, so the row
         // means nothing while that is off — disabled rather than hidden, so it
-        // does not appear and disappear as the switch above it is used.
-        (controls["modifierSound"] as? NSSwitch)?.isEnabled = global
+        // does not appear and disappear as the box above it is used.
+        (controls["modifierSound"] as? NSButton)?.isEnabled = global
         mutedApps?.reload()
         let blocked = global && !GlobalKeySound.isPermitted
         permissionLabel?.stringValue = "Accessibility is off — other apps are not heard."
@@ -676,12 +676,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func refreshGeneralPane() {
         // Awaiting approval counts as on. It is a registration the user has
         // asked for, so showing it off invited a second `register()` — and
-        // left no way to cancel the pending one, because switching an
-        // already-off switch off does nothing.
-        (controls["loginItem"] as? NSSwitch)?.state = LoginItem.isRequested ? .on : .off
-        (controls["startInMenuBar"] as? NSSwitch)?.state =
+        // left no way to cancel the pending one, because unticking an
+        // already-unticked box does nothing.
+        (controls["loginItem"] as? NSButton)?.state = LoginItem.isRequested ? .on : .off
+        (controls["startInMenuBar"] as? NSButton)?.state =
             AppPreferences.startInMenuBar.value ? .on : .off
-        (controls["showInDock"] as? NSSwitch)?.state =
+        (controls["showInDock"] as? NSButton)?.state =
             AppPreferences.showInDock.value ? .on : .off
         let note = loginNote
         loginNoteLabel?.stringValue = note ?? ""
@@ -690,7 +690,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         resizePanes()
     }
 
-    /// What, if anything, stands between the switch and the app actually
+    /// What, if anything, stands between the box and the app actually
     /// starting at login.
     ///
     /// Only two things qualify: an approval macOS is waiting for, and a
@@ -698,7 +698,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// is missing" and is in fact what `SMAppService` reports for a main app
     /// that has simply never been registered. Showing it turned the ordinary
     /// off state into a warning that TYPE could not be registered at all,
-    /// under a switch that then registered it on the first click.
+    /// under a box that then registered it on the first click.
     private var loginNote: String? {
         if let loginError { return loginError }
         return LoginItem.status == .requiresApproval
@@ -808,8 +808,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return control
     }
 
+    /// The window's boolean control.
+    ///
+    /// A checkbox rather than `NSSwitch`. `NSSwitch` has exactly one size on
+    /// macOS 26 — it accepts `controlSize` and ignores it, measuring 54×24 for
+    /// all four values — and fifty-four points of width for a boolean is a lot
+    /// in a pane whose other controls are popups. A checkbox is sixteen.
+    ///
+    /// No title, because the label belongs in the grid's left column with
+    /// every other row's. A checkbox carrying its own text would drop out of
+    /// that column, and the right-aligned label axis is the one thing holding
+    /// these panes together.
+    private func checkbox() -> NSButton {
+        NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    }
+
     private func toggle(_ key: String) -> NSControl {
-        let control = NSSwitch()
+        let control = checkbox()
         control.target = self
         control.action = #selector(changed(_:))
         control.identifier = .init(key)
@@ -914,10 +929,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         select(controls["testDurationSec"], settings.testDurationSec, SettingsSchema.durationPresets)
         (controls["passageLength"] as? NSPopUpButton)?.selectItem(
             at: SettingsSchema.passageLengths.firstIndex(of: settings.passageLength) ?? 0)
-        (controls["stopOnError"] as? NSSwitch)?.state = settings.stopOnError ? .on : .off
-        (controls["noBackspace"] as? NSSwitch)?.state = settings.noBackspace ? .on : .off
-        (controls["includeNumbers"] as? NSSwitch)?.state = settings.includeNumbers ? .on : .off
-        (controls["includePunctuation"] as? NSSwitch)?.state =
+        (controls["stopOnError"] as? NSButton)?.state = settings.stopOnError ? .on : .off
+        (controls["noBackspace"] as? NSButton)?.state = settings.noBackspace ? .on : .off
+        (controls["includeNumbers"] as? NSButton)?.state = settings.includeNumbers ? .on : .off
+        (controls["includePunctuation"] as? NSButton)?.state =
             settings.includePunctuation ? .on : .off
 
         // The duration row only means something in time mode, and the word
@@ -971,10 +986,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case "passageLength":
             settings.passageLength = SettingsSchema.passageLengths[
                 max(0, (sender as? NSPopUpButton)?.indexOfSelectedItem ?? 0)]
-        case "stopOnError": settings.stopOnError = (sender as? NSSwitch)?.state == .on
-        case "noBackspace": settings.noBackspace = (sender as? NSSwitch)?.state == .on
-        case "includeNumbers": settings.includeNumbers = (sender as? NSSwitch)?.state == .on
-        case "includePunctuation": settings.includePunctuation = (sender as? NSSwitch)?.state == .on
+        case "stopOnError": settings.stopOnError = (sender as? NSButton)?.state == .on
+        case "noBackspace": settings.noBackspace = (sender as? NSButton)?.state == .on
+        case "includeNumbers": settings.includeNumbers = (sender as? NSButton)?.state == .on
+        case "includePunctuation": settings.includePunctuation = (sender as? NSButton)?.state == .on
         default: return
         }
 

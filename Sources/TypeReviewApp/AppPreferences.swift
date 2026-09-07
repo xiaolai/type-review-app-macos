@@ -125,7 +125,7 @@ enum AppPreferences {
     /// Whether TYPE has a Dock tile.
     ///
     /// On by default, and stored positively rather than as `hideDockIcon` so
-    /// that the switch, the preference and the code all say the same thing.
+    /// that the checkbox, the preference and the code all say the same thing.
     /// An inverted checkbox is a bug waiting for whoever reads it next.
     ///
     /// Turning it off costs the menu bar as well, and that is macOS rather

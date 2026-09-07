@@ -21,7 +21,7 @@ enum LoginItem {
 
     /// Whether the user has asked for this, whether or not macOS has finished
     /// agreeing. `.requiresApproval` is a registration in flight, not an off
-    /// state — a switch that shows it as off cannot be used to cancel it.
+    /// state — a checkbox that shows it unticked cannot be used to cancel it.
     static var isRequested: Bool {
         status == .enabled || status == .requiresApproval
     }
@@ -34,13 +34,13 @@ enum LoginItem {
     static var status: SMAppService.Status { SMAppService.mainApp.status }
 
     /// Throws rather than swallowing. An unsigned or relocated bundle can be
-    /// refused registration, and a switch that silently slid back would be
+    /// refused registration, and a checkbox that silently unticked itself would be
     /// the worst version of that.
     static func setEnabled(_ enabled: Bool) throws {
         guard enabled else {
             // Unregistering something that was never registered is not a
             // failure worth reporting to anyone. A registration still awaiting
-            // approval *is* unregistered, which is how the switch cancels it.
+            // approval *is* unregistered, which is how unticking cancels it.
             guard status != .notRegistered, status != .notFound else { return }
             try SMAppService.mainApp.unregister()
             return
