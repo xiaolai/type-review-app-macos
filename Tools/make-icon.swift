@@ -9,18 +9,10 @@ import AppKit
 ///
 /// Two things make this an icon *set* rather than one picture scaled ten ways.
 /// The artwork simplifies as it shrinks, because `keyboard.badge.eye`'s badge
-/// and its rows of small keys collapse into a smudge well before 16 points.
-/// Weight is deliberately *not* varied across sizes: one weight reads at all of
-/// them, and the earlier plan to thicken the mark as it shrank was tried and
-/// looked heavy at 32 rather than clearer.
-///
-/// The mark is *cut out* of the tile rather than painted on it. Where the
-/// keyboard is, there is nothing — the desktop shows through. That is the
-/// point and it is also the risk: the mark has no colour of its own, so on a
-/// dark wallpaper it goes dark. The lit edge in `drawMark` is what answers
-/// that. A hole in a thick piece of glass catches light along its cut, and
-/// tracing every cut edge in near-white gives the shape an outline that
-/// survives whatever is behind it.
+/// and its rows of small keys collapse into a grey smudge well before 16
+/// points. Weight is deliberately *not* varied: `.regular` reads at every one
+/// of these sizes, and the earlier plan to thicken the mark as it shrank was
+/// tried and looked heavy at 32 rather than clearer.
 enum IconArtwork {
     /// Apple's grid: on a 1024 canvas the rounded tile is 824 across.
     static let tileFraction: CGFloat = 824.0 / 1024.0
@@ -57,18 +49,10 @@ enum IconArtwork {
     /// rendering the candidates side by side rather than from guessing. At 32
     /// pixels the *filled* badge is still a distinguishable eye, so the eye —
     /// which is the mark — survives there; the outlined variant at that size
-    /// is a smear. Only at 16 does the badge become a smudge that makes the
-    /// keyboard beside it harder to read, and there the plain keyboard stands
-    /// alone.
-    ///
-    /// Both the weight and the widths went up when the tile went blue, and for
-    /// one reason rather than taste. A shape cut out of a dark ground reads
-    /// thinner than the same shape painted on a light one — light bleeds
-    /// across the cut edge and eats into it. `.medium` on blue lands about
-    /// where `.regular` landed on silver. The widths were then set from the
-    /// same side-by-side pass: at 32 the badge holds together at 0.90 of the
-    /// tile and loses the eye at 0.80, which is the size that decides it,
-    /// because a Dock icon is admired at 1024 and *used* at 32.
+    /// is a grey smear. Only at 16 does the badge become a smudge that makes
+    /// the keyboard beside it harder to read, and there the plain keyboard
+    /// stands alone. The weight is `.regular` throughout — see the note at
+    /// the top of this file.
     ///
     /// `width` is the share of the tile the glyph should span, measured on the
     /// *rendered* image rather than set as a point size. A symbol's point size
@@ -76,28 +60,17 @@ enum IconArtwork {
     /// narrow one look lost.
     static func symbol(forPixelSize size: CGFloat) -> (name: String, weight: NSFont.Weight, width: CGFloat) {
         switch size {
-        case ..<24: return ("keyboard.fill", .medium, 0.86)
-        case ..<80: return ("keyboard.badge.eye.fill", .medium, 0.90)
-        default: return ("keyboard.badge.eye", .medium, 0.84)
+        case ..<24: return ("keyboard.fill", .regular, 0.74)
+        case ..<80: return ("keyboard.badge.eye.fill", .regular, 0.78)
+        default: return ("keyboard.badge.eye", .regular, 0.78)
         }
     }
 
-    /// sRGB, written as bytes because that is how the ramp was chosen.
-    static func rgb(_ r: Int, _ g: Int, _ b: Int, _ a: CGFloat = 1) -> NSColor {
-        NSColor(srgbRed: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: a)
-    }
-
-    /// The blue glass tile: shadow, body, specular, bounce and rim.
+    /// The rounded silver tile: shadow, gradient and hairline border.
     ///
-    /// Five passes, and each one is a thing glass actually does. Take any of
-    /// them away and it flattens into a coloured square: the body alone is
-    /// paint, the body plus the specular is plastic, and it is the rim — the
-    /// lit edge of a slab thick enough to have an edge — that makes it read as
-    /// a material with depth rather than a colour.
-    ///
-    /// Everything but the body is size-gated. A specular highlight at 16
-    /// pixels is two grey pixels in the corner, which is noise rather than
-    /// light.
+    /// Split out of `render`, which was doing this as well as bitmap setup and
+    /// symbol placement in one 75-line block, with its graphics-state saves
+    /// and restores separated by forty lines of unrelated drawing.
     static func drawTile(_ path: NSBezierPath, in tile: NSRect, pixelSize: CGFloat) {
         // The shadow is part of the artwork on macOS, not something the Dock
         // adds. Skipped under 64 pixels, where it is a smudge on an already
@@ -106,103 +79,32 @@ enum IconArtwork {
             NSGraphicsContext.saveGraphicsState()
             defer { NSGraphicsContext.restoreGraphicsState() }
             let shadow = NSShadow()
-            shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.36)
-            shadow.shadowBlurRadius = pixelSize * 0.022
-            shadow.shadowOffset = NSSize(width: 0, height: -pixelSize * 0.014)
+            shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.32)
+            shadow.shadowBlurRadius = pixelSize * 0.02
+            shadow.shadowOffset = NSSize(width: 0, height: -pixelSize * 0.012)
             shadow.set()
             NSColor.black.setFill()
             path.fill()
         }
-
-        // The body. Four stops rather than two: a straight two-stop ramp puts
-        // its fastest change in the middle of the tile, which is exactly where
-        // the mark sits, and the mark's cut edge then crosses a visible band.
-        // Weighting the stops toward the foot keeps the middle even and puts
-        // the darkening where there is nothing to interfere with.
-        NSGradient(
-            colors: [rgb(74, 139, 224), rgb(36, 91, 192), rgb(22, 50, 126), rgb(12, 30, 87)],
-            atLocations: [0, 0.42, 0.74, 1], colorSpace: .sRGB
-        )?.draw(in: path, angle: -90)
-
-        guard pixelSize >= 32 else { return }
-
-        NSGraphicsContext.saveGraphicsState()
-        path.setClip()
-        // Specular: the broad reflection a curved face throws back at the top.
-        // The ellipse is deliberately wider than the tile so its own edges
-        // leave the frame — contained, it draws a visible arc across the
-        // artwork and reads as a drawn shape instead of as light.
-        let sheen = NSRect(
-            x: tile.minX - tile.width * 0.28, y: tile.midY - tile.height * 0.06,
-            width: tile.width * 1.56, height: tile.height * 0.92)
         NSGradient(
             colors: [
-                NSColor(white: 1, alpha: 0.34), NSColor(white: 1, alpha: 0.05),
-                NSColor(white: 1, alpha: 0),
-            ], atLocations: [0, 0.55, 1], colorSpace: .sRGB
-        )?.draw(in: NSBezierPath(ovalIn: sheen), angle: -90)
+                NSColor(calibratedWhite: 0.99, alpha: 1),
+                NSColor(calibratedWhite: 0.86, alpha: 1),
+            ])?.draw(in: path, angle: -90)
 
-        // Bounce: light coming back up off whatever the tile sits on. Small,
-        // and the one warm-ward note in an otherwise cold object — without it
-        // the foot of the tile goes to flat navy and the whole thing reads as
-        // painted rather than lit.
-        let bounce = NSRect(
-            x: tile.minX - tile.width * 0.2, y: tile.minY - tile.height * 0.42,
-            width: tile.width * 1.4, height: tile.height * 0.62)
-        NSGradient(
-            colors: [NSColor(white: 1, alpha: 0), rgb(120, 190, 255, 0.30)],
-            atLocations: [0, 1], colorSpace: .sRGB
-        )?.draw(in: NSBezierPath(ovalIn: bounce), angle: -90)
-        NSGraphicsContext.restoreGraphicsState()
-
-        // Rim: bright along the top edge, gone by the foot. Drawn as a ring —
-        // the tile path with an inset copy of itself punched out under the
-        // even-odd rule — because a gradient can fill a shape and cannot
-        // stroke one, and this edge has to fade from lit to unlit along its
-        // length. Below 64 pixels the ring is thinner than a pixel and only
-        // muddies the outline.
+        // A hairline border. A dark tile needs a light edge to stop it reading
+        // as a hole; a light one needs a dark edge to stop it dissolving into
+        // a pale Dock background. Below 64 pixels it is thinner than a pixel
+        // and only muddies the outline, so it is left off.
         if pixelSize >= 64 {
             NSGraphicsContext.saveGraphicsState()
             defer { NSGraphicsContext.restoreGraphicsState() }
-            let inset = pixelSize * 0.010
-            let ring = NSBezierPath()
-            ring.append(path)
-            ring.append(squircle(in: tile.insetBy(dx: inset, dy: inset)))
-            ring.windingRule = .evenOdd
-            ring.setClip()
-            NSGradient(
-                colors: [
-                    NSColor(white: 1, alpha: 0.72), NSColor(white: 1, alpha: 0.14),
-                    rgb(110, 170, 255, 0.26),
-                ], atLocations: [0, 0.45, 1], colorSpace: .sRGB
-            )?.draw(in: tile, angle: -90)
+            path.setClip()
+            let border = squircle(in: tile.insetBy(dx: pixelSize * 0.004, dy: pixelSize * 0.004))
+            border.lineWidth = pixelSize * 0.007
+            NSColor(calibratedWhite: 0, alpha: 0.14).setStroke()
+            border.stroke()
         }
-    }
-
-    /// Cuts the mark out of the tile, and lights the cut.
-    ///
-    /// Two passes over the same glyph. The first draws it with a pale shadow
-    /// and no offset, which lays a halo on the tile in the exact shape of the
-    /// mark; the second punches the glyph away with `.destinationOut`, taking
-    /// the tile with it and leaving the halo behind as a lit edge. Doing it
-    /// this way rather than by drawing a scaled-up copy underneath matters:
-    /// scaling a glyph moves every part of it away from the centre by a
-    /// different distance, so the edge would come out thick at the rim of the
-    /// mark and invisible near the middle. A shadow spreads the same distance
-    /// everywhere, including into the gaps between the keys.
-    static func drawMark(_ mark: NSImage, in box: NSRect, pixelSize: CGFloat) {
-        NSGraphicsContext.saveGraphicsState()
-        let glow = NSShadow()
-        glow.shadowColor = rgb(209, 235, 255, 0.95)
-        // Floored at a pixel. Below that the blur rounds to nothing and the
-        // edge silently stops existing at exactly the sizes that need it most.
-        glow.shadowBlurRadius = max(pixelSize * 0.016, 1)
-        glow.shadowOffset = .zero
-        glow.set()
-        mark.draw(in: box)
-        NSGraphicsContext.restoreGraphicsState()
-
-        mark.draw(in: box, from: .zero, operation: .destinationOut, fraction: 1)
     }
 
     static func render(pixelSize: CGFloat) -> NSBitmapImageRep {
@@ -223,19 +125,19 @@ enum IconArtwork {
             x: (pixelSize - tileSide) / 2, y: (pixelSize - tileSide) / 2,
             width: tileSide, height: tileSide)
 
-        // Blue, lit from the top.
+        // Silver, lit from the top — the colour of the keyboard case the app
+        // draws, and of the hardware it is a picture of.
         drawTile(squircle(in: tile), in: tile, pixelSize: pixelSize)
 
         let choice = symbol(forPixelSize: pixelSize)
-        // Black, and the colour is arbitrary. The mark is never painted — it
-        // is used twice as a stencil, once to cast the halo and once to punch
-        // the hole, and both passes read only its alpha.
         let configuration = NSImage.SymbolConfiguration(
             pointSize: tileSide * 0.5, weight: choice.weight
-        ).applying(NSImage.SymbolConfiguration(paletteColors: [.black]))
+        ).applying(
+            NSImage.SymbolConfiguration(
+                paletteColors: [NSColor(calibratedWhite: 0.13, alpha: 1)]))
         // Fails loudly. An `if let` here meant a symbol that could not be
         // found or configured was simply not drawn: the script still wrote ten
-        // PNGs and reported success, and the app shipped a blank tile.
+        // PNGs and reported success, and the app shipped a blank silver tile.
         guard let symbol = NSImage(systemSymbolName: choice.name, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration)
         else {
@@ -246,12 +148,10 @@ enum IconArtwork {
         let target = tileSide * choice.width
         let scale = target / max(natural.width, 1)
         let drawn = NSSize(width: natural.width * scale, height: natural.height * scale)
-        drawMark(
-            symbol,
+        symbol.draw(
             in: NSRect(
                 x: canvas.midX - drawn.width / 2, y: canvas.midY - drawn.height / 2,
-                width: drawn.width, height: drawn.height),
-            pixelSize: pixelSize)
+                width: drawn.width, height: drawn.height))
 
         return rep
     }
@@ -260,18 +160,18 @@ enum IconArtwork {
 /// The mark on its own, for Icon Composer.
 ///
 /// macOS 26 does not want a picture of an icon. It wants the *contents* — the
-/// mark, on nothing — and supplies the tile, the glass, the lighting and the
-/// shadow itself, live, so the icon can answer to light mode, dark mode and
-/// tinting. Handing it the finished `.icns` instead is what put a cream plate
-/// behind this app in the Dock: the system filled the transparent margin
-/// around our own 80.5% tile with white and rounded the result, so the icon
-/// became a small blue square sitting inside a big white one.
+/// mark, on nothing — and supplies the tile, the lighting and the shadow
+/// itself, live, so the icon can answer to light mode, dark mode and tinting.
+/// Handing it the finished `.icns` instead is what put a cream plate behind
+/// this app in the Dock: the system filled the transparent margin around our
+/// own 80.5% tile with white and rounded the result, so the icon became a
+/// small tile sitting inside a big white one.
 ///
-/// So the same artwork ships twice, and deliberately. `Resources/TypeReview.icns`
+/// So the same mark ships twice, and deliberately. `Resources/TypeReview.icns`
 /// is the whole picture, tile included, for macOS 14 and 15, which draw an app
 /// icon exactly as given and expect it to arrive pre-shaped. This layer is the
 /// mark alone, for macOS 26, which shapes it. Neither is derivable from the
-/// other by cropping.
+/// other by cropping: one must carry a tile and the other must not.
 func writeLiquidGlassLayer(to path: String) {
     let pixelSize: CGFloat = 1024
     let rep = NSBitmapImageRep(
@@ -283,11 +183,24 @@ func writeLiquidGlassLayer(to path: String) {
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     NSGraphicsContext.current?.imageInterpolation = .high
 
-    // The outlined variant, always. This layer is only ever rendered large —
-    // the system derives every small size from it — so the size-dependent
-    // simplification that `symbol(forPixelSize:)` exists for does not apply.
-    let configuration = NSImage.SymbolConfiguration(pointSize: pixelSize * 0.40, weight: .medium)
-        .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(white: 1, alpha: 1)]))
+    // The outlined variant, and black rather than the flat tile's graphite.
+    //
+    // Not a different design decision — the same one, corrected for what the
+    // system does to it. Liquid Glass lights a layer, and lighting only ever
+    // adds: the graphite the flat icon uses (0.13) comes out of the compositor
+    // at 0.46 luminance, against 0.18 on the flat tile, so the mark arrives
+    // washed out. Measured across three layer values, contrast against the
+    // tile went 0.440 at 0.13, 0.499 at 0.07, 0.545 at black — and black is
+    // the floor. The flat icon's 0.756 is simply not reachable through this
+    // renderer, so this takes the most of it that exists rather than pretending
+    // the two can be matched.
+    //
+    // This layer is only ever rendered large — the system derives every small
+    // size from it — so the size-dependent simplification that
+    // `symbol(forPixelSize:)` exists for does not apply here.
+    let configuration = NSImage.SymbolConfiguration(pointSize: pixelSize * 0.40, weight: .regular)
+        .applying(
+            NSImage.SymbolConfiguration(paletteColors: [NSColor(calibratedWhite: 0, alpha: 1)]))
     guard let mark = NSImage(systemSymbolName: "keyboard.badge.eye", accessibilityDescription: nil)?
         .withSymbolConfiguration(configuration)
     else {
@@ -296,9 +209,9 @@ func writeLiquidGlassLayer(to path: String) {
     // Smaller than the share the mark takes on the `.icns`, and not by taste.
     // There the mark sits inside a tile that is itself 80.5% of the canvas;
     // here the system's tile is the whole canvas, so the same optical size
-    // needs a smaller number. 0.62 of the canvas is 0.77 of the tile, which is
+    // needs a smaller number. 0.63 of the canvas is 0.78 of the tile, which is
     // where the flat icon already puts it.
-    let target = pixelSize * 0.62
+    let target = pixelSize * 0.63
     let scale = target / max(mark.size.width, 1)
     let drawn = NSSize(width: mark.size.width * scale, height: mark.size.height * scale)
     mark.draw(

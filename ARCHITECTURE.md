@@ -335,30 +335,37 @@ so an ordinary build needs neither, but the artwork stays reproducible and
 changing it is an edit to code.
 
 - **The artwork simplifies as it shrinks.** `keyboard.badge.eye`'s badge and
-  its rows of small keys collapse into a smudge well before 16 points, so the
-  filled badge stands in below 80 pixels and the plain `keyboard.fill` below
-  24.
-- **The mark is fitted by rendered width, not point size** — 0.84 of the tile
-  at full size, 0.90 at 32. A symbol's point size is its cap height, so sizing
-  by it makes a wide mark overflow and a narrow one look lost. The widths came
-  from rendering candidates side by side: at 32 pixels the badge holds together
-  at 0.90 and loses the eye at 0.80, and 32 is the size that decides, because a
-  Dock icon is admired at 1024 and used at 32.
-- **The tile is blue glass, and the mark is cut out of it.** Five passes, each
-  one something glass does: shadow, body, specular, bounce, rim. The rim is the
-  one that matters — body alone is paint and body plus specular is plastic. The
-  mark is punched through with `.destinationOut`, so the desktop shows through
-  it; the pale edge around every cut is a shadow laid down before the punch and
-  left behind by it, which is what keeps the shape readable on a dark wallpaper
-  where a hole has no colour of its own.
-- **Weight rose with the colour.** A shape cut out of a dark ground reads
-  thinner than the same shape painted on a light one, because light bleeds
-  across the cut. `.medium` on blue lands where `.regular` landed on silver.
+  its rows of small keys collapse into a smudge well before 16 points. At 32
+  the *filled* badge is still a distinguishable eye, so the eye — which is the
+  mark — survives there; only at 16 does it become a smudge, and the plain
+  keyboard stands alone.
+- **The mark is fitted by rendered width, not point size** — 0.78 of the tile.
+  A symbol's point size is its cap height, so sizing by it makes a wide mark
+  overflow its tile and a narrow one look lost.
+- **The tile is silver, not graphite** — the colour of the keyboard case the
+  app draws, and of the hardware it is a picture of. A light tile needs a dark
+  hairline border where a dark one needs a light one: the first would dissolve
+  into a pale Dock background, the second would read as a hole.
 - **The tile is a superellipse, not a rounded rectangle.** macOS icon tiles
   use a continuous corner and `NSBezierPath` has none; `|x/a|^5 + |y/b|^5 = 1`
   is the shape, and sampling it is shorter than faking it with arcs. Apple's
   grid puts an 824-point tile on a 1024 canvas, and the shadow is part of the
   artwork rather than something the Dock adds.
+
+### The one place the two artworks disagree, and why
+
+The Icon Composer layer is black where the flat tile's mark is graphite, and
+that is the same decision corrected for the renderer rather than a second one.
+
+Liquid Glass lights a layer, and lighting only ever adds. The flat icon's 0.13
+graphite comes out of the compositor at 0.46 luminance against 0.18 on the flat
+tile, so the mark arrives washed out. Measured across three layer values,
+contrast against the tile ran 0.440 at 0.13, 0.499 at 0.07 and 0.545 at black.
+Black is the floor: the flat icon's 0.756 is not reachable through this
+renderer at all, so the layer takes the most of it that exists instead of
+pretending the two can be matched. A mark that reads slightly softer on macOS
+26 than on 15 is a property of the system's icon rendering, not a defect in the
+artwork.
 
 ## The on-screen keyboard
 
