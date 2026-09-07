@@ -14,8 +14,9 @@ account, no server, no telemetry.
 - **Benchmark mode** — real prose, ended by a word count or a timer.
 - **Text worth typing** — public-domain quotes and passages, code snippets,
   your own `.txt` and `.md` files, or generated drills. `Auto` picks for you.
-- **Per-key statistics** — speed and accuracy for every key, with the history
-  behind them.
+- **Per-key and per-finger statistics** — speed and accuracy for every key,
+  and the same numbers regrouped by the finger responsible, which is what turns
+  a heatmap of thirty keys into "the right pinky is the slow one".
 - **An on-screen keyboard**, optional, coloured by how well you know each key
   and lit as you press them.
 - **Keystroke sound, optionally everywhere.** Seven packs — three synthesised

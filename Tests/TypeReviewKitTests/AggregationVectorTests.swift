@@ -55,6 +55,7 @@ final class AggregationVectorTests: XCTestCase {
         let streaks: [Streak]
         let dailyCounts: [DailyCount]
         let perKey: [PerKey]
+        let perFinger: [FingerRow]
         let slowestBigrams: [Slow]
         let histograms: [[String: Hit]]
         let runTimestamps: [Double]
@@ -62,7 +63,7 @@ final class AggregationVectorTests: XCTestCase {
 
     private func vector(_ name: String) throws -> (Vector, Calendar) {
         guard let url = Bundle.module.url(forResource: "Vectors/\(name)", withExtension: "json")
-        else { throw XCTSkip("Vectors/\(name).json missing — run `pnpm emit:vectors`") }
+        else { throw XCTSkip("Vectors/\(name).json missing — see ARCHITECTURE.md — Regenerating a vector") }
         let vector = try JSONDecoder().decode(Vector.self, from: Data(contentsOf: url))
         guard let zone = TimeZone(identifier: vector.timeZone) else {
             throw XCTSkip("unknown timezone \(vector.timeZone)")
@@ -142,6 +143,32 @@ final class AggregationVectorTests: XCTestCase {
                     actual.current, testCase.current, "\(name): current — \(testCase.name)")
                 XCTAssertEqual(
                     actual.longest, testCase.longest, "\(name): longest — \(testCase.name)")
+            }
+        }
+    }
+
+    struct FingerRow: Decodable {
+        let finger: String
+        let hits: Int
+        let avgMs: Double
+        let errorRate: Double
+    }
+
+    /// The website's own output over the same histograms, recorded by running
+    /// its `aggregatePerFinger` — not values worked out by hand here, which
+    /// would only pin this port to whatever this port already believes.
+    func testPerFingerMatches() throws {
+        try eachVector { vector, _, name in
+            let actual = aggregatePerFinger(aggregatePerKey(runs(vector)))
+            XCTAssertEqual(
+                actual.count, vector.perFinger.count, "\(name): number of fingers reported")
+            for (actual, expected) in zip(actual, vector.perFinger) {
+                XCTAssertEqual(
+                    actual.finger.rawValue, expected.finger, "\(name): order and identity")
+                XCTAssertEqual(actual.hits, expected.hits, "\(name) hits \(expected.finger)")
+                XCTAssertEqual(actual.avgMs, expected.avgMs, "\(name) avgMs \(expected.finger)")
+                XCTAssertEqual(
+                    actual.errorRate, expected.errorRate, "\(name) errorRate \(expected.finger)")
             }
         }
     }

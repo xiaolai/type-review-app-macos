@@ -209,5 +209,25 @@
   "runTimestamps": [
     1779256800000,
     1779170400000
+  ],
+  "perFinger": [
+    {
+      "finger": "left-middle",
+      "hits": 6,
+      "avgMs": 140,
+      "errorRate": 0
+    },
+    {
+      "finger": "left-index",
+      "hits": 3,
+      "avgMs": 300,
+      "errorRate": 0
+    },
+    {
+      "finger": "right-index",
+      "hits": 10,
+      "avgMs": 196,
+      "errorRate": 0.3
+    }
   ]
 }

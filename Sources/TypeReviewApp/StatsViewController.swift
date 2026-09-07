@@ -1,7 +1,13 @@
 import AppKit
 import TypeReviewKit
 
-/// The statistics window: totals, streaks and a per-key table.
+/// The statistics window: totals, streaks, and one table that answers the same
+/// four questions about either a key or a finger.
+///
+/// Two views of one set of numbers, because `aggregatePerFinger` is built on
+/// `aggregatePerKey` — the same data regrouped. A finger view is what turns a
+/// heatmap of thirty keys into "your right pinky is the slow one", which is a
+/// sentence the per-key table makes the reader assemble themselves.
 ///
 /// Not the slowest *pairs*, which this used to claim. `slowestBigrams` exists
 /// in the engine and the results screen shows them after a run; this window
@@ -14,7 +20,18 @@ final class StatsViewController: NSViewController {
     private let summary = NSTextField(labelWithString: "")
     private let streakLabel = NSTextField(labelWithString: "")
     private let table = NSTableView()
-    private var rows: [(key: String, stat: PerKeyStat)] = []
+    /// One row shape for both groupings. The columns ask the same four
+    /// questions either way, so the table does not need to know which it is
+    /// showing — only the first column's heading changes.
+    private struct Row {
+        let label: String
+        let hits: Int
+        let avgMs: Double
+        let errorRate: Double
+    }
+    private var rows: [Row] = []
+    private let grouping = NSSegmentedControl(
+        labels: ["Keys", "Fingers"], trackingMode: .selectOne, target: nil, action: nil)
     /// Where to re-read the history from.
     ///
     /// A closure rather than the snapshot this used to keep — which was stored
@@ -46,7 +63,7 @@ final class StatsViewController: NSViewController {
         // look like they came from different decades.
         table.style = .inset
         for (identifier, title, width) in [
-            ("key", "Key", CGFloat(60)), ("hits", "Typed", 80), ("avg", "Avg ms", 90),
+            ("key", "Key", CGFloat(90)), ("hits", "Typed", 80), ("avg", "Avg ms", 90),
             ("err", "Errors", 90),
         ] {
             let column = NSTableColumn(identifier: .init(identifier))
@@ -67,7 +84,11 @@ final class StatsViewController: NSViewController {
     }
 
     private func makeHeader() -> NSStackView {
-        let header = NSStackView(views: [summary, streakLabel])
+        grouping.selectedSegment = 0
+        grouping.target = self
+        grouping.action = #selector(groupingChanged)
+        grouping.segmentStyle = .rounded
+        let header = NSStackView(views: [summary, streakLabel, grouping])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
@@ -133,12 +154,37 @@ final class StatsViewController: NSViewController {
 
         // Sorted slowest first: the table is a list of what to work on, so the
         // useful row is at the top rather than wherever the alphabet puts it.
-        rows = aggregatePerKey(results).entries
-            .filter { $0.value.hits > 0 }
-            .sorted { $0.value.avgMs > $1.value.avgMs }
-            .map { (key: $0.key, stat: $0.value) }
+        let perKey = aggregatePerKey(results)
+        if grouping.selectedSegment == 1 {
+            // Left in the hand's own order rather than sorted slowest-first.
+            // Nine rows read as a pair of hands when they are laid out like
+            // one, and finding the slow finger among nine is not the search
+            // that sorting thirty keys was solving.
+            rows = aggregatePerFinger(perKey).map {
+                Row(
+                    label: $0.finger.label, hits: $0.hits, avgMs: $0.avgMs,
+                    errorRate: $0.errorRate)
+            }
+        } else {
+            // Sorted slowest first: the table is a list of what to work on, so
+            // the useful row is at the top rather than wherever the alphabet
+            // puts it.
+            rows = perKey.entries
+                .filter { $0.value.hits > 0 }
+                .sorted { $0.value.avgMs > $1.value.avgMs }
+                .map {
+                    // A space is a real key and the commonest one; showing it
+                    // blank would leave the top row unexplained.
+                    Row(
+                        label: $0.key == " " ? "space" : $0.key, hits: $0.value.hits,
+                        avgMs: $0.value.avgMs, errorRate: $0.value.errorRate)
+                }
+        }
+        table.tableColumns.first?.title = grouping.selectedSegment == 1 ? "Finger" : "Key"
         table.reloadData()
     }
+
+    @objc private func groupingChanged() { refresh() }
 }
 
 extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {
@@ -151,18 +197,15 @@ extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {
         let entry = rows[row]
         let text: String
         switch identifier {
-        case "key":
-            // A space is a real key and the commonest one; showing it blank
-            // would leave the top row unexplained.
-            text = entry.key == " " ? "space" : entry.key
-        case "hits": text = String(entry.stat.hits)
-        case "avg": text = String(format: "%.0f", entry.stat.avgMs)
-        default: text = String(format: "%.1f%%", entry.stat.errorRate * 100)
+        case "key": text = entry.label
+        case "hits": text = String(entry.hits)
+        case "avg": text = String(format: "%.0f", entry.avgMs)
+        default: text = String(format: "%.1f%%", entry.errorRate * 100)
         }
 
         let label = NSTextField(labelWithString: text)
         label.font = Theme.statFont
-        if identifier == "err", entry.stat.errorRate > 0.05 { label.textColor = Theme.incorrect }
+        if identifier == "err", entry.errorRate > 0.05 { label.textColor = Theme.incorrect }
         return label
     }
 }

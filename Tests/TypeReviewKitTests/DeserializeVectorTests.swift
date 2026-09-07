@@ -35,7 +35,7 @@ final class DeserializeVectorTests: XCTestCase {
 
     private func cases() throws -> [Case] {
         guard let url = Bundle.module.url(forResource: "Vectors/deserialize", withExtension: "json")
-        else { throw XCTSkip("Vectors/deserialize.json missing — run `pnpm emit:vectors`") }
+        else { throw XCTSkip("Vectors/deserialize.json missing — see ARCHITECTURE.md — Regenerating a vector") }
         return try JSONDecoder().decode([Case].self, from: Data(contentsOf: url))
     }
 

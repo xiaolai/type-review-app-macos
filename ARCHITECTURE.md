@@ -41,7 +41,7 @@ order.
 Regenerate after any engine change in the web repo:
 
 ```sh
-cd ../type-review && pnpm emit:vectors
+# see "Regenerating a vector" below
 ```
 
 The vectors cover the RNG across six seeds, the rounding and statistics
@@ -53,6 +53,28 @@ completed profile.
 That last one is a product requirement, not a nicety: a user must be able to
 carry a profile between the website and this app, so the encoder here has to
 reproduce the original's bytes — key order included.
+
+## Regenerating a vector
+
+There is no `pnpm emit:vectors`, and there never was — this document and nine
+test skip messages used to say there was. The vectors were produced by running
+the web implementation over chosen inputs and recording what it returned, and
+that is still the method:
+
+1. Write a throwaway test **inside the web repository** — not a plain script.
+   `tsx` cannot load `src/ui/stats/aggregations.ts`: something in its import
+   chain uses `import.meta.glob`, which is a Vite feature. Vitest has Vite's
+   transform, so a `*.test.ts` file works where a script does not.
+2. Read the existing vector's *input* section (`histograms`, `runTimestamps`,
+   whatever that file carries), feed it to the real function, and print the
+   result as JSON.
+3. Paste that into the vector file and add the Swift assertion.
+4. **Then break the Swift port on purpose** and watch the vector fail. A vector
+   nobody has seen fail is a vector nobody knows is connected.
+
+The per-finger section was added this way, and step 4 caught both the obvious
+error (a key mapped to the wrong finger) and the arithmetic one the comment
+warns about (`misses / (hits + misses)`, which counts every typo twice).
 
 ## Layout
 

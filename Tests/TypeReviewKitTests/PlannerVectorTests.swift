@@ -12,7 +12,7 @@ import XCTest
 final class PlannerVectorTests: XCTestCase {
     private func load<T: Decodable>(_ name: String, as type: T.Type) throws -> T {
         guard let url = Bundle.module.url(forResource: "Vectors/\(name)", withExtension: "json")
-        else { throw XCTSkip("Vectors/\(name).json missing — run `pnpm emit:vectors`") }
+        else { throw XCTSkip("Vectors/\(name).json missing — see ARCHITECTURE.md — Regenerating a vector") }
         return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
     }
 

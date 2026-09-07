@@ -13,7 +13,7 @@ final class GoldenVectorTests: XCTestCase {
     private func vector<T: Decodable>(_ name: String, as type: T.Type) throws -> T {
         guard let url = Bundle.module.url(forResource: "Vectors/\(name)", withExtension: "json")
         else {
-            throw XCTSkip("Vectors/\(name).json is missing — regenerate with `pnpm emit:vectors`")
+            throw XCTSkip("Vectors/\(name).json is missing — see ARCHITECTURE.md — Regenerating a vector")
         }
         return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
     }

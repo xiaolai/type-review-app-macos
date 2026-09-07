@@ -56,6 +56,99 @@ public func aggregatePerKey(_ results: [RunResult]) -> OrderedMap<PerKeyStat> {
     return out
 }
 
+/// Which finger a touch typist uses for a key, on a US QWERTY layout.
+///
+/// Ported from the website's `aggregations.ts`, values and order unchanged.
+/// The per-key heatmap already carries this information; a reader has to
+/// assemble "my right pinky is the slow one" out of it in their head, and this
+/// is the assembly.
+public enum Finger: String, Sendable, CaseIterable {
+    case leftPinky = "left-pinky"
+    case leftRing = "left-ring"
+    case leftMiddle = "left-middle"
+    case leftIndex = "left-index"
+    case thumb
+    case rightIndex = "right-index"
+    case rightMiddle = "right-middle"
+    case rightRing = "right-ring"
+    case rightPinky = "right-pinky"
+
+    /// The order the panel reads in: left hand outward-in, thumb, right hand
+    /// in-outward. Not the declaration order of a set, which would put the
+    /// thumb wherever it happened to be written.
+    public static let display: [Finger] = [
+        .leftPinky, .leftRing, .leftMiddle, .leftIndex, .thumb,
+        .rightIndex, .rightMiddle, .rightRing, .rightPinky,
+    ]
+
+    public var label: String {
+        switch self {
+        case .leftPinky: return "L pinky"
+        case .leftRing: return "L ring"
+        case .leftMiddle: return "L middle"
+        case .leftIndex: return "L index"
+        case .thumb: return "thumb"
+        case .rightIndex: return "R index"
+        case .rightMiddle: return "R middle"
+        case .rightRing: return "R ring"
+        case .rightPinky: return "R pinky"
+        }
+    }
+
+    /// Standard touch-typing assignment. Digits and the rarely-used keys are
+    /// deliberately absent: a key with no finger is skipped rather than
+    /// guessed at, which is why this is a lookup and not a computation.
+    public static let map: [String: Finger] = [
+        "q": .leftPinky, "a": .leftPinky, "z": .leftPinky,
+        "w": .leftRing, "s": .leftRing, "x": .leftRing,
+        "e": .leftMiddle, "d": .leftMiddle, "c": .leftMiddle,
+        "r": .leftIndex, "f": .leftIndex, "v": .leftIndex,
+        "t": .leftIndex, "g": .leftIndex, "b": .leftIndex,
+        "y": .rightIndex, "h": .rightIndex, "n": .rightIndex,
+        "u": .rightIndex, "j": .rightIndex, "m": .rightIndex,
+        "i": .rightMiddle, "k": .rightMiddle, ",": .rightMiddle,
+        "o": .rightRing, "l": .rightRing, ".": .rightRing,
+        "p": .rightPinky, ";": .rightPinky, "/": .rightPinky, "'": .rightPinky,
+        " ": .thumb,
+    ]
+}
+
+public struct FingerStat: Sendable, Equatable {
+    public let finger: Finger
+    public let hits: Int
+    public let avgMs: Double
+    public let errorRate: Double
+}
+
+/// Per-key stats regrouped by the finger responsible for each key.
+///
+/// Built on `aggregatePerKey` rather than on the runs, exactly as the website
+/// does — the same numbers, bucketed differently, so the two can never
+/// disagree about a key while agreeing about its finger.
+///
+/// `hits` is total attempts including typos, so `misses / hits` is the rate.
+/// The same note is on `aggregatePerKey`, and it is the arithmetic most easily
+/// got wrong here: `misses / (hits + misses)` counts every typo twice.
+public func aggregatePerFinger(_ perKey: OrderedMap<PerKeyStat>) -> [FingerStat] {
+    struct Accumulator { var hits = 0; var misses = 0; var weightedMs = 0.0 }
+    var acc: [Finger: Accumulator] = [:]
+    for key in perKey.keys {
+        guard let finger = Finger.map[key], let stat = perKey[key] else { continue }
+        var current = acc[finger] ?? Accumulator()
+        current.hits += stat.hits
+        current.misses += stat.misses
+        current.weightedMs += Double(stat.hits) * stat.avgMs
+        acc[finger] = current
+    }
+    return Finger.display.compactMap { finger in
+        guard let v = acc[finger], v.hits > 0 else { return nil }
+        return FingerStat(
+            finger: finger, hits: v.hits,
+            avgMs: v.weightedMs / Double(v.hits),
+            errorRate: Double(v.misses) / Double(v.hits))
+    }
+}
+
 public struct BigramStat: Sendable, Equatable {
     public let bigram: String
     public let hits: Int
