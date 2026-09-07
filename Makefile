@@ -450,7 +450,7 @@ pkg:
 		|| { echo "error: the profile is for '$$got', not $(TEAM_ID).$(BUNDLE_ID_STORE)"; exit 1; }; \
 	expiry=$$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "$$plist" 2>/dev/null); \
 	test -n "$$expiry" || { echo "error: the profile has no expiry date"; exit 1; }; \
-	python3 -c "import sys,datetime;e=datetime.datetime.strptime(sys.argv[1],'%a %b %d %H:%M:%S %Z %Y');sys.exit(0 if e>datetime.datetime.utcnow() else 1)" "$$expiry" \
+	python3 -c "import sys,datetime as d;e=d.datetime.strptime(sys.argv[1],'%a %b %d %H:%M:%S %Z %Y');sys.exit(0 if e>d.datetime.now() else 1)" "$$expiry" \
 		|| { echo "error: the profile expired on $$expiry"; exit 1; }; \
 	echo "  profile: $(TEAM_ID).$(BUNDLE_ID_STORE), valid until $$expiry"
 	@security find-identity -v | grep -q "$(STORE_SIGN)" \
