@@ -274,8 +274,17 @@ extension AppDelegate {
                     // On, but muted by the system, is a state the user cannot
                     // otherwise see from here — the monitor is installed and
                     // never called. Say so where the switch is.
-                    item.title = on && !GlobalKeySound.isPermitted
-                        ? "Sound in Every App (Needs Input Monitoring)" : "Sound in Every App"
+                    // Three states, because "on" is not the same as "heard".
+                    // The status menu is the only surface a menu-bar-only
+                    // build has, so a setting that is on and silent has to
+                    // explain itself here or nowhere.
+                    if on, !GlobalKeySound.isPermitted {
+                        item.title = "Sound in Every App (Needs Input Monitoring)"
+                    } else if on, Channel.shouldYieldToSibling {
+                        item.title = "Sound in Every App (Another Copy Started First)"
+                    } else {
+                        item.title = "Sound in Every App"
+                    }
                 } else if item.action == #selector(toggleSound(_:)) {
                     item.state = AppPreferences.soundIsOn ? .on : .off
                     // The menu advertises whatever is actually registered, so

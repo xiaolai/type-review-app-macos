@@ -88,6 +88,7 @@ final class GlobalKeySound {
 
     private var rememberedForeignApp: NSRunningApplication?
     private var activationObserver: NSObjectProtocol?
+    private var siblingObservers: [NSObjectProtocol] = []
 
     init(play: @escaping (UInt16, Stroke) -> Void) {
         self.play = play
@@ -136,21 +137,49 @@ final class GlobalKeySound {
                 // front the monitor is taken down, so nothing is delivered.
                 // Switching applications is rare enough that installing and
                 // removing it around them costs nothing worth measuring.
-                if monitor.isProtectedAppInFront {
-                    monitor.removeGlobalMonitor()
-                } else {
-                    monitor.installGlobalMonitor()
-                }
+                monitor.reconsider()
             }
+        }
+        // The other install starting or quitting changes whether this one
+        // should be listening, and neither is an activation — a menu-bar-only
+        // build never comes to the front at all.
+        for name in [
+            NSWorkspace.didLaunchApplicationNotification,
+            NSWorkspace.didTerminateApplicationNotification,
+        ] {
+            siblingObservers.append(
+                NSWorkspace.shared.notificationCenter.addObserver(
+                    forName: name, object: nil, queue: .main
+                ) { note in
+                    let app = note.userInfo?[NSWorkspace.applicationUserInfoKey]
+                        as? NSRunningApplication
+                    let id = app?.bundleIdentifier
+                    MainActor.assumeIsolated {
+                        guard id == Channel.sibling else { return }
+                        KeySoundMonitors.shared?.reconsider()
+                    }
+                })
         }
         installGlobalMonitor()
         KeySoundMonitors.shared = self
     }
 
-    /// Installs the monitor on other applications' keys, unless the
-    /// application in front is one this app will not watch at all.
+    /// Puts the tap up or takes it down to match the current reasons.
+    ///
+    /// Called for anything that can change the answer: a different application
+    /// coming to the front, and the other install starting or quitting.
+    private func reconsider() {
+        if shouldNotListen {
+            removeGlobalMonitor()
+        } else {
+            installGlobalMonitor()
+        }
+    }
+
+    /// Installs the monitor on other applications' keys, unless something says
+    /// it should not be listening at all.
     private func installGlobalMonitor() {
-        guard tap == nil, !isProtectedAppInFront else { return }
+        guard tap == nil, !shouldNotListen else { return }
         // The callback is a C function pointer and cannot capture, so it
         // reaches the instance the same way the old monitors did — through the
         // one shared reference.
@@ -240,6 +269,19 @@ final class GlobalKeySound {
             || Self.declaresCredentialProvider(frontmostBundleID)
     }
 
+    /// Every reason not to be listening right now.
+    ///
+    /// The sibling check joins the password-manager one rather than getting
+    /// machinery of its own, because they want the identical thing: no tap,
+    /// installed again when the reason goes away. Two taps on one machine mean
+    /// every keystroke sounds twice; `Channel.shouldYieldToSibling` decides
+    /// which copy stops, by launch order so that both reach opposite answers.
+    /// Self-correcting either way: quitting one lets the other pick the tap up
+    /// on the next notification.
+    private var shouldNotListen: Bool {
+        isProtectedAppInFront || Channel.shouldYieldToSibling
+    }
+
     /// Whether an application says it is a password manager.
     ///
     /// macOS asks one to ship an AutoFill credential-provider extension, so
@@ -284,6 +326,10 @@ final class GlobalKeySound {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
         }
         activationObserver = nil
+        for observer in siblingObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        siblingObservers = []
         removeGlobalMonitor()
         if KeySoundMonitors.shared === self { KeySoundMonitors.shared = nil }
     }

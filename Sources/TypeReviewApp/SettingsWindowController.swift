@@ -45,6 +45,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// The warning under "Sound in every app", shown only while the setting
     /// is on and the system is not delivering the events it needs.
     private var permissionLabel: NSTextField?
+    /// The "Allow…" button, hidden when the row is explaining something a
+    /// button cannot fix.
+    private var permissionButton: NSButton?
     private var permissionRows: [NSGridRow] = []
     /// The note under "Start at login". Carries whatever `SMAppService` has to
     /// say — an approval it is still waiting for, or the reason it refused.
@@ -649,7 +652,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// button — which is two copies of the same styling to keep in step.
     private func addStatusRow(
         _ grid: NSGridView, button title: String, action: Selector
-    ) -> (label: NSTextField, row: NSGridRow) {
+    ) -> (label: NSTextField, button: NSButton, row: NSGridRow) {
         let label = NSTextField(labelWithString: "")
         label.font = .preferredFont(forTextStyle: .caption1)
         // The system's own warning colour rather than red: these are settings
@@ -665,13 +668,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let row = grid.addRow(with: [NSGridCell.emptyContentView, stack])
         row.topPadding = 1
         row.bottomPadding = 4
-        return (label, row)
+        return (label, button, row)
     }
 
     private func addPermissionRow(_ grid: NSGridView) {
         let made = addStatusRow(
             grid, button: "Allow…", action: #selector(openInputMonitoringSettings(_:)))
         permissionLabel = made.label
+        permissionButton = made.button
         permissionRows = [made.row]
     }
 
@@ -699,9 +703,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         (controls["releaseSound"] as? NSButton)?.state =
             AppPreferences.releaseSound.value ? .on : .off
         mutedApps?.reload()
-        let blocked = global && !GlobalKeySound.isPermitted
-        permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
-        for row in permissionRows { row.isHidden = !blocked }
+        // Two reasons the setting can be on while nothing is heard, and one
+        // row to say either. The permission comes first when both apply: it is
+        // the one with a button that fixes it, and the other install being
+        // open is the more obvious of the two to a person looking at their own
+        // screen.
+        let unpermitted = global && !GlobalKeySound.isPermitted
+        let conflicted = global && !unpermitted && Channel.shouldYieldToSibling
+        if unpermitted {
+            permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
+        } else if conflicted {
+            permissionLabel?.stringValue =
+                "Another copy of TYPE started first — only it is heard."
+        }
+        permissionButton?.isHidden = !unpermitted
+        for row in permissionRows { row.isHidden = !(unpermitted || conflicted) }
 
         resizePanes()
     }
