@@ -1,6 +1,6 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
-import IOKit.hid
 
 /// Keystroke sound for the whole machine rather than for one window.
 ///
@@ -52,8 +52,6 @@ final class GlobalKeySound {
         self.play = play
     }
 
-    /// Running at all. The global half is absent until Input Monitoring is
-    /// granted, so the local monitor is what this tracks.
     var isRunning: Bool { localMonitor != nil }
 
     func start() {
@@ -67,25 +65,27 @@ final class GlobalKeySound {
             KeySoundMonitors.shared == nil,
             "a GlobalKeySound is already running; stop it before starting another")
         lastRawFlags = NSEvent.modifierFlags.rawValue
-        // Only when the system will actually deliver other applications' keys.
-        //
-        // Input Monitoring gates `.keyDown` but not `.flagsChanged`, so an
-        // ungranted app still receives modifier events — and installing this
-        // anyway produced the worst possible result: shift and caps lock
-        // clicked everywhere while letters were silent, which reads as a
-        // broken feature rather than as a permission nobody has granted. With
-        // the monitor left off, "on but not permitted" simply behaves like
-        // "off outside this app", and the Settings pane and the menu both say
-        // why.
         // `.flagsChanged` only when modifiers are wanted, so the default
         // configuration observes fewer kinds of keyboard event rather than
         // observing them and throwing the result away.
         let matching: NSEvent.EventTypeMask =
             soundsModifiers ? [.keyDown, .flagsChanged] : [.keyDown]
-        if Self.isPermitted {
-            globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
-                MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
-            }
+        // Installed whether or not the permission has been granted, and that
+        // is the point: *asking* for other applications' key events is what
+        // makes macOS record this app as a client of Accessibility, list it
+        // and offer its prompt. Skipping the install while ungranted was
+        // circular — nothing ever asked, so nothing was ever offered, and the
+        // Settings button sent the user to a list with nothing in it to switch
+        // on.
+        //
+        // What arrives without permission is discarded in `handleGlobal`. TCC
+        // gates `.keyDown` and not `.flagsChanged`, so an ungranted app still
+        // receives modifier events, and playing those was the worst available
+        // outcome: shift and caps lock clicking everywhere while letters
+        // stayed silent, which reads as a broken feature rather than as a
+        // permission nobody has granted.
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
+            MainActor.assumeIsolated { KeySoundMonitors.shared?.handleGlobal(event) }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) { event in
             MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
@@ -106,7 +106,7 @@ final class GlobalKeySound {
 
     /// Tears the monitors down and puts them straight back.
     ///
-    /// For the moment Input Monitoring is granted while the app is already
+    /// For the moment Accessibility is granted while the app is already
     /// running. The system decides what a monitor may see when it is
     /// installed, so one installed before the grant stays deaf afterwards —
     /// and nothing tells an app its permission changed, which is why this is
@@ -128,6 +128,13 @@ final class GlobalKeySound {
         soundsModifiers = modifiers
         if wanted { start() } else { stop() }
         return isRunning
+    }
+
+    /// Events from another application, which arrive whether or not the
+    /// permission exists. Silent until all of them do.
+    private func handleGlobal(_ event: NSEvent) {
+        guard Self.isPermitted else { return }
+        handle(event)
     }
 
     private func handle(_ event: NSEvent) {
@@ -215,30 +222,35 @@ final class GlobalKeySound {
     /// Whether the system will actually deliver other applications' key
     /// events to this process.
     ///
-    /// Two gates, and either one opens it. `addGlobalMonitorForEvents`
-    /// documents Accessibility; what macOS has enforced for key events since
-    /// Catalina is Input Monitoring. Checking both avoids sending someone to
-    /// grant a permission they already granted under the other name.
+    /// Accessibility, and only Accessibility. That is what
+    /// `addGlobalMonitorForEvents` documents for key-related events, and it is
+    /// where macOS lists this app.
     ///
-    /// This matters because the failure is silent: without permission the
-    /// monitor is installed, returns a perfectly good object, and is simply
-    /// never called. Nothing anywhere reports it — which is why the setting
-    /// shows this state rather than letting the user wonder why their
-    /// keyboard went quiet.
-    static var isPermitted: Bool {
-        if AXIsProcessTrusted() { return true }
-        return IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
-    }
+    /// It used to accept Input Monitoring as an alternative, and everything
+    /// downstream — the request, the button, the captions — named that
+    /// permission instead. It is the wrong one: this app never calls the API
+    /// that gates on it, so it never appeared in that list, and someone
+    /// following the button arrived at a pane that was empty and stayed empty.
+    /// Accepting it here would also have been wrong in the other direction:
+    /// granting Input Monitoring alone would have reported "permitted" over a
+    /// monitor that still received nothing.
+    ///
+    /// The check matters because the failure is otherwise silent: the monitor
+    /// installs, returns a perfectly good object, and is never called.
+    static var isPermitted: Bool { AXIsProcessTrusted() }
 
-    /// Asks the system for Input Monitoring.
+    /// Asks the system for Accessibility, with its prompt.
     ///
-    /// macOS shows its prompt only the first time a given process asks, and
-    /// answers from cache forever after. That is why the caller also offers
-    /// the System Settings door: for everyone past their first refusal, this
-    /// call is a no-op that returns false.
+    /// The prompt is what puts the app in front of the user with an "Open
+    /// System Settings" button; the entry in the list is added by asking at
+    /// all. macOS shows it only the first time a given process asks and
+    /// answers from cache afterwards, which is why the caller also offers the
+    /// System Settings door directly.
     @discardableResult
     static func requestPermission() -> Bool {
-        IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+        // The key by name. `kAXTrustedCheckOptionPrompt` is a global `var` in
+        // the SDK, which Swift 6 will not let a concurrent context read.
+        AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
     }
 
     /// Opens the pane where the permission is granted by hand.
@@ -246,7 +258,7 @@ final class GlobalKeySound {
         guard
             let url = URL(
                 string:
-                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
         else { return }
         NSWorkspace.shared.open(url)
     }

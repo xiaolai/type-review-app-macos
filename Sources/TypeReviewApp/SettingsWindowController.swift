@@ -477,7 +477,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// Whether keystrokes are heard in every app.
     ///
-    /// Asks for Input Monitoring as part of switching on rather than leaving
+    /// Asks for Accessibility as part of switching on rather than leaving
     /// it as a second step to discover. Without the permission the monitor
     /// installs cleanly and is never called — the switch would read "on" over
     /// a keyboard that stayed silent.
@@ -560,7 +560,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func addPermissionRow(_ grid: NSGridView) {
         let made = addStatusRow(
-            grid, button: "Allow…", action: #selector(openInputMonitoringSettings(_:)))
+            grid, button: "Allow…", action: #selector(openAccessibilitySettings(_:)))
         permissionLabel = made.label
         permissionRows = [made.row]
     }
@@ -587,7 +587,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // does not appear and disappear as the switch above it is used.
         (controls["modifierSound"] as? NSSwitch)?.isEnabled = global
         let blocked = global && !GlobalKeySound.isPermitted
-        permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
+        permissionLabel?.stringValue = "Accessibility is off — other apps are not heard."
         for row in permissionRows { row.isHidden = !blocked }
 
         // Awaiting approval counts as on. It is a registration the user has
@@ -619,11 +619,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// Asks, then opens the pane.
     ///
-    /// The request is what puts TYPE into the Input Monitoring list in the
-    /// first place. Sending someone straight to that pane before the app has
-    /// ever asked lands them in a list TYPE is not in, with nothing to switch
-    /// on and no hint that the `+` button is the way through.
-    @objc private func openInputMonitoringSettings(_ sender: Any?) {
+    /// Asking is what shows macOS's own prompt, which carries an "Open System
+    /// Settings" button of its own and is the path most people will take. The
+    /// pane is opened as well for anyone who has already answered once, since
+    /// the prompt is shown only the first time a process asks.
+    @objc private func openAccessibilitySettings(_ sender: Any?) {
         GlobalKeySound.requestPermission()
         GlobalKeySound.openPermissionSettings()
     }
