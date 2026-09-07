@@ -20,8 +20,19 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// it the row read as an unexplained gap above two small buttons rather
     /// than as a list with nothing in it yet.
     private let empty = NSTextField(labelWithString: "Nothing muted.")
-    /// Bundle identifiers, in the order shown.
-    private var identifiers: [String] = []
+    /// What each row is, in the order shown. Built-in entries come first and
+    /// cannot be removed.
+    private enum Entry {
+        case protected(String)
+        case user(String)
+
+        var bundleID: String {
+            switch self {
+            case .protected(let id), .user(let id): return id
+            }
+        }
+    }
+    private var entries: [Entry] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -35,10 +46,31 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// Re-reads the preference. Called when the list changes from anywhere —
     /// the menu bar writes to it too.
     func reload() {
-        identifiers = AppPreferences.mutedApps.value
+        // Only the built-in entries that are actually installed. Listing
+        // password managers the user does not have would be noise; listing
+        // none of them would be worse, because an invisible list of protected
+        // applications is assurance nobody can check. Showing the ones that
+        // are here lets someone see at a glance whether their own manager is
+        // covered — and add it themselves when it is not.
+        let installed = AppPreferences.protectedApps.filter {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+        }
+        entries =
+            installed.map(Entry.protected)
+            + AppPreferences.mutedApps.value.map(Entry.user)
         table.reloadData()
-        empty.isHidden = !identifiers.isEmpty
-        remove.isEnabled = table.selectedRow >= 0
+        empty.isHidden = !entries.isEmpty
+        updateRemoveButton()
+    }
+
+    /// Removable only for the user's own entries.
+    private func updateRemoveButton() {
+        let selected = table.selectedRowIndexes
+        remove.isEnabled = !selected.isEmpty && selected.allSatisfy { row in
+            guard row < entries.count else { return false }
+            if case .user = entries[row] { return true }
+            return false
+        }
     }
 
     private func build() {
@@ -143,7 +175,8 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     @objc private func removeSelected() {
         let selected = table.selectedRowIndexes.compactMap { row -> String? in
-            row < identifiers.count ? identifiers[row] : nil
+            guard row < entries.count, case .user(let id) = entries[row] else { return nil }
+            return id
         }
         guard !selected.isEmpty else { return }
         AppPreferences.mutedApps.value = AppPreferences.mutedApps.value.filter {
@@ -154,23 +187,34 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: - Table
 
-    func numberOfRows(in tableView: NSTableView) -> Int { identifiers.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
 
     func tableView(
         _ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int
     ) -> NSView? {
-        guard row < identifiers.count else { return nil }
-        let id = identifiers[row]
+        guard row < entries.count else { return nil }
+        let entry = entries[row]
+        let id = entry.bundleID
         let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id)
         let label = NSTextField(labelWithString: name(for: id, at: url))
         label.font = .systemFont(ofSize: 12)
         label.lineBreakMode = .byTruncatingTail
+        var trailing: [NSView] = []
+        if case .protected = entry {
+            // Said in words rather than shown as a lock: "always" is the part
+            // that matters, and it is not obvious from a dimmed row whether
+            // something is off or merely fixed.
+            let note = NSTextField(labelWithString: "always")
+            note.font = .systemFont(ofSize: 10)
+            note.textColor = .tertiaryLabelColor
+            trailing = [note]
+        }
         let icon = NSImageView()
         icon.image = url.map { NSWorkspace.shared.icon(forFile: $0.path) }
         icon.imageScaling = .scaleProportionallyDown
         icon.widthAnchor.constraint(equalToConstant: 16).isActive = true
         icon.heightAnchor.constraint(equalToConstant: 16).isActive = true
-        let row = NSStackView(views: [icon, label])
+        let row = NSStackView(views: [icon, label] + trailing)
         row.spacing = 6
         row.alignment = .centerY
         return row
@@ -186,6 +230,6 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        remove.isEnabled = table.selectedRow >= 0
+        updateRemoveButton()
     }
 }

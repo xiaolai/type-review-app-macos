@@ -109,15 +109,6 @@ final class GlobalKeySound {
         // outcome: shift and caps lock clicking everywhere while letters
         // stayed silent, which reads as a broken feature rather than as a
         // permission nobody has granted.
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
-            MainActor.assumeIsolated { KeySoundMonitors.shared?.handleGlobal(event) }
-        }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) { event in
-            MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
-            // Returned unchanged. A local monitor that swallowed the event
-            // would make the sound and eat the keystroke with it.
-            return event
-        }
         // The frontmost application, tracked rather than polled. See
         // `frontmostBundleID`.
         frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -131,9 +122,48 @@ final class GlobalKeySound {
                 if let app, app.bundleIdentifier != Bundle.main.bundleIdentifier {
                     monitor.rememberedForeignApp = app
                 }
+                // Not "receive and discard": while a password manager is in
+                // front the monitor is taken down, so nothing is delivered.
+                // Switching applications is rare enough that installing and
+                // removing it around them costs nothing worth measuring.
+                if monitor.isProtectedAppInFront {
+                    monitor.removeGlobalMonitor()
+                } else {
+                    monitor.installGlobalMonitor()
+                }
             }
         }
+        installGlobalMonitor()
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) { event in
+            MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
+            // Returned unchanged. A local monitor that swallowed the event
+            // would make the sound and eat the keystroke with it.
+            return event
+        }
         KeySoundMonitors.shared = self
+    }
+
+    /// Installs the monitor on other applications' keys, unless the
+    /// application in front is one this app will not watch at all.
+    private func installGlobalMonitor() {
+        guard globalMonitor == nil, !isProtectedAppInFront else { return }
+        let matching: NSEvent.EventTypeMask =
+            soundsModifiers ? [.keyDown, .flagsChanged] : [.keyDown]
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
+            MainActor.assumeIsolated { KeySoundMonitors.shared?.handleGlobal(event) }
+        }
+    }
+
+    private func removeGlobalMonitor() {
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        globalMonitor = nil
+    }
+
+    /// Whether the application in front is one whose keystrokes are not to be
+    /// observed. See `AppPreferences.protectedApps`.
+    private var isProtectedAppInFront: Bool {
+        guard let frontmostBundleID else { return false }
+        return AppPreferences.isProtected(frontmostBundleID)
     }
 
     func stop() {

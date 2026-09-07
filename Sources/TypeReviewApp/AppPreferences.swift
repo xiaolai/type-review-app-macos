@@ -141,6 +141,57 @@ enum AppPreferences {
     /// fields — is handled by `IsSecureEventInputEnabled` without anyone
     /// having to think of it, so there is nothing to preload here and no
     /// guessed list to go stale.
+    /// Applications this app will not watch the keyboard in, ever, whatever
+    /// the settings say.
+    ///
+    /// Password managers, as whole applications rather than as password
+    /// fields. `IsSecureEventInputEnabled` covers the fields that ask for
+    /// protection, and inside a password manager that is not most of them: a
+    /// vault search, a secure note, a card number, the label on a one-time
+    /// code are ordinary text fields. The gap sits exactly where the stakes
+    /// are highest.
+    ///
+    /// This is not a mute. While one of these is in front the global monitor
+    /// is uninstalled, so the events are not received at all — a promise that
+    /// is much easier to trust than "received and discarded".
+    ///
+    /// **The list is necessarily incomplete**, which is why it is shown in
+    /// Settings rather than kept out of sight: an invisible list of protected
+    /// applications offers assurance it cannot deliver. The entries that are
+    /// actually installed appear there, unremovable, so anyone can see at a
+    /// glance whether their own manager is among them and add it themselves if
+    /// it is not.
+    static let protectedApps: [String] = [
+        "com.1password.1password",
+        "com.agilebits.onepassword7",
+        "com.agilebits.onepassword-osx",
+        "com.bitwarden.desktop",
+        "org.keepassxc.keepassxc",
+        "com.lastpass.LastPass",
+        "in.sinew.Enpass-Desktop",
+        "com.apple.keychainaccess",
+        "com.apple.Passwords",
+        // The system's own authentication surfaces. `LocalAuthentication`'s
+        // agent is the Touch-ID-or-password sheet; `SecurityAgent` and the
+        // login window are the older ones. They came out of watching the
+        // monitor's state while switching applications: dismissing Keychain
+        // Access handed the front to the authentication agent, which was not
+        // on this list, so the monitor was reinstalled for exactly the dialog
+        // a password is typed into. They should be covered by secure input,
+        // and the point of naming a whole application is not to have to trust
+        // that.
+        "com.apple.LocalAuthentication.UIAgent",
+        "com.apple.SecurityAgent",
+        "com.apple.loginwindow",
+    ]
+
+    /// Case-insensitively, because a bundle identifier is compared by the
+    /// system that way and a vendor's capitalisation is not something to bet a
+    /// password on.
+    static func isProtected(_ bundleID: String) -> Bool {
+        protectedApps.contains { $0.compare(bundleID, options: .caseInsensitive) == .orderedSame }
+    }
+
     enum mutedApps {
         static let key = "MutedApps"
 

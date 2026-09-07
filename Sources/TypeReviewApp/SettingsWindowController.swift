@@ -217,7 +217,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 hint: "⇧ ⌃ ⌥ ⌘ fn ⇪ click too. A capital stays one sound here.")
             self.addRow(
                 grid, "Silent in", self.mutedAppsControl(),
-                hint: "Password fields are always silent, without being listed.")
+                hint: "Password managers are never watched. Password fields never sound.")
             self.addRow(
                 grid, "Start at login", self.loginItemToggle(),
                 hint: "TYPE waits in the menu bar, ready before you type.")
