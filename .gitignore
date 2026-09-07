@@ -60,3 +60,6 @@ CLAUDE.md
 # Working notes and scratch output. Kept out of the repo on purpose:
 # they are for whoever is mid-task, not for whoever clones this.
 dev-docs/
+
+# Release archives.
+dist/

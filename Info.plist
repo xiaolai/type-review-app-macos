@@ -11,6 +11,18 @@
   <key>CFBundleShortVersionString</key> <string>0.1.0</string>
   <key>CFBundleVersion</key>         <string>1</string>
   <key>LSMinimumSystemVersion</key>  <string>14.0</string>
+  <!-- One copy of this build at a time. `open` already activates the running
+       instance rather than duplicating it, but `open -n` does not, and two
+       processes of the same build means two event taps and every keystroke
+       heard twice. Measured: without this, `open -n` yields two.
+
+       This says nothing about the two distribution channels, which carry
+       different identifiers and are different applications to the system.
+       Those are allowed to run together on purpose — refusing to launch is an
+       unexplainable failure, and moving a profile from one to the other needs
+       both of them open. `Channel.shouldYieldToSibling` keeps them from
+       sounding at once. -->
+  <key>LSMultipleInstancesProhibited</key> <true/>
   <key>NSHighResolutionCapable</key> <true/>
 </dict>
 </plist>

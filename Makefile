@@ -132,7 +132,7 @@ endif
 # file", which is a property of where a line was pasted rather than of intent.
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore
+.PHONY: all run selftest test icon clean notarize password-managers version appstore zip
 
 all: $(APP)
 
@@ -256,6 +256,39 @@ icon:
 # silently discarding a stapled ticket it had just earned.
 # What a build would call itself. Useful before tagging or submitting, and
 # cheap enough to run when a version number looks wrong.
+# A distributable archive of the direct build, plus the checksum a Homebrew
+# cask needs.
+#
+# `ditto -c -k --keepParent`, because that is the incantation Apple documents
+# for submitting and distributing an app, and matching the documented path
+# costs nothing.
+#
+# Not for the reason first written here. That comment claimed a plain `zip`
+# loses the extended attribute the signature lives in — which is true of a
+# lone signed binary and not of a bundle, where the signature is in
+# `Contents/_CodeSignature` and inside the Mach-O, both ordinary file content.
+# Checked: a plain zip round-trips and still verifies. The rationale was
+# plausible and wrong, which is why the check below exists instead of trust.
+#
+# Notarize before archiving, not after: stapling writes a ticket into the
+# bundle, and an archive made first would ship without it.
+DIST_VERSION := $(shell /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)
+ZIP          := dist/TYPE-$(DIST_VERSION).zip
+
+zip: $(APP)
+	@mkdir -p dist
+	@rm -f "$(ZIP)"
+	ditto -c -k --keepParent "$(APP)" "$(ZIP)"
+	# Round-trips, or it is not a distributable archive. The property that
+	# matters is "the app inside this file still verifies", and asserting it
+	# costs a second — cheaper than any argument about which archiver keeps
+	# what, and it stays true if the archiver ever changes.
+	@work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; 		ditto -x -k "$(ZIP)" "$$work"; 		codesign --verify --strict "$$work/$(APP)" 			|| { echo "error: the archived app does not verify"; exit 1; }
+	@printf '\n%s\n' "$(ZIP)"
+	@printf '  version : %s (build %s)\n' "$(DIST_VERSION)" "$(BUILD_NUMBER)"
+	@printf '  size    : %s\n' "$$(du -h '$(ZIP)' | cut -f1)"
+	@printf '  sha256  : %s\n' "$$(shasum -a 256 '$(ZIP)' | cut -d' ' -f1)"
+
 # The sandboxed build, without having to remember the variable.
 appstore:
 	@$(MAKE) --no-print-directory VARIANT=appstore
