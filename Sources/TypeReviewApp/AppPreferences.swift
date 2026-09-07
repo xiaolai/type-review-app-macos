@@ -152,42 +152,93 @@ enum AppPreferences {
     /// are highest.
     ///
     /// This is not a mute. While one of these is in front the global monitor
-    /// is uninstalled, so the events are not received at all — a promise that
-    /// is much easier to trust than "received and discarded".
+    /// is uninstalled, so the events are not received at all.
     ///
-    /// **The list is necessarily incomplete**, which is why it is shown in
-    /// Settings rather than kept out of sight: an invisible list of protected
-    /// applications offers assurance it cannot deliver. The entries that are
-    /// actually installed appear there, unremovable, so anyone can see at a
-    /// glance whether their own manager is among them and add it themselves if
-    /// it is not.
+    /// ## Where these came from
+    ///
+    /// Every identifier here was read from a primary source rather than
+    /// recalled: the Mac App Store's lookup API, or the `quit:`/`zap` stanzas
+    /// of the app's Homebrew cask, both of which state the bundle identifier
+    /// outright. That mattered — the LastPass desktop app is
+    /// `com.lastpass.lastpassmacdesktop`, not the `com.lastpass.LastPass` an
+    /// earlier version of this list guessed at, and a wrong identifier does
+    /// not fail loudly. It simply never matches, while looking like coverage.
+    ///
+    /// A list still cannot be complete, which is why it is not the only
+    /// mechanism: `GlobalKeySound.declaresCredentialProvider` asks the
+    /// application itself, and the entries that are installed are shown in
+    /// Settings so the answer for *this* Mac is something anyone can check.
     static let protectedApps: [String] = [
-        "com.1password.1password",
-        "com.agilebits.onepassword7",
-        "com.agilebits.onepassword-osx",
-        "com.bitwarden.desktop",
-        "org.keepassxc.keepassxc",
-        "com.lastpass.LastPass",
-        "in.sinew.Enpass-Desktop",
+        // Apple
         "com.apple.keychainaccess",
         "com.apple.Passwords",
         // The system's own authentication surfaces. `LocalAuthentication`'s
-        // agent is the Touch-ID-or-password sheet; `SecurityAgent` and the
-        // login window are the older ones. They came out of watching the
-        // monitor's state while switching applications: dismissing Keychain
-        // Access handed the front to the authentication agent, which was not
-        // on this list, so the monitor was reinstalled for exactly the dialog
-        // a password is typed into. They should be covered by secure input,
-        // and the point of naming a whole application is not to have to trust
-        // that.
+        // agent is the Touch-ID-or-password sheet; it came out of watching the
+        // monitor while switching applications — dismissing Keychain Access
+        // handed the front to it, and it was not on this list, so the monitor
+        // was reinstalled for exactly the dialog a password is typed into.
+        "com.apple.LocalAuthentication.UIAgent",
+        "com.apple.SecurityAgent",
+        "com.apple.loginwindow",
+        // 1Password
+        "com.1password.1password",
+        "com.agilebits.onepassword7",
+        "com.agilebits.onepassword-osx",
+        // Bitwarden
+        "com.bitwarden.desktop",
+        // LastPass
+        "com.lastpass.lastpassmacdesktop",
+        // Dashlane
+        "com.dashlane.dashlanephonefinal",
+        // Keeper
+        "com.keepersecurity.passwordmanager",
+        "com.callpod.keepermac.lite",
+        "com.callpod.keepermac",
+        // NordPass
+        "com.nordsec.nordpass",
+        // Enpass
+        "in.sinew.Enpass-Desktop",
+        // The KeePass family
+        "org.keepassxc.keepassxc",
+        "com.hicknhacksoftware.MacPass",
+        "net.antelle.keeweb",
+        "com.markmcguill.strongbox",
+        "com.keepassium.ios",
+        "com.keepassium.ios.pro",
+        // Proton
+        "me.proton.pass.electron",
+        // The rest, all from the App Store's own listing
+        "pw.buttercup.desktop",
+        "com.SiberSystems.RoboForm",
+        "com.sibersystems.RoboFormMac",
+        "com.outercorner.Secrets",
+        "com.mseven.msecuremac",
+        "com.safeincloud.Safe-In-Cloud.OSX",
+        "net.zetetic.Strip.mac",
+        "com.app77.pwsafemac",
+        "com.keepsolid.passwarden",
+        "com.2stable.passwords",
+        // A one-time-code app is not a password manager, but a secret is still
+        // typed into it when one is added by hand.
+        "com.NeilSardesai.Step-Two-Mac",
+    ]
+
+    /// The protected entries that are not worth showing anyone.
+    ///
+    /// The system's authentication surfaces are protected for the same reason
+    /// as everything else here, but they are not applications a person thinks
+    /// about — a row reading "loginwindow" in a list of password managers
+    /// answers no question and crowds out the rows that do.
+    static let hiddenProtectedApps: Set<String> = [
         "com.apple.LocalAuthentication.UIAgent",
         "com.apple.SecurityAgent",
         "com.apple.loginwindow",
     ]
 
-    /// Case-insensitively, because a bundle identifier is compared by the
-    /// system that way and a vendor's capitalisation is not something to bet a
-    /// password on.
+    /// Case-insensitively, because a bundle identifier is compared that way and
+    /// a vendor's capitalisation is not something to bet a password on —
+    /// RoboForm ships both `com.SiberSystems.RoboForm` and
+    /// `com.sibersystems.RoboFormMac`.
     static func isProtected(_ bundleID: String) -> Bool {
         protectedApps.contains { $0.compare(bundleID, options: .caseInsensitive) == .orderedSame }
     }

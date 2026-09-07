@@ -160,11 +160,54 @@ final class GlobalKeySound {
     }
 
     /// Whether the application in front is one whose keystrokes are not to be
-    /// observed. See `AppPreferences.protectedApps`.
+    /// observed.
+    ///
+    /// Two ways of knowing, because a hand-kept list of password managers can
+    /// only ever be a list of the ones somebody thought of.
     private var isProtectedAppInFront: Bool {
         guard let frontmostBundleID else { return false }
         return AppPreferences.isProtected(frontmostBundleID)
+            || Self.declaresCredentialProvider(frontmostBundleID)
     }
+
+    /// Whether an application says it is a password manager.
+    ///
+    /// macOS asks one to ship an AutoFill credential-provider extension, so
+    /// the application's own bundle declares what it is — better evidence than
+    /// any list this app could maintain, and it covers managers written after
+    /// this was. It is a supplement rather than a replacement: Apple's own
+    /// Passwords and Keychain Access provide the service from inside the
+    /// system and ship no such extension, and neither do several of the
+    /// KeePass front-ends.
+    ///
+    /// Answered once per application and remembered. It reads a few property
+    /// lists, which is nothing next to how often it would otherwise be asked.
+    static func declaresCredentialProvider(_ bundleID: String) -> Bool {
+        if let known = credentialProviders[bundleID] { return known }
+        var found = false
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
+            let plugins = try? FileManager.default.contentsOfDirectory(
+                at: url.appendingPathComponent("Contents/PlugIns"),
+                includingPropertiesForKeys: nil)
+        {
+            for plugin in plugins where plugin.pathExtension == "appex" {
+                guard
+                    let info = NSDictionary(
+                        contentsOf: plugin.appendingPathComponent("Contents/Info.plist")),
+                    let extensionInfo = info["NSExtension"] as? [String: Any],
+                    let point = extensionInfo["NSExtensionPointIdentifier"] as? String
+                else { continue }
+                if point.contains("credential-provider") {
+                    found = true
+                    break
+                }
+            }
+        }
+        credentialProviders[bundleID] = found
+        return found
+    }
+
+    private static var credentialProviders: [String: Bool] = [:]
 
     func stop() {
         if let activationObserver {

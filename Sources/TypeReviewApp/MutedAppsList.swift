@@ -52,8 +52,18 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
         // applications is assurance nobody can check. Showing the ones that
         // are here lets someone see at a glance whether their own manager is
         // covered — and add it themselves when it is not.
-        let installed = AppPreferences.protectedApps.filter {
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+        var installed = AppPreferences.protectedApps.filter {
+            !AppPreferences.hiddenProtectedApps.contains($0)
+                && NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+        }
+        // Anything that declares itself a password manager, whether or not it
+        // is on the list. Shown for the same reason the list is: coverage the
+        // user cannot see is coverage they cannot check.
+        for app in NSWorkspace.shared.runningApplications {
+            guard let id = app.bundleIdentifier, !installed.contains(id),
+                GlobalKeySound.declaresCredentialProvider(id)
+            else { continue }
+            installed.append(id)
         }
         entries =
             installed.map(Entry.protected)
@@ -131,7 +141,10 @@ final class MutedAppsList: NSView, NSTableViewDataSource, NSTableViewDelegate {
             well.topAnchor.constraint(equalTo: topAnchor),
             well.leadingAnchor.constraint(equalTo: leadingAnchor),
             well.trailingAnchor.constraint(equalTo: trailingAnchor),
-            well.heightAnchor.constraint(equalToConstant: 84),
+            // Tall enough for four rows. Three showed the two Apple entries
+            // and pushed the user's actual password manager out of sight,
+            // which is the one row they opened this to look for.
+            well.heightAnchor.constraint(equalToConstant: 112),
             scroll.topAnchor.constraint(equalTo: well.topAnchor, constant: 1),
             scroll.leadingAnchor.constraint(equalTo: well.leadingAnchor, constant: 1),
             scroll.trailingAnchor.constraint(equalTo: well.trailingAnchor, constant: -1),
