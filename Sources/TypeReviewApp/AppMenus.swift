@@ -209,6 +209,12 @@ extension AppDelegate {
             withTitle: "Sound in Every App", action: #selector(toggleGlobalSound(_:)),
             keyEquivalent: "")
         everywhere.target = self
+        // Directly under the scope switch, because it refines it: sound in
+        // every app, except this one.
+        let mute = menu.addItem(
+            withTitle: "Mute in This App", action: #selector(toggleMuteFrontmost(_:)),
+            keyEquivalent: "")
+        mute.target = self
         menu.addItem(.separator())
         for pack in KeySoundPack.all {
             let item = menu.addItem(
@@ -216,6 +222,9 @@ extension AppDelegate {
             item.target = self
             item.representedObject = pack.name
         }
+        // So the item that names the frontmost application is right when the
+        // menu is opened rather than when it was built.
+        menu.delegate = self
         soundMenus.append(menu)
         markSoundMenus()
         return menu
@@ -231,6 +240,13 @@ extension AppDelegate {
             for item in menu.items {
                 if let name = item.representedObject as? String {
                     item.state = name == active.name ? .on : .off
+                } else if item.action == #selector(toggleMuteFrontmost(_:)) {
+                    let app = globalSound.lastForeignApp
+                    item.title = app?.localizedName.map { "Mute in \($0)" } ?? "Mute in This App"
+                    item.isEnabled =
+                        app?.bundleIdentifier != nil && AppPreferences.globalSound.value
+                    item.state = (app?.bundleIdentifier).map(AppPreferences.mutedApps.contains)
+                        == true ? .on : .off
                 } else if item.action == #selector(toggleGlobalSound(_:)) {
                     let on = AppPreferences.globalSound.value
                     item.state = on ? .on : .off

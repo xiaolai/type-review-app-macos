@@ -5,7 +5,7 @@ import TypeReviewKit
 /// alternative under strict concurrency is annotating them one at a time and
 /// still having the compiler object to closures that capture `self`.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow?
     var practice: PracticeViewController?
     // Built in applicationDidFinishLaunching, for the same reason the stats
@@ -41,7 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// costs anything until first touched: the player holds no audio device
     /// until a pack that makes noise is set.
     private lazy var sounds = KeySoundPlayer()
-    private lazy var globalSound = GlobalKeySound { [weak self] code in
+    // Not private: the menu extension reads which application was last in
+    // front, to name the item that silences it.
+    lazy var globalSound = GlobalKeySound { [weak self] code in
         self?.playKey(code)
     }
     /// The passage shape the window was last sized to, so an unrelated
@@ -452,6 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sounds.setVolume(AppPreferences.soundVolume.value)
 
         let global = AppPreferences.globalSound.value
+        globalSound.mutedApps = Set(AppPreferences.mutedApps.value)
         globalSound.setRunning(global, soundsModifiers: AppPreferences.modifierSound.value)
         practice?.onKeyStruck = global ? nil : { [weak self] code in self?.playKey(code) }
         markSoundMenus()
@@ -478,6 +481,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Switching on with no window in front and no keystroke yet made is
         // silent in a way that reads as broken. One click says it took.
         if wanted, AppPreferences.soundIsOn { previewSound() }
+    }
+
+    /// Silences the keyboard in whichever application the user was just in.
+    ///
+    /// The moment someone decides sound does not belong somewhere is while
+    /// they are *in* that place, so the switch is offered there — one click
+    /// from the menu bar — rather than asking them to remember the name later
+    /// and find it in a file picker. The Settings list is for reviewing the
+    /// set, not for building it.
+    @objc func toggleMuteFrontmost(_ sender: Any?) {
+        guard let id = globalSound.lastForeignApp?.bundleIdentifier else { return }
+        AppPreferences.mutedApps.toggle(id)
+    }
+
+    /// Opening the Sound menu re-reads what it says. The frontmost application
+    /// changes between openings, and one of the items names it.
+    func menuWillOpen(_ menu: NSMenu) {
+        if soundMenus.contains(where: { $0 === menu }) { markSoundMenus() }
     }
 
     @objc func toggleKeyboard(_ sender: Any?) {

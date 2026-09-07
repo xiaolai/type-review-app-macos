@@ -47,6 +47,31 @@ final class GlobalKeySound {
     private var lastRawFlags: UInt = 0
     /// Whether modifier keys click. See `AppPreferences.modifierSound`.
     private(set) var soundsModifiers = false
+    /// Applications to stay silent in, by bundle identifier.
+    var mutedApps: Set<String> = []
+    /// The bundle identifier of the application in front, cached.
+    ///
+    /// Asked once per application switch rather than once per keystroke. This
+    /// runs on every key pressed anywhere on the machine, and reaching into
+    /// `NSWorkspace` from that path to answer a question that changes a few
+    /// times an hour is work nobody needs done.
+    private var frontmostBundleID: String?
+    /// The application the "mute in …" item should name.
+    ///
+    /// Whatever is in front, unless that is TYPE — in which case the last
+    /// thing that was. Both halves are needed: the status-bar menu can be
+    /// opened without TYPE ever becoming active, and the menu-bar one cannot
+    /// be opened any other way. Falling back only to the remembered app left
+    /// the item dead until the user had switched applications at least once,
+    /// which is not a state anyone should meet on first use.
+    var lastForeignApp: NSRunningApplication? {
+        let front = NSWorkspace.shared.frontmostApplication
+        if let front, front.bundleIdentifier != Bundle.main.bundleIdentifier { return front }
+        return rememberedForeignApp
+    }
+
+    private var rememberedForeignApp: NSRunningApplication?
+    private var activationObserver: NSObjectProtocol?
 
     init(play: @escaping (UInt16) -> Void) {
         self.play = play
@@ -93,10 +118,29 @@ final class GlobalKeySound {
             // would make the sound and eat the keystroke with it.
             return event
         }
+        // The frontmost application, tracked rather than polled. See
+        // `frontmostBundleID`.
+        frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated {
+                guard let monitor = KeySoundMonitors.shared else { return }
+                monitor.frontmostBundleID = app?.bundleIdentifier
+                if let app, app.bundleIdentifier != Bundle.main.bundleIdentifier {
+                    monitor.rememberedForeignApp = app
+                }
+            }
+        }
         KeySoundMonitors.shared = self
     }
 
     func stop() {
+        if let activationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+        }
+        activationObserver = nil
         if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
         if let localMonitor { NSEvent.removeMonitor(localMonitor) }
         globalMonitor = nil
@@ -131,10 +175,28 @@ final class GlobalKeySound {
     }
 
     /// Events from another application, which arrive whether or not the
-    /// permission exists. Silent until all of them do.
+    /// permission exists. Silent until all of them do, and silent in the
+    /// places sound does not belong.
     private func handleGlobal(_ event: NSEvent) {
-        guard Self.isPermitted else { return }
+        guard Self.isPermitted, !isMutedHere else { return }
         handle(event)
+    }
+
+    /// Whether this keystroke should be silent because of *where* it is.
+    ///
+    /// Two reasons, and the first is not a setting. When any application turns
+    /// on secure event input — a password field, the login window, a terminal
+    /// told to protect its input — the keystroke is one nobody should be
+    /// broadcasting the rhythm of. Asking the system covers every password
+    /// field in every application, including the ones no exclusion list would
+    /// ever have thought to name.
+    ///
+    /// The second is the user's own list. Video calls, games and anything with
+    /// its own audio are the cases a system flag cannot know about.
+    private var isMutedHere: Bool {
+        if IsSecureEventInputEnabled() { return true }
+        guard let frontmostBundleID else { return false }
+        return mutedApps.contains(frontmostBundleID)
     }
 
     private func handle(_ event: NSEvent) {

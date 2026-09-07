@@ -53,6 +53,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// The last registration error, kept until the next attempt. `status`
     /// alone cannot say why something failed.
     private var loginError: String?
+    private weak var mutedApps: MutedAppsList?
     /// Where the profile lives, resolved once when the Data pane is built.
     private var profileURL: URL?
     private static let lastPaneKey = "SettingsLastPane"
@@ -214,6 +215,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Modifier keys", self.modifierSoundToggle(),
                 hint: "⇧ ⌃ ⌥ ⌘ fn ⇪ click too. A capital stays one sound here.")
+            self.addRow(
+                grid, "Silent in", self.mutedAppsControl(),
+                hint: "Password fields are always silent, without being listed.")
             self.addRow(
                 grid, "Start at login", self.loginItemToggle(),
                 hint: "TYPE waits in the menu bar, ready before you type.")
@@ -510,6 +514,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
+    /// The applications the keyboard stays silent in.
+    ///
+    /// Held so the pane can re-read it: the same list is edited from the menu
+    /// bar, which is where most entries will come from.
+    private func mutedAppsControl() -> NSControl {
+        let list = MutedAppsList()
+        mutedApps = list
+        return StackControl(NSStackView(views: [list]))
+    }
+
     /// Whether TYPE starts with the Mac.
     ///
     /// Reads `SMAppService` rather than a preference of its own: the user can
@@ -586,6 +600,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // means nothing while that is off — disabled rather than hidden, so it
         // does not appear and disappear as the switch above it is used.
         (controls["modifierSound"] as? NSSwitch)?.isEnabled = global
+        mutedApps?.reload()
         let blocked = global && !GlobalKeySound.isPermitted
         permissionLabel?.stringValue = "Accessibility is off — other apps are not heard."
         for row in permissionRows { row.isHidden = !blocked }

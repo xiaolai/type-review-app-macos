@@ -126,6 +126,45 @@ enum AppPreferences {
     /// events: with this off, `flagsChanged` is not monitored at all.
     static let modifierSound = Flag(key: "ModifierSound")
 
+    /// Applications the keyboard stays silent in, by bundle identifier.
+    ///
+    /// A list of exclusions rather than of inclusions, because the setting
+    /// above is called "sound in every app" and that is the model: it plays
+    /// everywhere, except here. An inclusion list would ask the user to
+    /// enumerate every application they ever type in, which has no end, and
+    /// would leave the feature doing nothing until they did.
+    ///
+    /// Bundle identifiers, not names or paths. An app can be renamed and can
+    /// be moved; its identifier is what stays put.
+    ///
+    /// Empty by default. The exclusion that actually matters — password
+    /// fields — is handled by `IsSecureEventInputEnabled` without anyone
+    /// having to think of it, so there is nothing to preload here and no
+    /// guessed list to go stale.
+    enum mutedApps {
+        static let key = "MutedApps"
+
+        static var value: [String] {
+            get { UserDefaults.standard.stringArray(forKey: key) ?? [] }
+            set {
+                UserDefaults.standard.set(newValue.sorted(), forKey: key)
+                AppPreferences.announce(key)
+            }
+        }
+
+        static func contains(_ bundleID: String) -> Bool { value.contains(bundleID) }
+
+        static func toggle(_ bundleID: String) {
+            var current = value
+            if let index = current.firstIndex(of: bundleID) {
+                current.remove(at: index)
+            } else {
+                current.append(bundleID)
+            }
+            value = current
+        }
+    }
+
     /// Whether keystrokes make any sound at all.
     static var soundIsOn: Bool { soundPack.value != .off }
 
