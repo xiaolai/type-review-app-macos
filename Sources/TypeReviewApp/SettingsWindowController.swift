@@ -318,6 +318,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // Autoresizing stays on for the pane's root view, or preferredContentSize
         // silently does nothing and every pane renders at one size.
         root.translatesAutoresizingMaskIntoConstraints = true
+        // And the mask has to say so, which it did not. The default is `.none`,
+        // so the pane kept the frame it was built with while the window
+        // animated to a different height around it. Anchored at the bottom
+        // left with a fixed height, its top edge — the edge every row hangs
+        // from — slid out of the window and snapped back when layout next ran.
+        // That shudder was the tab switch's, and it was this.
+        root.autoresizingMask = [.width, .height]
         root.addSubview(grid)
         NSLayoutConstraint.activate([
             // Centred rather than pinned left: the labels are right-aligned
@@ -873,9 +880,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// height it was built with and the difference shows as empty space.
     private func resizePanes() {
         for pane in panes {
-            pane.controller.preferredContentSize = NSSize(
+            let size = NSSize(
                 width: Self.paneWidth,
                 height: pane.grid.fittingSize.height + 2 * Self.paneMargin)
+            // Only on a real change. Writing `preferredContentSize` makes the
+            // tab controller resize the window immediately and without
+            // animation, so an identical value still cost a snap — and this
+            // runs on `windowDidBecomeKey`, which is exactly what clicking a
+            // tab in an unfocused window fires just before the transition.
+            guard pane.controller.preferredContentSize != size else { continue }
+            pane.controller.preferredContentSize = size
         }
     }
 
@@ -1033,9 +1047,18 @@ private final class StackControl: NSControl {
 /// macOS keep the bottom edge instead would walk the title bar up the screen
 /// on every click.
 final class SettingsTabViewController: NSTabViewController {
-    /// Matched to the crossfade AppKit runs for `.crossfade`, so neither
-    /// finishes visibly before the other.
-    private static let duration: TimeInterval = 0.2
+    /// Long enough to read as one movement rather than a jump. 0.2 was the
+    /// crossfade's own default and it made the height change look abrupt; the
+    /// crossfade is now driven from the same figure, so the two halves cannot
+    /// drift apart when this is tuned.
+    private static let duration: TimeInterval = 0.3
+
+    /// Prompt at the start, unhurried at the end. `easeInEaseOut` eases into
+    /// the movement as well, which on a height change reads as hesitation
+    /// before anything happens.
+    private static var timing: CAMediaTimingFunction {
+        CAMediaTimingFunction(controlPoints: 0.3, 0, 0.2, 1)
+    }
 
     override func transition(
         from fromViewController: NSViewController, to toViewController: NSViewController,
@@ -1077,15 +1100,22 @@ final class SettingsTabViewController: NSTabViewController {
         // window is never asked to be smaller than what it currently holds.
         let isGrowing = frame.height >= window.frame.height
         if isGrowing { animate(to: frame) }
-        // Only Sendable values cross into the completion handler — a `CGRect`,
-        // a `Bool`, and `self` weakly. Capturing a local closure there is what
-        // the compiler objects to, and rightly.
-        super.transition(
-            from: fromViewController, to: toViewController, options: options
-        ) { [weak self] in
-            MainActor.assumeIsolated {
-                if !isGrowing { self?.animate(to: frame) }
-                completion?()
+        // The crossfade takes its duration from the surrounding animation
+        // context, so wrapping it is what keeps it in step with the frame
+        // animation above rather than running at AppKit's own default.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Self.duration
+            context.timingFunction = Self.timing
+            // Only Sendable values cross into the completion handler — a
+            // `CGRect`, a `Bool`, and `self` weakly. Capturing a local closure
+            // there is what the compiler objects to, and rightly.
+            super.transition(
+                from: fromViewController, to: toViewController, options: options
+            ) { [weak self] in
+                MainActor.assumeIsolated {
+                    if !isGrowing { self?.animate(to: frame) }
+                    completion?()
+                }
             }
         }
     }
@@ -1094,7 +1124,7 @@ final class SettingsTabViewController: NSTabViewController {
         guard let window = view.window else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.duration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.timingFunction = Self.timing
             window.animator().setFrame(frame, display: true)
         }
     }
