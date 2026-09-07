@@ -14,6 +14,17 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     private let table = NSTableView()
     private let statusLabel = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(labelWithString: "")
+    /// Written once: the empty state is also restored after the unreadable
+    /// state has replaced it.
+    private static let emptyMessage = "Nothing here yet.\nAdd a .txt or .md file, or paste text."
+
+    /// What sanitising did to a passage, when it did anything worth saying.
+    private static func note(for result: SanitizeResult) -> String {
+        var parts: [String] = []
+        if result.truncated { parts.append("truncated to the \(maxUserPassageLength)-character cap") }
+        if result.droppedChars > 0 { parts.append("\(result.droppedChars) unusable characters removed") }
+        return parts.isEmpty ? "" : " (" + parts.joined(separator: ", ") + ")"
+    }
     /// Held so its enabled state can follow the selection, the way the Remove
     /// button used to.
     private var removeItem: NSToolbarItem?
@@ -47,7 +58,18 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     private func build() {
         let content = DropView()
         content.onDrop = { [weak self] urls in self?.ingest(urls: urls) }
+        configureTable()
+        let scroll = makeScrollView()
+        styleLabels()
+        install(scroll: scroll, in: content)
+        window?.contentView = content
+        configureWindowChrome()
+    }
 
+    /// Columns, selection and row style. Split out of `build`, which
+    /// configured the table, the scroll view, the empty state, the layout, the
+    /// toolbar and the window's chrome in one 81-line run.
+    private func configureTable() {
         // Switched on only when there is something to alternate. An empty
         // inset table paints its blank rows as rounded grey bands, which reads
         // as content still loading rather than as a library with nothing in
@@ -68,7 +90,9 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         addedColumn.title = "Added"
         addedColumn.width = 120
         for column in [titleColumn, sizeColumn, addedColumn] { table.addTableColumn(column) }
+    }
 
+    private func makeScrollView() -> NSScrollView {
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
@@ -77,9 +101,12 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         // own inset shape, and Finder, Mail and Notes all let that sit
         // directly on the window rather than inside a box.
         scroll.borderType = .noBorder
+        return scroll
+    }
 
+    private func styleLabels() {
         // What an empty table should say, in place of four blank rows.
-        emptyLabel.stringValue = "Nothing here yet.\nAdd a .txt or .md file, or paste text."
+        emptyLabel.stringValue = Self.emptyMessage
         emptyLabel.alignment = .center
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.font = .systemFont(ofSize: 13)
@@ -87,12 +114,14 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
 
         statusLabel.font = NSFont.systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
+    }
 
-        // Add, Paste and Remove act on the whole library, so they belong in the
-        // window's toolbar rather than in a row of push buttons along the
-        // bottom. That row is the pre-Big Sur shape for this window, and moving
-        // it up is also what gives this window the same unified title bar as
-        // the practice window — one chrome for the app, not two.
+    /// Add, Paste and Remove act on the whole library, so they belong in the
+    /// window's toolbar rather than in a row of push buttons along the bottom.
+    /// That row is the pre-Big Sur shape for this window, and moving it up is
+    /// also what gives this window the same unified title bar as the practice
+    /// window — one chrome for the app, not two.
+    private func install(scroll: NSScrollView, in content: NSView) {
         for subview in [scroll, statusLabel, emptyLabel] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(subview)
@@ -111,7 +140,9 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
         ])
         window?.contentView = content
+    }
 
+    private func configureWindowChrome() {
         let toolbar = NSToolbar(identifier: "TypeReviewLibrary")
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
@@ -132,6 +163,18 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         let count = store.passages.count
         emptyLabel.isHidden = count > 0
         table.usesAlternatingRowBackgroundColors = count > 0
+        // Unreadable is not empty. Both have zero passages in memory, so the
+        // window said "Nothing here yet" over a file that was sitting on disk
+        // full of text it could not parse — and the user only found out when
+        // an addition was refused.
+        if store.isUnreadable {
+            emptyLabel.stringValue = "This library file could not be read."
+            emptyLabel.isHidden = false
+            statusLabel.stringValue =
+                "not overwriting it — the file is at \(store.fileURL.path)"
+            return
+        }
+        emptyLabel.stringValue = Self.emptyMessage
         // The empty case is stated in the middle of the table, so the status
         // line does not repeat it.
         statusLabel.stringValue = count == 0
@@ -154,30 +197,84 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func ingest(urls: [URL]) {
+        statusLabel.stringValue = "reading \(urls.count) file\(urls.count == 1 ? "" : "s")…"
+        // Read and parsed off the main actor. This did all of it inline in the
+        // panel's callback — open a large file, or a batch of them, on a slow
+        // volume and the whole app stopped until it finished, with the cap on
+        // passage length applied only at the very end and so bounding nothing
+        // that had already been done.
+        Task { @MainActor in
+            let parsed = await Self.read(urls)
+            self.install(parsed)
+        }
+    }
+
+    /// One file's worth of text, or the reason there is none.
+    private struct Ingested: Sendable {
+        let name: String
+        let title: String
+        let text: String?
+        let failure: String?
+    }
+
+    private nonisolated static func read(_ urls: [URL]) async -> [Ingested] {
+        await Task.detached(priority: .userInitiated) {
+            urls.map { url in
+                let name = url.lastPathComponent
+                let title = url.deletingPathExtension().lastPathComponent
+                // The panel grants access to the chosen file even under the
+                // sandbox, but a security scope still has to be entered for
+                // files reached any other way — a drag, for instance.
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                // Bounded before anything is decoded. The passage cap used to
+                // apply only after the whole file had been read and parsed, so
+                // a gigabyte of text was a gigabyte of work to then discard.
+                // Generous enough that nothing anyone would type is refused.
+                let limit = maxUserPassageLength * 8
+                do {
+                    let handle = try FileHandle(forReadingFrom: url)
+                    defer { try? handle.close() }
+                    let data = try handle.read(upToCount: limit) ?? Data()
+                    guard let raw = String(data: data, encoding: .utf8) else {
+                        return Ingested(
+                            name: name, title: title, text: nil,
+                            failure: "\(name): not readable as UTF-8")
+                    }
+                    let text = parseLibraryText(raw, kind: LibraryFileKind(filename: name))
+                    return Ingested(name: name, title: title, text: text, failure: nil)
+                } catch {
+                    // The actual reason. `try?` reported "not readable as
+                    // UTF-8" for a permission failure and for a file that had
+                    // been moved, which is the wrong thing to go and fix.
+                    return Ingested(
+                        name: name, title: title, text: nil,
+                        failure: "\(name): \(error.localizedDescription)")
+                }
+            }
+        }.value
+    }
+
+    /// Adds what was read. On the main actor, because the store is.
+    private func install(_ parsed: [Ingested]) {
         var added = 0
         var failures: [String] = []
-        for url in urls {
-            // The panel grants access to the chosen file even under the
-            // sandbox, but a security scope still has to be entered for files
-            // reached any other way — a drag, for instance.
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
-                failures.append("\(url.lastPathComponent): not readable as UTF-8")
+        for item in parsed {
+            if let failure = item.failure {
+                failures.append(failure)
                 continue
             }
-            let text = parseLibraryText(raw, kind: LibraryFileKind(filename: url.lastPathComponent))
-            let title = url.deletingPathExtension().lastPathComponent
+            guard let text = item.text else { continue }
             do {
-                try store.add(title: title, text: text)
+                try store.add(title: item.title, text: text)
                 added += 1
             } catch UserPassageError.empty {
-                failures.append("\(url.lastPathComponent): no text left after cleaning")
+                failures.append("\(item.name): no typeable text left after cleaning")
             } catch UserPassageError.full {
                 failures.append("library is full (\(maxUserPassages))")
                 break
             } catch {
-                failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                failures.append("\(item.name): \(error.localizedDescription)")
             }
         }
         reload()
@@ -198,11 +295,20 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             // Pasted text is treated as plain prose. Someone copying Markdown
             // source would be an unusual thing to want to type as prose, and
             // guessing wrong silently deletes their asterisks.
-            try store.add(title: "", text: sanitize(text).text)
+            let cleaned = sanitize(text)
+            try store.add(title: "", text: cleaned.text)
             reload()
-            statusLabel.stringValue = "pasted · \(store.passages.count) in library"
+            // Says what it did to the text. More than the cap was silently cut
+            // to the cap and reported as an ordinary success, so someone
+            // pasting a chapter got its first few pages and no indication that
+            // the rest had gone.
+            statusLabel.stringValue =
+                "pasted\(Self.note(for: cleaned)) · \(store.passages.count) in library"
         } catch UserPassageError.empty {
-            statusLabel.stringValue = "nothing to add — the clipboard text was all whitespace"
+            // Not "whitespace". Sanitising also removes control characters and
+            // anything outside the basic plane, so an emoji-only clipboard
+            // reached here and was told it contained spaces.
+            statusLabel.stringValue = "nothing to add — no typeable text left after cleaning"
         } catch UserPassageError.full {
             statusLabel.stringValue = "library is full (\(maxUserPassages))"
         } catch {
@@ -215,13 +321,25 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             row < store.passages.count ? store.passages[row].id : nil
         }
         guard !ids.isEmpty else { return }
-        do {
-            for id in ids { try store.delete(id: id) }
-            reload()
-            statusLabel.stringValue = "removed \(ids.count)"
-        } catch {
-            statusLabel.stringValue = "could not remove: \(error.localizedDescription)"
+        // Reloaded whatever happens. Deletions commit one at a time, so a
+        // failure part way through left earlier ones committed while the table
+        // still showed them — and the next attempt, working from stale row
+        // indexes, would have deleted different passages.
+        var removed = 0
+        var failure: String?
+        for id in ids {
+            do {
+                try store.delete(id: id)
+                removed += 1
+            } catch {
+                failure = error.localizedDescription
+                break
+            }
         }
+        reload()
+        statusLabel.stringValue = failure.map {
+            removed == 0 ? "could not remove: \($0)" : "removed \(removed) of \(ids.count) — \($0)"
+        } ?? "removed \(removed)"
     }
 
     // MARK: - Table
@@ -354,17 +472,10 @@ extension LibraryWindowController: NSToolbarDelegate {
         _ identifier: NSToolbarItem.Identifier, _ label: String, _ symbol: String,
         _ tip: String, _ action: Selector
     ) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = tip
-        item.image = Theme.toolbarSymbol(symbol)
-        item.target = self
-        item.action = action
-        item.isBordered = true
         // Validation is driven by the table's selection in `reload()`, so the
         // toolbar must not second-guess it on every runloop pass.
-        item.autovalidates = false
-        return item
+        ToolbarItems.button(
+            identifier, label: label, symbol: symbol, tip: tip, target: self, action: action,
+            autovalidates: false)
     }
 }

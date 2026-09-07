@@ -48,7 +48,7 @@ enum AppPreferences {
             get { CaretStyle(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .vertical }
             set {
                 UserDefaults.standard.set(newValue.rawValue, forKey: key)
-                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+                AppPreferences.announce(key)
             }
         }
     }
@@ -57,16 +57,7 @@ enum AppPreferences {
     ///
     /// The same setting the website calls `showWhitespace`, and the same three
     /// marks, so someone moving between them sees the same page.
-    enum showWhitespace {
-        static let key = "ShowWhitespace"
-        static var value: Bool {
-            get { UserDefaults.standard.bool(forKey: key) }
-            set {
-                UserDefaults.standard.set(newValue, forKey: key)
-                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
-            }
-        }
-    }
+    static let showWhitespace = Flag(key: "ShowWhitespace")
 
     /// How loud the keystroke sounds are. Zero is off in practice, and the
     /// pack named `off` is off by construction; both are honoured.
@@ -93,8 +84,16 @@ enum AppPreferences {
                 return KeySoundPack.named(name) ?? .off
             }
             set {
+                // Remembered here rather than only in `toggleSound`, which is
+                // what made the toggle restore a pack from two choices ago:
+                // picking one from Settings or the menu never updated this, so
+                // switching off and back on resurrected whatever the *toggle*
+                // had last seen.
+                if newValue != .off {
+                    UserDefaults.standard.set(newValue.name, forKey: lastAudibleKey)
+                }
                 UserDefaults.standard.set(newValue.name, forKey: key)
-                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+                AppPreferences.announce(key)
             }
         }
     }
@@ -109,16 +108,7 @@ enum AppPreferences {
     ///
     /// Orthogonal to the pack: `off` still means silence everywhere, so the
     /// global shortcut mutes the whole machine without this having to know.
-    enum globalSound {
-        static let key = "GlobalSound"
-        static var value: Bool {
-            get { UserDefaults.standard.bool(forKey: key) }
-            set {
-                UserDefaults.standard.set(newValue, forKey: key)
-                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
-            }
-        }
-    }
+    static let globalSound = Flag(key: "GlobalSound")
 
     /// Whether keystrokes make any sound at all.
     static var soundIsOn: Bool { soundPack.value != .off }
@@ -134,9 +124,6 @@ enum AppPreferences {
     /// keyboard, which is the point of turning it on.
     static func toggleSound() {
         let current = soundPack.value
-        if current != .off {
-            UserDefaults.standard.set(current.name, forKey: lastAudibleKey)
-        }
         let remembered = UserDefaults.standard.string(forKey: lastAudibleKey)
             .flatMap(KeySoundPack.named)
         soundPack.value = nextSoundPack(current: current, remembered: remembered)
@@ -164,9 +151,17 @@ enum AppPreferences {
                     return .defaultSoundToggle
                 }
                 guard defaults.bool(forKey: setKey) else { return nil }
+                // Present, numeric and in range — all three checked. Truncation
+                // turned 65536 into 0, and a missing or non-numeric value into
+                // 0 as well, so a corrupt preference could claim ⌘A globally.
+                guard let rawCode = defaults.object(forKey: keyCodeKey) as? NSNumber,
+                    let keyCode = UInt16(exactly: rawCode.int64Value),
+                    let rawModifiers = defaults.object(forKey: modifiersKey) as? NSNumber,
+                    let modifierBits = Int(exactly: rawModifiers.int64Value),
+                    modifierBits & ~ShortcutModifiers.all.rawValue == 0
+                else { return nil }
                 let candidate = KeyboardShortcut(
-                    keyCode: UInt16(truncatingIfNeeded: defaults.integer(forKey: keyCodeKey)),
-                    modifiers: ShortcutModifiers(rawValue: defaults.integer(forKey: modifiersKey)))
+                    keyCode: keyCode, modifiers: ShortcutModifiers(rawValue: modifierBits))
                 // A combination that is not safe to claim globally is treated
                 // as absent rather than registered — the same rule the
                 // recorder enforces, applied again on the way out, because
@@ -180,14 +175,49 @@ enum AppPreferences {
                     defaults.set(Int(newValue.keyCode), forKey: keyCodeKey)
                     defaults.set(newValue.modifiers.rawValue, forKey: modifiersKey)
                 }
-                NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+                AppPreferences.announce(keyCodeKey)
             }
         }
     }
 
     /// Fired when any of these change, so the window can take its new shape
     /// without being reopened.
+    ///
+    /// The `userInfo` carries `changedKey`. Without it every observer had to
+    /// assume the worst and redo all of its work: changing the volume
+    /// re-registered the global hot key and resized the window, which threw
+    /// away a size the user had just dragged.
     static let didChange = Notification.Name("AppPreferencesDidChange")
+    static let changedKey = "changedKey"
+
+    static func announce(_ key: String) {
+        NotificationCenter.default.post(
+            name: didChange, object: nil, userInfo: [changedKey: key])
+    }
+
+    /// A boolean preference. Two of these existed as hand-written enums that
+    /// differed only in their key.
+    struct Flag {
+        let key: String
+        let `default`: Bool
+
+        init(key: String, default: Bool = false) {
+            self.key = key
+            self.default = `default`
+        }
+
+        var value: Bool {
+            get {
+                guard UserDefaults.standard.object(forKey: key) != nil else { return `default` }
+                return UserDefaults.standard.bool(forKey: key)
+            }
+            nonmutating set {
+                guard newValue != value else { return }
+                UserDefaults.standard.set(newValue, forKey: key)
+                AppPreferences.announce(key)
+            }
+        }
+    }
 
     struct Preference<Value: Comparable & Sendable> {
         let key: String
@@ -200,6 +230,13 @@ enum AppPreferences {
         func clamped(_ value: Value) -> Value {
             min(max(value, range.lowerBound), range.upperBound)
         }
+
+        /// NaN compares false against everything, so `min(max(…))` returns it
+        /// unchanged — an out-of-range value walking straight past the clamp
+        /// and into a control. `defaults write … -string nan` is enough.
+        func sanitised(_ value: Value) -> Value where Value == Double {
+            value.isFinite ? clamped(value) : `default`
+        }
     }
 }
 
@@ -211,7 +248,7 @@ extension AppPreferences.Preference where Value == Int {
         }
         nonmutating set {
             UserDefaults.standard.set(clamped(newValue), forKey: key)
-            NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+            AppPreferences.announce(key)
         }
     }
 }
@@ -220,11 +257,11 @@ extension AppPreferences.Preference where Value == Double {
     var value: Double {
         get {
             guard UserDefaults.standard.object(forKey: key) != nil else { return `default` }
-            return clamped(UserDefaults.standard.double(forKey: key))
+            return sanitised(UserDefaults.standard.double(forKey: key))
         }
         nonmutating set {
             UserDefaults.standard.set(clamped(newValue), forKey: key)
-            NotificationCenter.default.post(name: AppPreferences.didChange, object: nil)
+            AppPreferences.announce(key)
         }
     }
 }
@@ -237,6 +274,11 @@ extension AppPreferences.Preference where Value == Double {
 /// with; there is no way to ask a view for them before it exists.
 @MainActor
 enum PracticeWindowMetrics {
+    /// The margin either side of the passage. Declared here and *used* by the
+    /// views: this number and the line spacing below were written out again in
+    /// `PracticeViewController`'s constraints and in `TypingView`'s paragraph
+    /// style, so changing the window's sizing arithmetic without changing both
+    /// copies would have made the window a size the text did not fit.
     static let horizontalInset: CGFloat = 32
     static let lineSpacing: CGFloat = 8
 

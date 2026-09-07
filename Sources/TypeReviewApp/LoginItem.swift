@@ -19,6 +19,13 @@ import ServiceManagement
 enum LoginItem {
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
 
+    /// Whether the user has asked for this, whether or not macOS has finished
+    /// agreeing. `.requiresApproval` is a registration in flight, not an off
+    /// state — a switch that shows it as off cannot be used to cancel it.
+    static var isRequested: Bool {
+        status == .enabled || status == .requiresApproval
+    }
+
     /// The system's own word for where registration stands. Worth surfacing
     /// rather than reducing to a bool: `.requiresApproval` is not `.enabled`
     /// and not a failure either — it means macOS took the request and is
@@ -30,10 +37,25 @@ enum LoginItem {
     /// refused registration, and a switch that silently slid back would be
     /// the worst version of that.
     static func setEnabled(_ enabled: Bool) throws {
-        if enabled {
-            try SMAppService.mainApp.register()
-        } else {
+        guard enabled else {
+            // Unregistering something that was never registered is not a
+            // failure worth reporting to anyone. A registration still awaiting
+            // approval *is* unregistered, which is how the switch cancels it.
+            guard status != .notRegistered, status != .notFound else { return }
             try SMAppService.mainApp.unregister()
+            return
+        }
+        switch status {
+        case .enabled:
+            return
+        case .requiresApproval:
+            // Already registered and waiting on the user. Calling `register()`
+            // again throws — and the caller would replace the "approve this in
+            // System Settings" note with that error, which is the one message
+            // that would have told them what to do.
+            return
+        default:
+            try SMAppService.mainApp.register()
         }
     }
 

@@ -65,9 +65,14 @@ public func fitsAlphabet(_ entry: CorpusEntry, _ filter: Set<String>) -> Bool {
 /// How well an entry's length matches what was asked for, 0...1.
 ///
 /// A triangular kernel peaking at an exact match, falling to zero at half and
-/// triple the wanted length. Entries outside that band score zero and are
-/// effectively skipped — a two-line quote is a poor answer to a request for a
-/// five-minute passage, and vice versa.
+/// triple the wanted length. A two-line quote is a poor answer to a request
+/// for a five-minute passage, and vice versa.
+///
+/// Zero here does not mean "skipped". `pickWeightedByLength` floors every
+/// weight at 0.01, so an entry outside the band stays reachable — and the
+/// golden vectors depend on it: they select a 101-character entry against a
+/// request for 400, which scores zero and is chosen anyway. The floor is the
+/// contract, not a safety net.
 public func lengthScore(entryLength: Int, wantedChars: Double) -> Double {
     guard wantedChars > 0 else { return 0 }
     let ratio = Double(entryLength) / wantedChars
@@ -123,11 +128,24 @@ public struct StaticCorpusSource: CorpusSource, Sendable {
     }
 
     public func pick(_ context: CorpusContext, rng: inout Mulberry32) -> CorpusEntry? {
-        let candidates = context.filter.map { filter in
-            entries.filter { fitsAlphabet($0, filter) }
-        } ?? entries
-        return pickWeightedByLength(candidates, wantedChars: context.wantedChars, rng: &rng)
+        pickFromCorpus(entries, context, rng: &rng)
     }
+}
+
+/// Filter by alphabet, then weight by length — the whole of what "pick an
+/// entry" means, in one place.
+///
+/// Written twice before, here and in `UserCorpusSource.pick`. Both the
+/// candidate *order* and the number of RNG draws are pinned by the golden
+/// vectors, so two copies were two chances to shift every later passage in a
+/// session by editing one of them.
+public func pickFromCorpus(
+    _ entries: [CorpusEntry], _ context: CorpusContext, rng: inout Mulberry32
+) -> CorpusEntry? {
+    let candidates = context.filter.map { filter in
+        entries.filter { fitsAlphabet($0, filter) }
+    } ?? entries
+    return pickWeightedByLength(candidates, wantedChars: context.wantedChars, rng: &rng)
 }
 
 public struct RawStaticEntry: Decodable {
@@ -175,12 +193,29 @@ public enum BundledCorpus {
         let entries: [RawStaticEntry]
     }
 
+    /// What went wrong while loading the bundled corpus, if anything.
+    ///
+    /// An empty corpus and a corpus that failed to load look identical to the
+    /// picker — both simply never answer, and the session quietly serves
+    /// generated words instead. Even an explicitly chosen channel does. The
+    /// reason is recorded here so `--selftest` and the diagnose path can say
+    /// *which* resource is missing rather than reporting an empty list.
+    public private(set) nonisolated(unsafe) static var loadFailures: [String] = []
+
     public static let quotes: StaticCorpusSource = {
-        guard let url = resourceBundle.url(forResource: "Resources/quotes", withExtension: "json"),
-            let data = try? Data(contentsOf: url),
-            let file = try? JSONDecoder().decode(QuotesFile.self, from: data)
-        else { return StaticCorpusSource(raw: [], kind: .quote) }
-        return StaticCorpusSource(raw: file.entries, kind: .quote)
+        guard let url = resourceBundle.url(forResource: "Resources/quotes", withExtension: "json")
+        else {
+            loadFailures.append("Resources/quotes.json: not in the bundle")
+            return StaticCorpusSource(raw: [], kind: .quote)
+        }
+        do {
+            let data = try Data(contentsOf: url)
+            let file = try JSONDecoder().decode(QuotesFile.self, from: data)
+            return StaticCorpusSource(raw: file.entries, kind: .quote)
+        } catch {
+            loadFailures.append("Resources/quotes.json: \(error)")
+            return StaticCorpusSource(raw: [], kind: .quote)
+        }
     }()
 
     /// Code keeps its indentation, so `preserveLayout` is on: collapsing the
@@ -190,11 +225,19 @@ public enum BundledCorpus {
         guard let directory = resourceBundle.url(forResource: "Resources/code", withExtension: nil),
             let files = try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: nil)
-        else { return StaticCorpusSource(raw: [], kind: .code, preserveLayout: true) }
+        else {
+            loadFailures.append("Resources/code: not in the bundle")
+            return StaticCorpusSource(raw: [], kind: .code, preserveLayout: true)
+        }
         let raw = files.filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
             .compactMap { url -> RawStaticEntry? in
-                guard let data = try? Data(contentsOf: url) else { return nil }
-                return try? JSONDecoder().decode(RawStaticEntry.self, from: data)
+                do {
+                    return try JSONDecoder().decode(
+                        RawStaticEntry.self, from: try Data(contentsOf: url))
+                } catch {
+                    loadFailures.append("\(url.lastPathComponent): \(error)")
+                    return nil
+                }
             }
         return StaticCorpusSource(raw: raw, kind: .code, preserveLayout: true)
     }()
@@ -252,12 +295,47 @@ public struct CorpusAdapter {
         }
     }
 
-    /// ~5.5 characters per word — five letters and a space, the English
-    /// average the whole app sizes passages with.
-    private func wantedChars(_ wordCount: Int) -> Double { Double(wordCount) * 5.5 }
+    /// How long a passage to look for.
+    ///
+    /// `passageLength` overrides the word count when it is set to anything
+    /// other than `any` — short is about a tweet, medium a paragraph, long
+    /// several. `any` keeps the historical behaviour: ~5.5 characters per
+    /// word, five letters and a space, the English average the whole app
+    /// sizes passages with.
+    ///
+    /// The setting reached `Session`, which passed it to the source closure,
+    /// which threw it away — so Short, Medium and Long were three labels for
+    /// one behaviour. The numbers are the reference implementation's.
+    private func wantedChars(_ wordCount: Int, _ passageLength: PassageLength) -> Double {
+        switch passageLength {
+        case .short: return 150
+        case .medium: return 400
+        case .long: return 800
+        case .any: return Double(wordCount) * 5.5
+        }
+    }
+
+    /// The first source that answers, turned into a passage.
+    ///
+    /// The observer is told only once `makePassage` has succeeded. It used to
+    /// fire first, so an entry the passage builder then rejected — an empty
+    /// `UserPassage` is publicly constructible — left the screen crediting a
+    /// source the session had refused.
+    private func firstPassage(
+        matching context: CorpusContext, rng: inout Mulberry32
+    ) throws -> Passage? {
+        for source in sources() {
+            guard let entry = source.pick(context, rng: &rng) else { continue }
+            let passage = try makePassage(id: entry.id, text: entry.text)
+            onEntryPicked?(entry)
+            return passage
+        }
+        return nil
+    }
 
     public func adaptiveSource(
-        filter: Filter, wordCount: Int, rng: inout Mulberry32
+        filter: Filter, wordCount: Int, passageLength: PassageLength = .any,
+        rng: inout Mulberry32
     ) throws -> Passage {
         // An explicitly chosen channel ignores the alphabet filter. Otherwise
         // a user in the early curriculum who picks "Code" or "Library" gets
@@ -266,13 +344,8 @@ public struct CorpusAdapter {
         // answers. Honouring the request beats honouring the curriculum.
         let context = CorpusContext(
             filter: channel == .auto ? Set(filter.allowed) : nil,
-            wantedChars: wantedChars(wordCount))
-        for source in sources() {
-            if let entry = source.pick(context, rng: &rng) {
-                onEntryPicked?(entry)
-                return try makePassage(id: entry.id, text: entry.text)
-            }
-        }
+            wantedChars: wantedChars(wordCount, passageLength))
+        if let passage = try firstPassage(matching: context, rng: &rng) { return passage }
         onEntryPicked?(nil)
         return try generatePseudoWords(
             filter: filter, options: PseudoWordOptions(wordCount: wordCount), rng: &rng)
@@ -288,13 +361,9 @@ public struct CorpusAdapter {
         let useGenerator =
             settings.includeNumbers || settings.includePunctuation || settings.testMode == .time
         if !useGenerator {
-            let context = CorpusContext(wantedChars: wantedChars(wordCount))
-            for source in sources() {
-                if let entry = source.pick(context, rng: &rng) {
-                    onEntryPicked?(entry)
-                    return try makePassage(id: entry.id, text: entry.text)
-                }
-            }
+            let context = CorpusContext(
+                wantedChars: wantedChars(wordCount, settings.passageLength))
+            if let passage = try firstPassage(matching: context, rng: &rng) { return passage }
         }
         onEntryPicked?(nil)
         return try generatePlainWords(

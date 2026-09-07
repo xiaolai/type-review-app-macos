@@ -1,8 +1,11 @@
 import AppKit
 import TypeReviewKit
 
-/// The statistics window: totals, streaks, a per-key table and the slowest
-/// pairs.
+/// The statistics window: totals, streaks and a per-key table.
+///
+/// Not the slowest *pairs*, which this used to claim. `slowestBigrams` exists
+/// in the engine and the results screen shows them after a run; this window
+/// has never had a place for them.
 ///
 /// Everything here comes from the ported aggregations, so the numbers are the
 /// website's numbers — including the day-level ones, which are computed in
@@ -12,15 +15,28 @@ final class StatsViewController: NSViewController {
     private let streakLabel = NSTextField(labelWithString: "")
     private let table = NSTableView()
     private var rows: [(key: String, stat: PerKeyStat)] = []
-    private var results: [RunResult] = []
+    /// Where to re-read the history from.
+    ///
+    /// A closure rather than the snapshot this used to keep — which was stored
+    /// and never read, and could not have helped anyway: the window showed the
+    /// totals as they were when it opened and never moved again, so finishing
+    /// a run with Statistics on screen left it quietly stale.
+    var history: () -> [RunResult] = { [] }
+    private var runObserver: NSObjectProtocol?
 
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
-
         summary.font = NSFont.monospacedDigitSystemFont(ofSize: 15, weight: .medium)
         streakLabel.font = Theme.statFont
         streakLabel.textColor = Theme.secondaryText
+        configureTable()
+        install(header: makeHeader(), scroll: makeScrollView(), in: root)
+        view = root
+    }
 
+    /// Columns and row style. Split out of `loadView`, which was doing this
+    /// alongside header construction, scrolling and constraints.
+    private func configureTable() {
         table.usesAlternatingRowBackgroundColors = true
         table.rowSizeStyle = .default
         table.headerView = NSTableHeaderView()
@@ -40,18 +56,26 @@ final class StatsViewController: NSViewController {
         }
         table.dataSource = self
         table.delegate = self
+    }
 
+    private func makeScrollView() -> NSScrollView {
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.translatesAutoresizingMaskIntoConstraints = false
+        return scroll
+    }
 
+    private func makeHeader() -> NSStackView {
         let header = NSStackView(views: [summary, streakLabel])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
         header.translatesAutoresizingMaskIntoConstraints = false
+        return header
+    }
 
+    private func install(header: NSStackView, scroll: NSScrollView, in root: NSView) {
         root.addSubview(header)
         root.addSubview(scroll)
         NSLayoutConstraint.activate([
@@ -63,11 +87,29 @@ final class StatsViewController: NSViewController {
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
         ])
-        view = root
+    }
+
+    /// Re-reads and redisplays. Called when the window opens and whenever a
+    /// run finishes while it is open.
+    func refresh() { present(results: history()) }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard runObserver == nil else { return }
+        runObserver = NotificationCenter.default.addObserver(
+            forName: PracticeViewController.runCompleted, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
+    }
+
+    override func viewDidDisappear() {
+        super.viewDidDisappear()
+        if let runObserver { NotificationCenter.default.removeObserver(runObserver) }
+        runObserver = nil
     }
 
     func present(results: [RunResult]) {
-        self.results = results
         guard !results.isEmpty else {
             summary.stringValue = "No runs yet."
             streakLabel.stringValue = ""

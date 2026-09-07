@@ -209,13 +209,12 @@ public enum KeyCode {
     public static let space: UInt16 = 49
 }
 
-/// The sound category for a physical key, or nil for keys that stay silent.
+/// Which voice a physical key uses.
 ///
-/// Backspace shares the `esc` voice deliberately, as it does on the website:
-/// a mechanical typewriter has no backspace, so there is no historically
-/// honest sound to borrow, and `esc` is the shortest and crispest voice in
-/// every pack — it reads as a small corrective tick rather than a keystroke.
-public func soundCategory(forKeyCode code: UInt16) -> SoundCategory? {
+/// Total: every key produces a sound. This returned an optional and its
+/// documentation described keys that make none, which was never true of any
+/// branch — so the caller carried an unreachable nil case.
+public func soundCategory(forKeyCode code: UInt16) -> SoundCategory {
     switch code {
     case KeyCode.tab: return .tab
     case KeyCode.return, KeyCode.keypadEnter: return .enter
@@ -244,52 +243,111 @@ public enum SynthRenderer {
     /// Linear attack to `peak`, then exponential decay toward `decayFloor` —
     /// the shape `linearRampToValueAtTime` followed by
     /// `exponentialRampToValueAtTime` produces.
+    ///
+    /// The floor is absolute, not relative. `exponentialRampToValueAtTime`
+    /// ramps *to the value given*, so the curve is
+    /// `peak * (floor/peak)^progress` and ends at 0.0001 whatever the peak
+    /// was. Writing `peak * floor^progress` ended a 0.4-peak voice at
+    /// 0.00004 — every built-in voice decaying further than the reference,
+    /// which is audible as a shorter, drier click.
     public static func envelope(
         frame: Int, frames: Int, peak: Double, attackSeconds: Double, sampleRate: Double
     ) -> Double {
-        guard frames > 0, frame >= 0 else { return 0 }
+        guard frames > 0, frame >= 0, peak > 0 else { return 0 }
         let attackFrames = max(1, Int(attackSeconds * sampleRate))
         if frame < attackFrames {
             return peak * (Double(frame) / Double(attackFrames))
         }
         let progress = Double(frame - attackFrames) / Double(max(1, frames - attackFrames))
-        return peak * pow(decayFloor, min(1, progress))
+        return peak * pow(decayFloor / peak, min(1, progress))
     }
 
-    /// One-pole lowpass. At a 35 ms burst and these cutoffs it is
-    /// indistinguishable from the biquad the site uses, and it has no
-    /// stability corner to worry about.
-    public static func lowpass(_ input: [Double], cutoff: Double, sampleRate: Double) -> [Double] {
-        let dt = 1 / sampleRate
-        let rc = 1 / (2 * Double.pi * max(1, cutoff))
-        let alpha = dt / (rc + dt)
-        var out = [Double](repeating: 0, count: input.count)
-        var previous = 0.0
-        for i in input.indices {
-            previous += alpha * (input[i] - previous)
-            out[i] = previous
+    /// A biquad, the shape Web Audio actually uses.
+    ///
+    /// Both filters here were approximations before: a one-pole for the
+    /// lowpass, which discards `q` entirely, and a Chamberlin state-variable
+    /// bandpass, whose two-integrator loop is only conditionally stable — a
+    /// 20 kHz centre at 44.1 kHz reached infinity in 589 frames, and the
+    /// built-in frequencies blow up at an 8 kHz rate. The RBJ forms below are
+    /// stable for every cutoff below Nyquist and are what the reference
+    /// implementation's `BiquadFilterNode` computes.
+    struct Biquad {
+        let b0, b1, b2, a1, a2: Double
+
+        func apply(_ input: [Double]) -> [Double] {
+            var out = [Double](repeating: 0, count: input.count)
+            var x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0
+            for i in input.indices {
+                let x0 = input[i]
+                let y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+                x2 = x1
+                x1 = x0
+                y2 = y1
+                y1 = y0
+                out[i] = y0
+            }
+            return out
         }
-        return out
+
+        /// Normalised angular frequency, clamped just below Nyquist so the
+        /// coefficients stay finite for any requested cutoff.
+        static func omega(_ frequency: Double, _ sampleRate: Double) -> Double {
+            let nyquist = sampleRate / 2
+            let clamped = min(max(1, frequency), nyquist * 0.999)
+            return 2 * Double.pi * clamped / sampleRate
+        }
+
+        /// Web Audio's lowpass takes `Q` in **decibels**, not as a plain
+        /// quality factor — the one detail that would otherwise make a
+        /// faithful-looking port sound wrong.
+        static func lowpass(cutoff: Double, qDecibels: Double, sampleRate: Double) -> Biquad {
+            let w0 = omega(cutoff, sampleRate)
+            let cosW = cos(w0)
+            let alpha = sin(w0) / (2 * pow(10, qDecibels / 20))
+            let a0 = 1 + alpha
+            return Biquad(
+                b0: (1 - cosW) / 2 / a0, b1: (1 - cosW) / a0, b2: (1 - cosW) / 2 / a0,
+                a1: -2 * cosW / a0, a2: (1 - alpha) / a0)
+        }
+
+        /// Bandpass with unity peak gain, where `q` *is* the quality factor.
+        static func bandpass(centre: Double, q: Double, sampleRate: Double) -> Biquad {
+            let w0 = omega(centre, sampleRate)
+            let alpha = sin(w0) / (2 * max(0.0001, q))
+            let a0 = 1 + alpha
+            return Biquad(
+                b0: alpha / a0, b1: 0, b2: -alpha / a0,
+                a1: -2 * cos(w0) / a0, a2: (1 - alpha) / a0)
+        }
     }
 
-    /// State-variable bandpass — the Chamberlin topology. `f` is clamped
-    /// below the point where the two-integrator loop goes unstable, which is
-    /// why a 3.5 kHz centre at 44.1 kHz stays well behaved.
+    public static func lowpass(
+        _ input: [Double], cutoff: Double, q: Double = 1, sampleRate: Double
+    ) -> [Double] {
+        guard sampleRate > 0 else { return input }
+        return Biquad.lowpass(cutoff: cutoff, qDecibels: q, sampleRate: sampleRate).apply(input)
+    }
+
     public static func bandpass(
         _ input: [Double], centre: Double, q: Double, sampleRate: Double
     ) -> [Double] {
-        let f = 2 * sin(Double.pi * min(max(1, centre), sampleRate / 2.2) / sampleRate)
-        let damping = 1 / max(0.5, q)
-        var low = 0.0
-        var band = 0.0
-        var out = [Double](repeating: 0, count: input.count)
-        for i in input.indices {
-            let high = input[i] - low - damping * band
-            band += f * high
-            low += f * band
-            out[i] = band
-        }
-        return out
+        guard sampleRate > 0 else { return input }
+        return Biquad.bandpass(centre: centre, q: q, sampleRate: sampleRate).apply(input)
+    }
+
+    /// How many frames a component of `durationMs` occupies, or nil when that
+    /// is not a number of frames anything can allocate.
+    ///
+    /// Every public input reached `Int(…)` unchecked before this. A negative
+    /// oscillator duration alongside a positive noise one produced a negative
+    /// upper bound and crashed on `0..<count`; a non-finite or enormous
+    /// duration trapped in the conversion itself.
+    static func frameCount(durationMs: Double, sampleRate: Double) -> Int? {
+        guard durationMs.isFinite, durationMs >= 0, sampleRate.isFinite, sampleRate > 0
+        else { return nil }
+        let frames = (durationMs / 1000) * sampleRate
+        guard frames.isFinite, frames >= 0, frames < 1e8 else { return nil }
+        return Int(frames)
     }
 
     /// The whole voice as mono samples. `noise` supplies the white-noise
@@ -299,43 +357,57 @@ public enum SynthRenderer {
         _ voice: SynthVoice, sampleRate: Double, noise: (Int) -> [Double]
     ) -> [Double] {
         guard !voice.isSilent else { return [] }
-        let longest = max(voice.noise?.durationMs ?? 0, voice.oscillator?.durationMs ?? 0)
-        let frames = Int((longest / 1000) * sampleRate)
+        let noiseFrames = voice.noise.flatMap {
+            frameCount(durationMs: $0.durationMs, sampleRate: sampleRate)
+        } ?? 0
+        let oscFrames = voice.oscillator.flatMap {
+            frameCount(durationMs: $0.durationMs, sampleRate: sampleRate)
+        } ?? 0
+        let frames = max(noiseFrames, oscFrames)
         guard frames > 0 else { return [] }
         var mix = [Double](repeating: 0, count: frames)
-
-        if let config = voice.noise {
-            let count = min(frames, Int((config.durationMs / 1000) * sampleRate))
-            if count > 0 {
-                let source = noise(count)
-                let filtered: [Double]
-                switch config.filter {
-                case .lowpass:
-                    filtered = lowpass(source, cutoff: config.frequency, sampleRate: sampleRate)
-                case .bandpass:
-                    filtered = bandpass(
-                        source, centre: config.frequency, q: config.q, sampleRate: sampleRate)
-                }
-                for i in 0..<count {
-                    mix[i] += filtered[i]
-                        * envelope(
-                            frame: i, frames: count, peak: config.peak, attackSeconds: 0.001,
-                            sampleRate: sampleRate)
-                }
-            }
+        if let config = voice.noise, noiseFrames > 0 {
+            mixNoise(config, into: &mix, frames: noiseFrames, sampleRate: sampleRate, noise: noise)
         }
-
-        if let config = voice.oscillator {
-            let count = min(frames, Int((config.durationMs / 1000) * sampleRate))
-            let step = 2 * Double.pi * config.frequency / sampleRate
-            for i in 0..<count {
-                mix[i] += sin(step * Double(i))
-                    * envelope(
-                        frame: i, frames: count, peak: config.peak, attackSeconds: 0.002,
-                        sampleRate: sampleRate)
-            }
+        if let config = voice.oscillator, oscFrames > 0 {
+            mixOscillator(config, into: &mix, frames: oscFrames, sampleRate: sampleRate)
         }
         return mix
+    }
+
+    private static func mixNoise(
+        _ config: NoiseVoice, into mix: inout [Double], frames: Int, sampleRate: Double,
+        noise: (Int) -> [Double]
+    ) {
+        let source = noise(frames)
+        // The closure is injected, so its contract is checked rather than
+        // trusted: a short array used to be an unchecked subscript crash.
+        guard source.count >= frames else { return }
+        let filtered: [Double] =
+            switch config.filter {
+            case .lowpass:
+                lowpass(source, cutoff: config.frequency, q: config.q, sampleRate: sampleRate)
+            case .bandpass:
+                bandpass(source, centre: config.frequency, q: config.q, sampleRate: sampleRate)
+            }
+        for i in 0..<frames {
+            mix[i] += filtered[i]
+                * envelope(
+                    frame: i, frames: frames, peak: config.peak, attackSeconds: 0.001,
+                    sampleRate: sampleRate)
+        }
+    }
+
+    private static func mixOscillator(
+        _ config: OscillatorVoice, into mix: inout [Double], frames: Int, sampleRate: Double
+    ) {
+        let step = 2 * Double.pi * config.frequency / sampleRate
+        for i in 0..<frames {
+            mix[i] += sin(step * Double(i))
+                * envelope(
+                    frame: i, frames: frames, peak: config.peak, attackSeconds: 0.002,
+                    sampleRate: sampleRate)
+        }
     }
 
     /// White noise in -1...1.
@@ -359,4 +431,49 @@ public func nextSoundPack(current: KeySoundPack, remembered: KeySoundPack?) -> K
     guard current == .off else { return .off }
     guard let remembered, remembered != .off else { return .mechvibe }
     return remembered
+}
+
+/// Sample-array arithmetic for the recorded pack.
+///
+/// Here rather than in the app because it is the part worth testing: finding
+/// strike onsets in a recording and shaping a slice's edges are ordinary
+/// numeric problems, and neither needs an audio device. The app keeps the
+/// AVFoundation buffer handling and hands these plain arrays.
+public enum SampleSlicing {
+    /// The start of each strike in a recording.
+    ///
+    /// A sample crossing `threshold` marks a strike, and everything within
+    /// `minGapSeconds` of it belongs to the same one — a single key press has
+    /// a rattle after it, not a second press. `preRollSeconds` backs the mark
+    /// up slightly so the slice starts before the attack rather than on it.
+    public static func onsets(
+        in samples: [Float], sampleRate: Double, threshold: Float = 0.3,
+        minGapSeconds: Double = 0.100, preRollSeconds: Double = 0.002
+    ) -> [Int] {
+        guard sampleRate > 0, !samples.isEmpty else { return [] }
+        let minGap = max(1, Int(minGapSeconds * sampleRate))
+        let preRoll = max(0, Int(preRollSeconds * sampleRate))
+        var found: [Int] = []
+        var last = -minGap
+        for index in samples.indices where abs(samples[index]) >= threshold && index - last >= minGap
+        {
+            found.append(max(0, index - preRoll))
+            last = index
+        }
+        return found
+    }
+
+    /// The gain for one frame of a slice, 0...1.
+    ///
+    /// Linear fades at both ends. The last frame is exactly zero: an envelope
+    /// measured from `frames - index` never reaches it, so a slice ended one
+    /// step of gain above silence and clicked.
+    public static func gain(atFrame index: Int, frames: Int, fadeIn: Int, fadeOut: Int) -> Float {
+        guard frames > 0, index >= 0, index < frames else { return 0 }
+        var gain: Float = 1
+        if fadeIn > 0, index < fadeIn { gain *= Float(index) / Float(fadeIn) }
+        let fromEnd = frames - 1 - index
+        if fadeOut > 0, fromEnd < fadeOut { gain *= Float(fromEnd) / Float(fadeOut) }
+        return gain
+    }
 }

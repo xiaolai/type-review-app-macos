@@ -5,9 +5,9 @@ import TypeReviewKit
 /// alternative under strict concurrency is annotating them one at a time and
 /// still having the compiler object to closures that capture `self`.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    private var window: NSWindow?
-    private var practice: PracticeViewController?
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var window: NSWindow?
+    var practice: PracticeViewController?
     // Built in applicationDidFinishLaunching, for the same reason the stats
     // controller is: a main-actor default value cannot be initialised from
     // AppDelegate's nonisolated init.
@@ -18,19 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var stats: StatsViewController?
     private var settings: SettingsWindowController?
     private var libraryWindow: LibraryWindowController?
-    private var keyboardMenuItem: NSMenuItem?
+    var keyboardMenuItem: NSMenuItem?
     private var preferencesObserver: NSObjectProtocol?
-    private var statusItem: NSStatusItem?
-    private var statusKeyboardItem: NSMenuItem?
-    private var sourceMenuItems: [NSMenuItem] = []
-    private var toolbarController: MainToolbarController?
+    private var windowCloseObserver: NSObjectProtocol?
+    var statusItem: NSStatusItem?
+    var statusKeyboardItem: NSMenuItem?
+    var sourceMenuItems: [NSMenuItem] = []
+    var toolbarController: MainToolbarController?
     /// Every Sound submenu built — the menu bar's and the status item's. Both
     /// carry the same checkmarks, so both have to be told when the pack
     /// changes, including when it changes from the global shortcut while
     /// neither menu is open.
-    private var soundMenus: [NSMenu] = []
-    /// The "Sound in Every App" item in each of them.
-    private var globalSoundMenuItems: [NSMenuItem] = []
+    var soundMenus: [NSMenu] = []
     private var soundHotKey: GlobalHotKey?
 
     /// The one keystroke player, at app scope rather than inside the practice
@@ -45,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private lazy var globalSound = GlobalKeySound { [weak self] code in
         self?.playKey(code)
     }
+    /// The passage shape the window was last sized to, so an unrelated
+    /// preference change does not resize it. See `applyWindowSize`.
+    private struct ShapePreference: Equatable { let columns: Int; let rows: Int }
+    private var appliedShape: ShapePreference?
     /// Input Monitoring as of the last time the app was frontmost, so a grant
     /// made while it was in the background can be noticed on the way back.
     private var soundWasPermitted = false
@@ -100,7 +103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // font-derived window sizing in `PracticeWindowMetrics` is untouched.
         window.titlebarSeparatorStyle = .none
         window.titlebarAppearsTransparent = true
-        window.delegate = self
         // Or closing the window deallocates it, and reopening from the menu
         // bar reaches a window that is no longer there. The default is true
         // for a programmatically created window.
@@ -145,21 +147,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         preferencesObserver = NotificationCenter.default.addObserver(
             forName: AppPreferences.didChange, object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
+            let changed = note.userInfo?[AppPreferences.changedKey] as? String
             MainActor.assumeIsolated {
                 guard let self, let window = self.window else { return }
-                self.applyWindowSize(to: window)
+                // Only what the change touches. Every preference used to
+                // arrive as the same anonymous notification, so adjusting the
+                // volume resized the window and re-registered the global hot
+                // key — and a window the user had just dragged snapped back.
+                if changed == nil || changed == AppPreferences.columns.key
+                    || changed == AppPreferences.rows.key
+                {
+                    self.applyWindowSize(to: window)
+                }
                 self.drawer?.reframe()
                 // Sound is an app preference too, and it rides the same
                 // notification — so a pack or volume changed in Settings is
                 // live on the next keystroke rather than at the next launch.
+                // `applySoundPreferences` marks the menus itself, and
+                // `registerSoundShortcut` marks them again after registering —
+                // so the explicit call that used to sit here was the third
+                // mark for one notification.
                 self.applySoundPreferences()
                 self.practice?.applyTypingPreferences()
-                self.markSoundMenus()
-                self.registerSoundShortcut()
+                if changed == nil || changed == AppPreferences.soundShortcut.keyCodeKey {
+                    self.registerSoundShortcut()
+                }
             }
         }
 
+        observeWindowClosing()
         registerSoundShortcut()
         // Pack, volume and — the new part — scope. This is what starts the
         // system-wide monitor when the setting says so, and what decides
@@ -168,76 +185,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         applySoundPreferences()
         soundWasPermitted = GlobalKeySound.isPermitted
 
-        if CommandLine.arguments.contains("--soundcheck") { runSoundCheck() }
-        if CommandLine.arguments.contains("--selftest") { runSelfTest() }
-    }
-
-    /// The menu-bar item.
-    ///
-    /// `keyboard.badge.eye` as a template image, so macOS inverts it for a
-    /// dark menu bar and dims it when the bar is inactive — the two things a
-    /// hand-tinted image gets wrong. The same mark as the app icon, because
-    /// there is no reason for an app to have two faces; the badge is the point
-    /// either way, saying this icon leads somewhere rather than being a status
-    /// light.
-    ///
-    /// The menu is the app's own verbs, not a second copy of the main menu:
-    /// what someone reaches for when TYPE is not the front app.
-    private func installStatusItem() {
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        // Sized explicitly. Left at its default the symbol draws 19 by 11
-        // points of ink, which is the shortest thing in the menu bar — its
-        // neighbours run 12 to 15.5 tall — because `keyboard.badge.eye` is a
-        // wide, short mark and the default configuration sizes by cap
-        // height. `.large` at 13 points brings the ink to roughly 24 by 14,
-        // matching the taller neighbours and a hair wider than the widest.
-        let image = Theme.symbol(
-            "keyboard.badge.eye", size: Theme.SymbolSize.menuBar, scale: .large,
-            description: "TYPE")
-        image?.isTemplate = true
-        item.button?.image = image
-        item.button?.toolTip = "TYPE"
-
-        let menu = NSMenu()
-        let show = menu.addItem(
-            withTitle: "Open TYPE", action: #selector(showMainWindow(_:)), keyEquivalent: "")
-        show.target = self
-        menu.addItem(.separator())
-        let keyboard = menu.addItem(
-            withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "")
-        keyboard.target = self
-        statusKeyboardItem = keyboard
-        let newText = menu.addItem(
-            withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "")
-        newText.target = self
-        // A submenu, because the packs are a list and a list of four does not
-        // belong inline in a menu this short. The toggle sits at its top with
-        // the shortcut printed beside it, which is also how someone discovers
-        // the shortcut exists.
-        let soundItem = menu.addItem(withTitle: "Sound", action: nil, keyEquivalent: "")
-        soundItem.submenu = makeSoundMenu()
-        menu.addItem(.separator())
-        for (title, action) in [
-            ("Library", #selector(showLibrary(_:))),
-            ("Statistics", #selector(showStats(_:))),
-            ("Settings…", #selector(showSettings(_:))),
-        ] {
-            let entry = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
-            entry.target = self
+        // One at a time. Both scheduled together, the sound check exits at
+        // ~0.2s and the self-test does not start until 0.5s — so asking for
+        // both reported the sound check's success and silently never ran the
+        // self-test at all. A diagnostic that skips without saying so is worse
+        // than one that refuses.
+        let soundcheck = CommandLine.arguments.contains("--soundcheck")
+        let selftest = CommandLine.arguments.contains("--selftest")
+        if soundcheck, selftest {
+            print("error: --soundcheck and --selftest cannot be combined — run them separately")
+            exit(2)
         }
-        menu.addItem(.separator())
-        menu.addItem(
-            withTitle: "Quit TYPE", action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "")
-        item.menu = menu
-        statusItem = item
+        if soundcheck { Diagnostics.runSoundCheck() }
+        if selftest { Diagnostics.runSelfTest(practice: practice) }
     }
 
-    /// Two menus offer the keyboard toggle, so both carry the checkmark.
-    private func markKeyboardMenus(_ visible: Bool) {
-        keyboardMenuItem?.state = visible ? .on : .off
-        statusKeyboardItem?.state = visible ? .on : .off
-    }
+
 
     /// Closes every window and leaves TYPE running in the menu bar.
     ///
@@ -245,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// it is `isReleasedWhenClosed = false` either way, but ordering out keeps
     /// its delegate and frame intact so coming back is the same window rather
     /// than a new one that has forgotten where it was.
-    @objc private func hideToMenuBar(_ sender: Any?) {
+    @objc func hideToMenuBar(_ sender: Any?) {
         for window in NSApp.windows where window.isVisible && window.canBecomeMain {
             window.orderOut(nil)
         }
@@ -263,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(.accessory)
     }
 
-    @objc private func showMainWindow(_ sender: Any?) {
+    @objc func showMainWindow(_ sender: Any?) {
         // Back to a normal app first. Ordering a window front while the policy
         // is still `.accessory` gives a window with no menu bar and no Dock
         // tile, which looks like the app half-launched.
@@ -289,11 +252,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// theirs to keep. The minimum stops the passage being squeezed narrower
     /// than it can usefully wrap.
     private func applyWindowSize(to window: NSWindow) {
-        let size = PracticeWindowMetrics.contentSize(
+        let shape = ShapePreference(
             columns: AppPreferences.columns.value, rows: AppPreferences.rows.value)
-        window.minSize = NSSize(
-            width: PracticeWindowMetrics.contentSize(columns: 30, rows: 4).width,
-            height: PracticeWindowMetrics.contentSize(columns: 30, rows: 4).height + 28)
+        // Every app preference rides one notification, so this ran for a
+        // volume drag and a sound toggle as well — and each one snapped a
+        // window the user had resized by hand back to the computed size.
+        // Nothing about the window changed unless these two numbers did.
+        guard shape != appliedShape else { return }
+        appliedShape = shape
+        let size = PracticeWindowMetrics.contentSize(columns: shape.columns, rows: shape.rows)
+        // `contentMinSize`, not `minSize`. The old line set a *frame* minimum
+        // from a *content* measurement and made up the difference with a
+        // hardcoded 28 points of chrome — which is not what a unified toolbar
+        // is, and was never rechecked against one. Letting AppKit account for
+        // its own title bar is both shorter and right at any toolbar height.
+        window.contentMinSize = PracticeWindowMetrics.contentSize(columns: 30, rows: 4)
         window.setContentSize(size)
     }
 
@@ -314,13 +287,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Auxiliary windows do not count — the drawer is borderless and cannot
     /// become main, which is exactly the test for "a window the user thinks
     /// of as a window".
-    func windowWillClose(_ notification: Notification) {
-        let closing = notification.object as? NSWindow
-        DispatchQueue.main.async { [weak self] in
-            let remaining = NSApp.windows.contains {
-                $0 !== closing && $0.isVisible && $0.canBecomeMain
+    /// Registered for *every* window, not just the practice one.
+    ///
+    /// This used to be the `NSWindowDelegate` method, which only ever fired
+    /// for the one window whose delegate is this object. Library, Settings and
+    /// Statistics each have their own controller as delegate, so closing the
+    /// practice window and then the last of those left the app running with no
+    /// window and still claiming to be a regular app — a Dock tile with
+    /// nothing behind it.
+    private func observeWindowClosing() {
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { notification in
+            let closing = notification.object as? NSWindow
+            MainActor.assumeIsolated {
+                // On the next pass of the runloop, because this fires *before*
+                // the window goes away and counting here would always find at
+                // least one. Auxiliary windows do not count — the drawer is
+                // borderless and cannot become main, which is exactly the test
+                // for "a window the user thinks of as a window".
+                DispatchQueue.main.async { [weak self] in
+                    let remaining = NSApp.windows.contains {
+                        $0 !== closing && $0.isVisible && $0.canBecomeMain
+                    }
+                    if !remaining { self?.retreatToMenuBar() }
+                }
             }
-            if !remaining { self?.retreatToMenuBar() }
         }
     }
 
@@ -332,104 +324,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
-    /// Every key equivalent carries Command.
-    ///
-    /// In the web-view version this rule was load-bearing because WKWebView
-    /// hands keys to the page first. Here the reason is different but the rule
-    /// is the same: the typing view consumes bare keys as *typing*, so a
-    /// bare-letter shortcut would either be swallowed mid-drill or steal a
-    /// character from the passage.
-    private func makeMenu() -> NSMenu {
-        let root = NSMenu()
 
-        let appItem = NSMenuItem()
-        let appMenu = NSMenu()
-        appMenu.addItem(
-            withTitle: "About TYPE",
-            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        appMenu.addItem(.separator())
-        let settingsItem = appMenu.addItem(
-            withTitle: "Settings…", action: #selector(showSettings(_:)), keyEquivalent: ",")
-        settingsItem.target = self
-        appMenu.addItem(.separator())
-        appMenu.addItem(
-            withTitle: "Hide TYPE", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        // Not "Quit", and not `terminate`. TYPE lives in the menu bar, so ⌘Q
-        // puts it away rather than ending it — and the item says so, because
-        // a "Quit" that does not quit is worse than no item at all. The one
-        // place the app really ends is the status item's own Quit, which is
-        // where someone goes when they mean it.
-        let putAway = appMenu.addItem(
-            withTitle: "Close to Menu Bar", action: #selector(hideToMenuBar(_:)),
-            keyEquivalent: "q")
-        putAway.target = self
-        appItem.submenu = appMenu
-        root.addItem(appItem)
-
-        let viewItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
-        let statsItem = viewMenu.addItem(
-            withTitle: "Statistics", action: #selector(showStats(_:)), keyEquivalent: "2")
-        statsItem.target = self
-        let libraryItem = viewMenu.addItem(
-            withTitle: "Library", action: #selector(showLibrary(_:)), keyEquivalent: "3")
-        libraryItem.target = self
-        let keyboardItem = viewMenu.addItem(
-            withTitle: "Show Keyboard", action: #selector(toggleKeyboard(_:)), keyEquivalent: "k")
-        keyboardItem.target = self
-        keyboardMenuItem = keyboardItem
-
-        viewMenu.addItem(.separator())
-        let sourceItem = NSMenuItem(title: "Source", action: nil, keyEquivalent: "")
-        let sourceMenu = NSMenu(title: "Source")
-        for (index, channel) in CorpusChannel.allCases.enumerated() {
-            let item = sourceMenu.addItem(
-                withTitle: channel.label, action: #selector(chooseSource(_:)),
-                keyEquivalent: String(index + 4))
-            item.target = self
-            item.representedObject = channel.rawValue
-        }
-        sourceItem.submenu = sourceMenu
-        viewMenu.addItem(sourceItem)
-        sourceMenuItems = sourceMenu.items
-
-        let soundItem = NSMenuItem(title: "Sound", action: nil, keyEquivalent: "")
-        soundItem.submenu = makeSoundMenu()
-        viewMenu.addItem(soundItem)
-        viewItem.submenu = viewMenu
-        root.addItem(viewItem)
-
-        let practiceItem = NSMenuItem()
-        let practiceMenu = NSMenu(title: "Practice")
-        let newText = practiceMenu.addItem(
-            withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "n")
-        newText.target = self
-        practiceItem.submenu = practiceMenu
-        root.addItem(practiceItem)
-
-        let windowItem = NSMenuItem()
-        let windowMenu = NSMenu(title: "Window")
-        // Close was missing, which is why ⌘W did nothing at all. `performClose`
-        // rather than a custom action, so it closes whichever window is in
-        // front — Settings and Library should close like windows, not put the
-        // whole app away.
-        windowMenu.addItem(
-            withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        windowMenu.addItem(
-            withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
-            keyEquivalent: "m")
-        windowItem.submenu = windowMenu
-        root.addItem(windowItem)
-        NSApp.windowsMenu = windowMenu
-
-        return root
-    }
-
-    @objc private func newText(_ sender: Any?) {
+    @objc func newText(_ sender: Any?) {
         practice?.startFreshRun()
     }
 
-    @objc private func chooseSource(_ sender: NSMenuItem) {
+    @objc func chooseSource(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
             let channel = CorpusChannel(rawValue: raw)
         else { return }
@@ -437,18 +337,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         markSourceMenu()
     }
 
-    /// A checkmark on the active source, so the menu says which corpus the
-    /// text is coming from rather than only offering to change it.
-    private func markSourceMenu() {
-        let active = practice?.channel.rawValue
-        for item in sourceMenuItems {
-            item.state = (item.representedObject as? String) == active ? .on : .off
-        }
-        // The toolbar's source menu carries the same checkmark, so it has to be
-        // told too — otherwise changing the source from the menu bar leaves the
-        // toolbar claiming the old one.
-        toolbarController?.refresh()
-    }
 
     /// Claims the configured combination system-wide, replacing whatever was
     /// claimed before.
@@ -457,6 +345,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// shortcut edited in Settings is live immediately — the old registration
     /// has to be released first or the previous combination keeps working
     /// alongside the new one.
+    /// Stands the global hot key down while the shortcut recorder is armed.
+    ///
+    /// `RegisterEventHotKey` claims its combination system-wide and dispatches
+    /// below the Cocoa event stream, so the recorder's local monitor never
+    /// sees it. Re-recording the shortcut you already have fired the sound
+    /// toggle instead of being captured.
+    private func setSoundShortcutSuspended(_ suspended: Bool) {
+        if suspended {
+            soundHotKey?.unregister()
+            soundHotKey = nil
+        } else {
+            registerSoundShortcut()
+        }
+    }
+
     private func registerSoundShortcut() {
         soundHotKey?.unregister()
         soundHotKey = nil
@@ -478,79 +381,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         markSoundMenus()
     }
 
-    /// The Sound submenu, built fresh for each menu that wants one.
-    ///
-    /// One builder rather than two hand-kept copies: the menu bar and the
-    /// status item offer exactly the same choices, and the last thing this
-    /// should grow is two lists that drift.
-    ///
-    /// The packs sit under the toggle rather than replacing it. Turning sound
-    /// off and picking a pack are different intentions — the toggle is the one
-    /// with a shortcut because it is the one wanted in a hurry, when someone
-    /// walks into the room.
-    private func makeSoundMenu() -> NSMenu {
-        let menu = NSMenu(title: "Sound")
-        // Not "Sound" — the submenu is already called that, and "Sound ▸
-        // Sound" reads like a mistake. A verb phrase with a checkmark, the
-        // same shape as "Show Keyboard" two items up.
-        let toggle = menu.addItem(
-            withTitle: "Play Sounds", action: #selector(toggleSound(_:)), keyEquivalent: "")
-        toggle.target = self
-        // Directly under it, because it answers the next question someone
-        // asks about the first: sound, yes — but where? This is the item that
-        // matters most from the status bar, since the case for system-wide
-        // sound is precisely the one where TYPE has no window open.
-        let everywhere = menu.addItem(
-            withTitle: "Sound in Every App", action: #selector(toggleGlobalSound(_:)),
-            keyEquivalent: "")
-        everywhere.target = self
-        globalSoundMenuItems.append(everywhere)
-        menu.addItem(.separator())
-        for pack in KeySoundPack.all {
-            let item = menu.addItem(
-                withTitle: pack.label, action: #selector(chooseSoundPack(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = pack.name
-        }
-        soundMenus.append(menu)
-        markSoundMenus()
-        return menu
-    }
 
-    /// A checkmark on the active pack, and on the toggle when sound is on.
-    /// Called from everywhere the pack can change — the menus, the Settings
-    /// window, and the global shortcut — so the two menus never disagree with
-    /// each other or with what is actually audible.
-    private func markSoundMenus() {
-        let active = AppPreferences.soundPack.value
-        let shortcut = AppPreferences.soundShortcut.value
-        for menu in soundMenus {
-            for item in menu.items {
-                if let name = item.representedObject as? String {
-                    item.state = name == active.name ? .on : .off
-                } else if item.action == #selector(toggleGlobalSound(_:)) {
-                    let on = AppPreferences.globalSound.value
-                    item.state = on ? .on : .off
-                    // On, but muted by the system, is a state the user cannot
-                    // otherwise see from here — the monitor is installed and
-                    // never called. Say so where the switch is.
-                    item.title = on && !GlobalKeySound.isPermitted
-                        ? "Sound in Every App (Needs Permission)" : "Sound in Every App"
-                } else if item.action == #selector(toggleSound(_:)) {
-                    item.state = AppPreferences.soundIsOn ? .on : .off
-                    // The menu advertises whatever is actually registered, so
-                    // it cannot end up printing a combination that no longer
-                    // does anything. Cleared means no shortcut shown.
-                    item.keyEquivalent = shortcut.map { $0.keyName.lowercased() } ?? ""
-                    item.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
-                }
-            }
-        }
-    }
 
     /// Toggling is what the global shortcut does, so it has to work with no
     /// window on screen and TYPE in the background.
-    @objc private func toggleSound(_ sender: Any?) {
+    @objc func toggleSound(_ sender: Any?) {
         AppPreferences.toggleSound()
         markSoundMenus()
         // Switching sound *on* silently would leave the user unsure it
@@ -560,7 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if AppPreferences.soundIsOn { previewSound() }
     }
 
-    @objc private func chooseSoundPack(_ sender: NSMenuItem) {
+    @objc func chooseSoundPack(_ sender: NSMenuItem) {
         guard let name = sender.representedObject as? String,
             let pack = KeySoundPack.named(name)
         else { return }
@@ -579,9 +414,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// showing its warning either way.
     func applicationDidBecomeActive(_ notification: Notification) {
         let permitted = GlobalKeySound.isPermitted
-        defer { soundWasPermitted = permitted }
-        guard permitted, !soundWasPermitted, AppPreferences.globalSound.value else { return }
-        globalSound.reinstall()
+        guard permitted != soundWasPermitted else { return }
+        soundWasPermitted = permitted
+        // Both directions relabel the menu. Only one of them reinstalls: a
+        // grant needs new monitors, a revocation needs the menu to stop
+        // claiming the setting is doing something. Guarding both behind the
+        // grant left "Sound in Every App" without its warning until some
+        // unrelated preference happened to change.
+        if permitted, AppPreferences.globalSound.value { globalSound.reinstall() }
         markSoundMenus()
     }
 
@@ -593,8 +433,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// place that decides what a key sounds like and no way for the two to
     /// drift apart.
     private func playKey(_ code: UInt16) {
-        guard let category = soundCategory(forKeyCode: code) else { return }
-        sounds.play(category: category, pan: KeyPan.pan(forKeyCode: code))
+        // Every key has a category — the optional this used to unwrap could
+        // not be nil, so the branch that handled it was unreachable.
+        sounds.play(
+            category: soundCategory(forKeyCode: code), pan: KeyPan.pan(forKeyCode: code))
     }
 
     /// Applies pack, volume and scope together.
@@ -629,7 +471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// nothing is worse than one that refuses. macOS only ever shows its own
     /// prompt once per process lifetime of the answer, so the Settings window
     /// carries the second door for everyone past that.
-    @objc private func toggleGlobalSound(_ sender: Any?) {
+    @objc func toggleGlobalSound(_ sender: Any?) {
         let wanted = !AppPreferences.globalSound.value
         if wanted, !GlobalKeySound.isPermitted { GlobalKeySound.requestPermission() }
         AppPreferences.globalSound.value = wanted
@@ -638,7 +480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if wanted, AppPreferences.soundIsOn { previewSound() }
     }
 
-    @objc private func toggleKeyboard(_ sender: Any?) {
+    @objc func toggleKeyboard(_ sender: Any?) {
         guard let drawer else { return }
         let visible = !drawer.isOpen
         drawer.setOpen(visible, animated: true)
@@ -648,35 +490,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The Library gets its own window for the same reason Statistics does:
     /// managing documents alongside the practice screen beats replacing it.
-    @objc private func showLibrary(_ sender: Any?) {
+    @objc func showLibrary(_ sender: Any?) {
         guard let practice else { return }
         let controller = libraryWindow ?? LibraryWindowController(store: practice.library)
         libraryWindow = controller
         controller.present()
     }
 
-    @objc private func showSettings(_ sender: Any?) {
+    @objc func showSettings(_ sender: Any?) {
         let controller = settings ?? SettingsWindowController()
         settings = controller
         controller.read = { [weak self] in self?.practice?.currentSettings ?? .default }
         controller.write = { [weak self] next in self?.practice?.applySettings(next) ?? false }
         controller.previewSound = { [weak self] in self?.previewSound() }
+        controller.suspendHotKey = { [weak self] suspended in
+            self?.setSoundShortcutSuspended(suspended)
+        }
         controller.present()
     }
 
     /// Statistics get their own window rather than a route. A separate window
     /// is the Mac answer to "show me this alongside" — it can sit next to the
     /// practice window instead of replacing it.
-    @objc private func showStats(_ sender: Any?) {
+    @objc func showStats(_ sender: Any?) {
         let controller = stats ?? StatsViewController()
         stats = controller
-        controller.present(results: practice?.history ?? [])
+        controller.history = { [weak self] in self?.practice?.history ?? [] }
+        controller.refresh()
         if statsWindow == nil {
             let window = NSWindow(contentViewController: controller)
             window.title = "Statistics"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.setContentSize(NSSize(width: 560, height: 480))
             window.setFrameAutosaveName("TypeReviewStats")
+            // Or closing Statistics deallocates the window while `statsWindow`
+            // still points at it, and reopening from the menu reaches freed
+            // memory. The default is true for a programmatically created
+            // window; the practice window sets this and this one was missed.
+            window.isReleasedWhenClosed = false
             // The same two lines the Settings and Library windows carry, and
             // for the same reasons: without `.auxiliary` this displaces the
             // practice window in Stage Manager, and `.automatic` tabbing lets
@@ -686,293 +537,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.tabbingMode = .disallowed
             window.titlebarSeparatorStyle = .none
             window.titlebarAppearsTransparent = true
-            window.center()
+            // Only when there is nothing to restore. `setFrameAutosaveName`
+            // reloads the saved frame, and centring unconditionally threw it
+            // away — so a window the user had moved came back centred on
+            // every launch, and the position was never remembered at all.
+            if !window.setFrameUsingName("TypeReviewStats") { window.center() }
             statsWindow = window
         }
         statsWindow?.makeKeyAndOrderFront(nil)
+        // Like Library and Settings. Ordering forward without activating
+        // leaves the window on screen but not focused when it is opened from
+        // the status menu while another app is in front.
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Proves every pack can actually produce sound in the built app.
-    ///
-    /// The unit tests cover the synthesis arithmetic, and they would pass just
-    /// as happily if `typewriter.m4a` never made it into the bundle — the
-    /// sample pack would simply go quiet, which looks exactly like a pack the
-    /// user has not selected. This runs against the real app: real bundle,
-    /// real decode, real slicing.
-    private func runSoundCheck() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            let player = KeySoundPlayer()
-            var failures: [String] = []
-            for pack in KeySoundPack.all {
-                player.setPack(pack)
-                player.setVolume(1)
-                if case .silent = pack.kind {
-                    if player.renderedPeak(for: .standard) != nil {
-                        failures.append("\(pack.name): the off pack produced audio")
-                    }
-                    continue
-                }
-                for category in SoundCategory.allCases {
-                    guard let peak = player.renderedPeak(for: category) else {
-                        failures.append("\(pack.name)/\(category.rawValue): no buffer")
-                        continue
-                    }
-                    guard peak > 0.001 else {
-                        failures.append(
-                            "\(pack.name)/\(category.rawValue): silent (peak \(peak))")
-                        continue
-                    }
-                    print("SOUNDCHECK \(pack.name)/\(category.rawValue) peak \(peak)")
-                }
-            }
-            if failures.isEmpty {
-                print("SOUNDCHECK OK: every pack produces audio")
-                exit(0)
-            }
-            for failure in failures { print("SOUNDCHECK FAIL: \(failure)") }
-            exit(1)
-        }
-    }
-
-    /// Drives a full run through the real UI and reports what reached disk.
-    ///
-    /// The same discipline the web-view shell used, for the same reason: unit
-    /// tests cover the engine exhaustively, and none of them can tell whether
-    /// the app is wired to it.
-    private func runSelfTest() {
-        guard let practice else { exit(1) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            let store = try? ProfileFileStore.standard()
-            let before: Int
-            if let store, case .ok(let profile) = store.load() {
-                before = profile.results.count
-            } else {
-                before = 0
-            }
-
-            // A missing resource bundle looks exactly like an empty corpus to
-            // the picker, so assert the data is actually there rather than
-            // letting the app quietly serve generated words forever.
-            guard BundledCorpus.quotes.entries.count > 100,
-                !BundledCorpus.code.entries.isEmpty
-            else {
-                print(
-                    "SELFTEST FAIL: corpus not bundled — "
-                        + "\(BundledCorpus.quotes.entries.count) quotes, "
-                        + "\(BundledCorpus.code.entries.count) code entries")
-                exit(1)
-            }
-            // The case must sit the same distance from the caps on all four
-            // sides. This was wrong until it was measured: the inter-key gap
-            // was being applied after the last key too, so the right and
-            // bottom margins were a gap wider than the left and top.
-            let keyboardLayout = KeyboardView().layout(forWidth: 900, height: 220)
-            let capsRect = keyboardLayout.keys.dropFirst().reduce(keyboardLayout.keys[0].rect) {
-                $0.union($1.rect)
-            }
-            let margins = [
-                capsRect.minX - keyboardLayout.caseRect.minX,
-                keyboardLayout.caseRect.maxX - capsRect.maxX,
-                capsRect.minY - keyboardLayout.caseRect.minY,
-                keyboardLayout.caseRect.maxY - capsRect.maxY,
-            ]
-            guard let tightest = margins.min(), let widest = margins.max(),
-                widest - tightest < 0.5, tightest > 0
-            else {
-                print("SELFTEST FAIL: keyboard margins are \(margins) — expected four equal")
-                exit(1)
-            }
-
-            // No key on any keyboard shape may be narrower than a key can be.
-            //
-            // Row totals are `unitsPerRow` by construction — the last key
-            // absorbs the slack — so checking the total proves nothing. What
-            // can go wrong is a row whose fixed keys leave the absorber too
-            // little, or nothing, or less than nothing. That is what a ragged
-            // or overflowing keyboard actually is, and nothing else reports
-            // it: the view just draws it.
-            for shape in [SystemKeyboard.Shape.ansi, .iso, .jis] {
-                for (index, row) in KeyboardGeometry.rows(for: shape).enumerated() {
-                    guard let narrowest = row.map(\.width).min(), narrowest >= 0.75 else {
-                        print(
-                            "SELFTEST FAIL: \(shape) row \(index) has a "
-                                + "\(row.map(\.width).min() ?? 0)u key — the row does not fit")
-                        exit(1)
-                    }
-                }
-            }
-
-            // Legends must come from a keyboard, not from an input method.
-            //
-            // With a CJK input method active, the *current* layout is the
-            // input method's own, and asking it what a key produces answers
-            // with `……` above 6 and `¥` above 4 — what that method types, not
-            // what is printed on the key. The ASCII-capable layout is the
-            // keyboard underneath. This check is worth little on a machine
-            // that only ever runs a US layout, where both answers agree; it
-            // bites on one where an input method is active, which is where the
-            // bug appeared.
-            guard SystemKeyboard.legendSourceIsASCIICapable else {
-                print(
-                    "SELFTEST FAIL: keycap legends are being read from "
-                        + "\(SystemKeyboard.layoutName), which is not an ASCII-capable layout")
-                exit(1)
-            }
-
-            // The status bar of live numbers must actually reach the screen.
-            //
-            // It did not, for the whole life of this app: laid out correctly,
-            // in the hierarchy, not hidden, with the right text and colour —
-            // and painted over, because the typing view filled its dirty rect
-            // rather than its bounds and AppKit does not clip a view's drawing
-            // to its own bounds. Every property that can be asserted from the
-            // view tree was true while the pixels were blank, so the only
-            // check that can catch it is a look at the pixels.
-            //
-            // The search walks the whole tree rather than one fixed level of
-            // stack views. It used to assume the label was a direct child of a
-            // stack that was a direct child of the root, which stopped being
-            // true the moment the numbers moved into a status bar and gained a
-            // nesting level — and the failure would have been this check
-            // quietly not finding its subject.
-            @MainActor func textFields(in view: NSView) -> [NSTextField] {
-                view.subviews.flatMap { child -> [NSTextField] in
-                    (child as? NSTextField).map { [$0] } ?? textFields(in: child)
-                }
-            }
-            let allLabels = textFields(in: practice.view)
-            guard let wpmLabel = allLabels.first(where: { $0.stringValue.hasSuffix("wpm") }) else {
-                print("SELFTEST FAIL: no wpm label in the status bar")
-                exit(1)
-            }
-            let root = practice.view
-            guard let bitmap = root.bitmapImageRepForCachingDisplay(in: root.bounds) else {
-                print("SELFTEST FAIL: could not render the practice view")
-                exit(1)
-            }
-            root.cacheDisplay(in: root.bounds, to: bitmap)
-            let labelRect = wpmLabel.convert(wpmLabel.bounds, to: root)
-            let scale = CGFloat(bitmap.pixelsWide) / max(root.bounds.width, 1)
-            // Raw bytes rather than `colorAt(x:y:)`, which raises on bitmap
-            // formats it does not recognise — including the one AppKit hands
-            // back for a cached display.
-            guard let bytes = bitmap.bitmapData, bitmap.samplesPerPixel >= 3 else {
-                print("SELFTEST FAIL: rendered bitmap has no readable pixels")
-                exit(1)
-            }
-            let rowBytes = bitmap.bytesPerRow
-            let step = bitmap.samplesPerPixel
-            // The bitmap counts rows from the top; the view does not.
-            let top = Int((root.bounds.height - labelRect.maxY) * scale)
-            let background = Theme.background.usingColorSpace(.deviceRGB)?.brightnessComponent ?? 1
-            let firstRow = max(0, top)
-            let lastRow = min(bitmap.pixelsHigh, top + Int(labelRect.height * scale))
-            let firstColumn = max(0, Int(labelRect.minX * scale))
-            let lastColumn = min(bitmap.pixelsWide, Int(labelRect.maxX * scale))
-            let rows: Range<Int> = firstRow..<max(firstRow, lastRow)
-            let columns: Range<Int> = firstColumn..<max(firstColumn, lastColumn)
-            var inked = 0
-            for y in rows {
-                for x in columns {
-                    let offset = y * rowBytes + x * step
-                    let brightness =
-                        (CGFloat(bytes[offset]) + CGFloat(bytes[offset + 1])
-                            + CGFloat(bytes[offset + 2])) / (3 * 255)
-                    if abs(brightness - background) > 0.15 { inked += 1 }
-                }
-            }
-            guard inked > 20 else {
-                print(
-                    "SELFTEST FAIL: the header reads \"\(wpmLabel.stringValue)\" but only "
-                        + "\(inked) of its pixels differ from the background — it is covered")
-                exit(1)
-            }
-
-            // The library round-trip, through the real file store: add,
-            // reload from disk, confirm the corpus serves it, delete. The unit
-            // tests cover the parser and the picker; only this can tell
-            // whether the app is wired to them.
-            let library = practice.library
-            let libraryBefore = library.passages.count
-            do {
-                try library.add(title: "selftest", text: "the quick brown fox jumps over it")
-            } catch {
-                print("SELFTEST FAIL: library add: \(error)")
-                exit(1)
-            }
-            let reread = LibraryStore(directory: library.directory)
-            guard reread.passages.count == libraryBefore + 1,
-                let added = reread.passages.last,
-                added.title == "selftest"
-            else {
-                print("SELFTEST FAIL: library did not survive a reload from \(library.fileURL.path)")
-                exit(1)
-            }
-            var libraryRNG = Mulberry32(seed: 1)
-            let served = try? CorpusAdapter(channel: .user, library: reread.passages)
-                .adaptiveSource(
-                    filter: Filter(allowed: ["e", "t", "a"], focus: nil), wordCount: 7,
-                    rng: &libraryRNG)
-            guard served?.text == added.text else {
-                print("SELFTEST FAIL: Library channel served \(served?.text ?? "nothing")")
-                exit(1)
-            }
-            do { try library.delete(id: added.id) } catch {
-                print("SELFTEST FAIL: library delete: \(error)")
-                exit(1)
-            }
-
-            guard let view = practice.view.subviews.compactMap({ $0 as? TypingView }).first else {
-                print("SELFTEST FAIL: no typing surface")
-                exit(1)
-            }
-            // A human cadence. Without it the run lands at hundreds of
-            // thousands of wpm, which the profile validator rightly refuses —
-            // the metric bounds exist to catch exactly that shape of nonsense.
-            var syntheticClock: Double = 0
-            practice.clock = {
-                syntheticClock += 120
-                return syntheticClock
-            }
-            // Through the same entry point AppKit uses for committed text, so
-            // the input path is the one being tested rather than bypassed.
-            let expected = practice.currentPassage
-            guard !expected.isEmpty else {
-                print("SELFTEST FAIL: no passage")
-                exit(1)
-            }
-            for unit in Array(expected.utf16) {
-                view.insertText(String(utf16CodeUnits: [unit], count: 1), replacementRange: NSRange())
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                guard let store else {
-                    print("SELFTEST FAIL: no store")
-                    exit(1)
-                }
-                let reloaded = store.load()
-                guard case .ok(let profile) = reloaded else {
-                    print(
-                        "SELFTEST FAIL: profile reloaded as \(reloaded.statusName) from \(store.fileURL.path)"
-                            + " — in-memory runs: \(practice.runCount)")
-                    exit(1)
-                }
-                guard profile.results.count == before + 1 else {
-                    print(
-                        "SELFTEST FAIL: expected \(before + 1) runs on disk, found \(profile.results.count)")
-                    exit(1)
-                }
-                let metrics = profile.results.last!.metrics
-                print(
-                    "SELFTEST OK: typed \(expected.utf16.count) chars — "
-                        + "\(Int(metrics.netWpm)) wpm, \(Int(metrics.accuracy))% accuracy, "
-                        + "\(profile.results.count) run(s) on disk")
-                exit(0)
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
-            print("SELFTEST FAIL: timed out")
-            exit(2)
-        }
-    }
 }

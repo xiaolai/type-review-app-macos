@@ -15,8 +15,18 @@ import Carbon.HIToolbox
 /// need no special-casing — they are layouts, and the layout is what we asked
 /// for.
 enum SystemKeyboard {
-    enum Shape {
+    enum Shape: Hashable {
         case ansi, iso, jis
+        /// Shape sets, for the geometry table. They live here rather than in
+        /// `KeyboardGeometry` because that file used to declare a second,
+        /// identical `Shape` and convert between the two case by case.
+        static let all: Set<Shape> = [.ansi, .iso, .jis]
+        static let isoOnly: Set<Shape> = [.iso]
+        static let jisOnly: Set<Shape> = [.jis]
+        static let notISO: Set<Shape> = [.ansi, .jis]
+        static let ansiOnly: Set<Shape> = [.ansi]
+        /// The two shapes whose return key is tall and L-shaped.
+        static let tallReturn: Set<Shape> = [.iso, .jis]
     }
 
     /// The physical shape of the attached keyboard.

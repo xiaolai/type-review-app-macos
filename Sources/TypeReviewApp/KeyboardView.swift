@@ -24,6 +24,7 @@ final class KeyboardView: NSView {
     private var lockedLetters: Set<String> = []
     /// The one letter this lesson drills hardest.
     private var focusLetter: String?
+    private var layoutObserver: NSObjectProtocol?
     /// Milliseconds per character at the user's target speed. The heat scale
     /// is anchored to this rather than to their own slowest key: a relative
     /// scale paints the whole keyboard warm as soon as timings cluster, and
@@ -48,6 +49,23 @@ final class KeyboardView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
+
+    /// Every legend comes from the *current* keyboard layout, read at draw
+    /// time — so switching to Dvorak in System Settings has to force a redraw.
+    /// Without this the old legends stayed on screen until something else
+    /// happened to invalidate the view, which for an idle window is never.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let layoutObserver { NotificationCenter.default.removeObserver(layoutObserver) }
+        layoutObserver = nil
+        guard window != nil else { return }
+        layoutObserver = NotificationCenter.default.addObserver(
+            forName: NSTextInputContext.keyboardSelectionDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.needsDisplay = true }
+        }
+    }
 
     func update(
         stats: OrderedMap<PerKeyStat>, plan: LessonPlan?, expected: String?, targetWpm: Double
@@ -149,7 +167,11 @@ final class KeyboardView: NSView {
         let keys: [(key: KeyboardGeometry.Key, rect: NSRect, corner: Corner?)]
     }
 
-    func layout(forWidth width: CGFloat, height: CGFloat = .greatestFiniteMagnitude) -> Layout {
+    /// `.infinity` means "no height constraint", and it has to be infinity
+    /// rather than `.greatestFiniteMagnitude`: the latter *is* finite, so the
+    /// `isFinite` test below accepted it and centred the case at half of
+    /// 1.8e308. Only the height-taking callers hid it.
+    func layout(forWidth width: CGFloat, height: CGFloat = .infinity) -> Layout {
         let rows = KeyboardGeometry.rows(for: SystemKeyboard.shape)
         let unit = unitWidth(for: width, height: height)
         let padding = casePadding(unit)
@@ -293,11 +315,17 @@ final class KeyboardView: NSView {
         face.fill()
 
         // The character this physical key types under the *current* layout.
+        // Both of what this key can type. `!` lives on the `1` key and `A` on
+        // `a`; matching only the unshifted output meant an expected `!` never
+        // lit a key, and every capital letter's statistics were dropped on the
+        // floor instead of counting towards the key that produces it.
         let character = key.types ? SystemKeyboard.character(forKeyCode: key.code) : nil
-        if let tint = heat(for: key, character: character), !isPressed {
+        let shifted = key.types ? SystemKeyboard.character(forKeyCode: key.code, shift: true) : nil
+        let produced = [character, shifted].compactMap { $0 }
+        if let tint = heat(for: key, produced: produced), !isPressed {
             glaze(face, tint.color, strength: tint.strength)
         }
-        if let expected, let character, character == expected, !isPressed {
+        if let expected, produced.contains(where: { $0.lowercased() == expected }), !isPressed {
             // The drilling target. Laid over the heat rather than replacing it
             // — a ring or a border would say "next" while hiding "how is this
             // key going", and both are worth knowing at once.
@@ -354,12 +382,28 @@ final class KeyboardView: NSView {
         }
     }
 
-    private func drawLabels(
-        _ key: KeyboardGeometry.Key, character: String?, in rect: NSRect, unit: CGFloat,
-        locked: Bool = false
-    ) {
+    /// One line of legend on a cap.
+    ///
+    /// A caption sits nearer the cap edge than a glyph does, which is both how
+    /// Apple prints it and the three points that decide whether the word
+    /// "control" fits a one-unit key at all.
+    private struct Line {
+        let text: String
+        let font: NSFont
+        let color: NSColor
+        let inset: CGFloat
+    }
+
+    /// What a cap should say, before anything is measured or placed.
+    ///
+    /// Split out of `drawLabels`, which resolved the text, chose the colours,
+    /// asked the system for the shifted glyph, measured, filtered and drew —
+    /// six jobs in one function, and the reason its length was flagged.
+    private func labelLines(
+        _ key: KeyboardGeometry.Key, character: String?, unit: CGFloat, locked: Bool
+    ) -> (lines: [Line], shifted: String?, glyphInset: CGFloat) {
         let label = key.label ?? character?.uppercased() ?? ""
-        guard !label.isEmpty, label != " " else { return }
+        guard !label.isEmpty, label != " " else { return ([], nil, 0) }
         let stat = character.flatMap { stats[$0] }
         var color: NSColor =
             switch key.role {
@@ -385,16 +429,6 @@ final class KeyboardView: NSView {
         }
 
         let labelFont = NSFont.systemFont(ofSize: max(6, unit * Self.labelScale(for: key)))
-
-        /// A caption sits nearer the cap edge than a glyph does, which is both
-        /// how Apple prints it and the three points that decide whether the
-        /// word "control" fits a one-unit key at all.
-        struct Line {
-            let text: String
-            let font: NSFont
-            let color: NSColor
-            let inset: CGFloat
-        }
         let glyphInset = max(2, unit * 0.12)
         var lines: [Line] = []
         if let shiftedText {
@@ -411,6 +445,24 @@ final class KeyboardView: NSView {
                     text: sub, font: NSFont.systemFont(ofSize: max(5, unit * 0.15)),
                     color: Theme.secondaryText.withAlphaComponent(0.55), inset: 2))
         }
+        return (lines, shiftedText, glyphInset)
+    }
+
+    private func drawLabels(
+        _ key: KeyboardGeometry.Key, character: String?, in rect: NSRect, unit: CGFloat,
+        locked: Bool = false
+    ) {
+        let (lines, shiftedText, glyphInset) = labelLines(
+            key, character: character, unit: unit, locked: locked)
+        guard !lines.isEmpty else { return }
+
+        // Measured once, then carried. Every line was measured here to decide
+        // whether it fitted and measured again below to place it — the same
+        // text-layout call twice per line, on every redraw.
+        let spacing = unit * 0.04
+        var measured = lines.map { line in
+            (line: line, size: (line.text as NSString).size(withAttributes: [.font: line.font]))
+        }
 
         // Drop any line that does not fit its cap rather than clipping it.
         // Font sizes have a legibility floor, so below a certain cap size the
@@ -419,24 +471,38 @@ final class KeyboardView: NSView {
         // per line, so it adapts to the label, the font and the drawer height
         // instead of guessing a cap size to switch at. The primary label is
         // never dropped: a key with no label at all is worse than a tight one.
-        let primary = lines.count == 1 ? 0 : (shiftedText == nil ? 0 : 1)
-        lines = lines.enumerated().filter { index, line in
-            index == primary
-                || (line.text as NSString).size(withAttributes: [.font: line.font]).width
-                    <= rect.width - 2 * line.inset
+        let primary = measured.count == 1 ? 0 : (shiftedText == nil ? 0 : 1)
+        measured = measured.enumerated().filter { index, entry in
+            index == primary || entry.size.width <= rect.width - 2 * entry.line.inset
         }.map(\.element)
 
-        let spacing = unit * 0.04
-        let sizes = lines.map { line in
-            (line.text as NSString).size(withAttributes: [.font: line.font])
+        // Height as well as width. A cap at the smallest supported size is 14
+        // points of face and the `!` over `1` stack is 15.8 — so both legends
+        // were drawn, over the edge of the key and onto its neighbour. Trimmed
+        // from the ends inward, keeping the primary label, because that is the
+        // one the key is for.
+        func stackHeight() -> CGFloat {
+            measured.reduce(0) { $0 + $1.size.height }
+                + spacing * CGFloat(max(0, measured.count - 1))
         }
-        let total = sizes.reduce(0) { $0 + $1.height } + spacing * CGFloat(lines.count - 1)
+        // One inset, not two. The stack is placed against the *bottom* inset
+        // on a bottom-aligned key and centred otherwise, so reserving the
+        // inset at both ends was a margin the layout never uses — and it
+        // trimmed the shifted glyph off every digit and punctuation cap at
+        // ordinary sizes, which is a regression, not a fix.
+        let available = rect.height - (key.vertical == .bottom ? glyphInset : 0)
+        while measured.count > 1, stackHeight() > available {
+            let dropLast = measured.count - 1 != primary
+            measured.remove(at: dropLast ? measured.count - 1 : 0)
+        }
+
+        let total = stackHeight()
         // The view is flipped, so maxY is the visual bottom of the cap.
         var lineY =
             key.vertical == .bottom
             ? rect.maxY - glyphInset - total
             : rect.midY - total / 2
-        for (line, size) in zip(lines, sizes) {
+        for (line, size) in measured {
             let lineX: CGFloat =
                 switch key.align {
                 case .start: rect.minX + line.inset
@@ -515,16 +581,41 @@ final class KeyboardView: NSView {
     /// not a chart: it has to be readable at a glance and invisible when you
     /// are looking at the passage instead.
     private func heat(
-        for key: KeyboardGeometry.Key, character: String?
+        for key: KeyboardGeometry.Key, produced: [String]
     ) -> (color: NSColor, strength: CGFloat)? {
-        guard key.types, let character, let stat = stats[character], stat.hits >= 5
-        else { return nil }
-        if stat.errorRate > 0.05 {
-            return (Theme.incorrect, min(0.30, 0.08 + CGFloat(stat.errorRate)))
+        // Every character this key can type, combined rather than just the
+        // unshifted one. Not a `PerKeyStat`: its memberwise initialiser is
+        // internal to the engine, and the three numbers are all that is
+        // needed here.
+        let found = produced.compactMap { stats[$0] }
+        guard key.types, !found.isEmpty else { return nil }
+        let hits = found.reduce(0) { $0 + $1.hits }
+        guard hits >= 5 else { return nil }
+        let attempts = found.reduce(0) { $0 + $1.hits + $1.misses }
+        let errorRate = attempts > 0
+            ? found.reduce(0.0) { $0 + $1.errorRate * Double($1.hits + $1.misses) }
+                / Double(attempts)
+            : 0
+        // Hit-weighted, so a key typed mostly unshifted is coloured mostly by
+        // that. Untimed entries contribute no weight rather than a zero.
+        let timed = found.filter { $0.avgMs > 0 }
+        let timedHits = timed.reduce(0) { $0 + $1.hits }
+        let avgMs = timedHits > 0
+            ? timed.reduce(0.0) { $0 + $1.avgMs * Double($1.hits) } / Double(timedHits)
+            : 0
+
+        if errorRate > 0.05 {
+            return (Theme.incorrect, min(0.30, 0.08 + CGFloat(errorRate)))
         }
+        // No timing, no speed colour. `avgMs` is zero when every attempt at a
+        // key was excluded from timing — the first keystroke of a run, or one
+        // after a correction — and `max(avgMs, 1)` turned that into a claimed
+        // one millisecond per press, the strongest "fast" tint in the scale,
+        // for a key there is no speed evidence about at all.
+        guard avgMs > 0 else { return nil }
         // Confidence, the same ratio the planner uses to decide mastery: at or
         // above 1 the key is at target and stays cool; below it warms.
-        let confidence = targetMs / max(stat.avgMs, 1)
+        let confidence = targetMs / avgMs
         if confidence >= 1 {
             return (.systemTeal, min(0.18, 0.07 + CGFloat(confidence - 1) * 0.11))
         }

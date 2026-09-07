@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import TypeReviewKit
 
 /// Plays a click per keystroke.
@@ -40,8 +40,60 @@ final class KeySoundPlayer {
     /// For the sample pack: the whole recording, plus the onsets found in it.
     private var sample: AVAudioPCMBuffer?
     private var onsets: [Int] = []
+    /// Why the recording could not be loaded, if it could not. Also stops the
+    /// load being retried on every keystroke.
+    private(set) var loadFailure: String?
+    private var isLoadingSample = false
 
-    private static let format = AVAudioFormat(
+    /// Resamples a decoded recording into the engine's format.
+    private nonisolated static func converted(
+        _ input: AVAudioPCMBuffer, to format: AVAudioFormat
+    ) -> AVAudioPCMBuffer? {
+        if input.format == format { return input }
+        guard let converter = AVAudioConverter(from: input.format, to: format) else { return nil }
+        let ratio = format.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio) + 1024
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity)
+        else { return nil }
+        // A reference box, not a captured `var`. The input block is typed
+        // `@Sendable`, so a mutable local captured in it is a data race as far
+        // as the compiler is concerned — even though `convert` calls it
+        // synchronously on this thread.
+        final class Once: @unchecked Sendable { var supplied = false }
+        let once = Once()
+        var error: NSError?
+        converter.convert(to: output, error: &error) { _, status in
+            if once.supplied {
+                status.pointee = .endOfStream
+                return nil
+            }
+            once.supplied = true
+            status.pointee = .haveData
+            return input
+        }
+        guard error == nil, output.frameLength > 0 else { return nil }
+        // Sample-rate conversion interpolates, and interpolation overshoots on
+        // a transient. This recording is percussive and already close to full
+        // scale, so the converted buffer peaked at 1.15 — which the mixer
+        // clips. Scaled back to the peak it came in with, never boosted, so
+        // the waveform is unchanged apart from the overshoot.
+        if let source = input.floatChannelData?[0], let result = output.floatChannelData?[0] {
+            var inputPeak: Float = 0
+            for i in 0..<Int(input.frameLength) { inputPeak = max(inputPeak, abs(source[i])) }
+            var outputPeak: Float = 0
+            for i in 0..<Int(output.frameLength) { outputPeak = max(outputPeak, abs(result[i])) }
+            if outputPeak > inputPeak, outputPeak > 0 {
+                let gain = inputPeak / outputPeak
+                for channel in 0..<Int(output.format.channelCount) {
+                    guard let data = output.floatChannelData?[channel] else { continue }
+                    for i in 0..<Int(output.frameLength) { data[i] *= gain }
+                }
+            }
+        }
+        return output
+    }
+
+    nonisolated static let format = AVAudioFormat(
         standardFormatWithSampleRate: 44_100, channels: 2)!
 
     // MARK: - Configuration
@@ -78,8 +130,7 @@ final class KeySoundPlayer {
     }
 
     private func nextPlayerNode() -> AVAudioPlayerNode? {
-        guard let engine = start() else { return nil }
-        _ = engine
+        guard start() != nil else { return nil }
         let node = voices[nextVoice]
         nextVoice = (nextVoice + 1) % voices.count
         return node
@@ -121,7 +172,13 @@ final class KeySoundPlayer {
 
     @discardableResult
     private func start() -> AVAudioEngine? {
-        if let engine { return engine }
+        // Running, not merely existing. Changing the output device — plugging
+        // in headphones, or a sample-rate change — stops and uninitialises the
+        // engine, and returning the cached object then scheduled buffers into
+        // something that would never play them: sound stopped for the rest of
+        // the session with nothing to indicate why.
+        if let engine, engine.isRunning { return engine }
+        if engine != nil { teardown() }
         let engine = AVAudioEngine()
         for _ in 0..<Self.voiceCount {
             let node = AVAudioPlayerNode()
@@ -188,27 +245,80 @@ final class KeySoundPlayer {
     @discardableResult
     private func loadSample(_ resource: String, _ ext: String) -> AVAudioPCMBuffer? {
         if let sample { return sample }
+        // One attempt, and it does not happen here. Decoding the recording is
+        // 83 seconds of audio and about four million samples to scan, and it
+        // used to run synchronously on the main actor at the first typewriter
+        // keystroke — freezing input and the window for as long as it took,
+        // and doing it again on every switch back to the pack.
+        //
+        // Started once and installed when it lands. Until then this pack is
+        // silent, which is a far better failure than a stalled app.
+        guard loadFailure == nil, !isLoadingSample else { return nil }
+        isLoadingSample = true
+        let wanted = pack
+        Task.detached(priority: .userInitiated) {
+            let loaded = Self.decodeSample(resource: resource, ext: ext)
+            await MainActor.run {
+                self.isLoadingSample = false
+                // Only if it is still the pack the user has chosen. Switching
+                // away while this was in flight would otherwise install a
+                // recording nothing is going to play.
+                guard self.pack == wanted else { return }
+                switch loaded {
+                case .loaded(let box):
+                    self.sample = box.buffer
+                    self.onsets = box.onsets
+                    self.rendered.removeAll()
+                case .failed(let reason):
+                    self.loadFailure = reason
+                }
+            }
+        }
+        return nil
+    }
+
+    /// What a decode attempt produced.
+    private enum LoadOutcome: Sendable {
+        case loaded(LoadedSample)
+        case failed(String)
+    }
+
+    /// The decoded, resampled recording and where its strikes begin.
+    ///
+    /// `@unchecked Sendable` because `AVAudioPCMBuffer` is not `Sendable` and
+    /// this one is handed across exactly once, from the task that made it to
+    /// the main actor, and never touched again by the sender.
+    private final class LoadedSample: @unchecked Sendable {
+        let buffer: AVAudioPCMBuffer
+        let onsets: [Int]
+        init(buffer: AVAudioPCMBuffer, onsets: [Int]) {
+            self.buffer = buffer
+            self.onsets = onsets
+        }
+    }
+
+    /// Reads, converts and scans the recording. No actor, no shared state.
+    private nonisolated static func decodeSample(
+        resource: String, ext: String
+    ) -> LoadOutcome {
         guard let url = Bundle.main.url(forResource: resource, withExtension: ext),
             let file = try? AVAudioFile(forReading: url),
-            let raw = AVAudioPCMBuffer(
+            let decoded = AVAudioPCMBuffer(
                 pcmFormat: file.processingFormat,
                 frameCapacity: AVAudioFrameCount(file.length)),
-            (try? file.read(into: raw)) != nil,
-            let data = raw.floatChannelData?[0]
-        else { return nil }
-
-        let rate = file.processingFormat.sampleRate
-        let minGap = Int(0.100 * rate)
-        let preRoll = Int(0.002 * rate)
-        var found: [Int] = []
-        var last = -minGap
-        for i in 0..<Int(raw.frameLength) where abs(data[i]) >= 0.3 && i - last >= minGap {
-            found.append(max(0, i - preRoll))
-            last = i
-        }
-        sample = raw
-        onsets = found
-        return raw
+            (try? file.read(into: decoded)) != nil
+        else { return .failed("could not read \(resource).\(ext)") }
+        // Converted to the engine's format before anything is measured or
+        // sliced. The recording is 48 kHz and the engine runs at 44.1 kHz, and
+        // the slicing below copies sample for sample — so every typewriter
+        // click played 8.8% too long and about 1.5 semitones flat, which is
+        // audible as a duller, slower typewriter than the one on the site.
+        guard let raw = converted(decoded, to: format), let data = raw.floatChannelData?[0]
+        else { return .failed("could not convert \(resource).\(ext) to the engine's format") }
+        let samples = Array(UnsafeBufferPointer(start: data, count: Int(raw.frameLength)))
+        let found = SampleSlicing.onsets(in: samples, sampleRate: format.sampleRate)
+        guard !found.isEmpty else { return .failed("\(resource).\(ext) has no detectable strikes") }
+        return .loaded(LoadedSample(buffer: raw, onsets: found))
     }
 
     /// Cuts one slice at a random onset, with the short fades that stop the
@@ -236,10 +346,11 @@ final class KeySoundPlayer {
         let fadeOut = max(1, Int(0.008 * rate))
         for i in 0..<frames {
             let index = start + i
-            var value = index < Int(sample.frameLength) ? source[index] : 0
-            if i < fadeIn { value *= Float(i) / Float(fadeIn) }
-            let fromEnd = frames - i
-            if fromEnd < fadeOut { value *= Float(fromEnd) / Float(fadeOut) }
+            let raw = index < Int(sample.frameLength) ? source[index] : 0
+            // The envelope lives in the engine, where it is tested. See
+            // `SampleSlicing.gain`.
+            let value = raw * SampleSlicing.gain(
+                atFrame: i, frames: frames, fadeIn: fadeIn, fadeOut: fadeOut)
             channels[0][i] = value
             channels[1][i] = value
         }

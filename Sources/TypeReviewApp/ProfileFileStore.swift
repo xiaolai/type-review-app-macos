@@ -26,17 +26,25 @@ struct ProfileFileStore {
     /// directory, so the library round-trip stops writing a passage called
     /// "selftest" into the user's own text as well.
     ///
-    /// Keyed by process id rather than wiped on entry. `standard()` is called
+    /// One directory per process, and a fresh one. `standard()` is called
     /// twice in a self-test run — once by the practice controller, once by the
-    /// check itself — and a directory that resets on each call would delete
-    /// the profile between writing it and reading it back.
+    /// check itself — so it cannot be wiped on entry: that would delete the
+    /// profile between writing it and reading it back. A `static let` is
+    /// initialised once and shared by both calls, which gives the same
+    /// property without the wipe.
+    ///
+    /// Named by UUID rather than by process id. Process ids are recycled, so a
+    /// later run could land on the directory an interrupted earlier one left
+    /// behind and assert against its half-written profile — a test that passes
+    /// or fails based on what happened yesterday. The system reclaims
+    /// abandoned directories under `$TMPDIR` on its own.
+    private static let selfTestDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("TypeReviewSelfTest-\(UUID().uuidString)", isDirectory: true)
+
     static func standard() throws -> ProfileFileStore {
         let directory: URL
         if CommandLine.arguments.contains("--selftest") {
-            directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent(
-                    "TypeReviewSelfTest-\(ProcessInfo.processInfo.processIdentifier)",
-                    isDirectory: true)
+            directory = selfTestDirectory
         } else {
             let base = try FileManager.default.url(
                 for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
@@ -49,7 +57,27 @@ struct ProfileFileStore {
     }
 
     func load() -> LoadResult {
-        guard let json = try? String(contentsOf: fileURL, encoding: .utf8) else { return .absent }
+        // "Missing" and "unreadable" are different answers, and only one of
+        // them is safe to guess. `.absent` means a clean first run, so the
+        // controller starts an empty profile and the next completed run saves
+        // it — over whatever is actually on disk. `try?` sent a permission
+        // error, an I/O failure and a file that is not valid UTF-8 down that
+        // same path, so a profile that existed and merely could not be read
+        // was quietly replaced by an empty one.
+        //
+        // Asked before the read rather than inferred from the error: the
+        // question is about the file, and `String(contentsOf:)` reports
+        // several unrelated failures through codes that would each have to be
+        // enumerated correctly for the answer to be right.
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return .absent }
+        let json: String
+        do {
+            json = try String(contentsOf: fileURL, encoding: .utf8)
+        } catch {
+            // `.corrupt` is what makes the store read-only, which is the whole
+            // point: the file stays on disk, untouched and recoverable.
+            return .corrupt(reason: "profile could not be read — \(error.localizedDescription)")
+        }
         // Straight through the ported validator: a file edited by hand, or
         // half-written by a crash, is caught here rather than becoming
         // impossible statistics later.

@@ -1,4 +1,3 @@
-import Foundation
 
 /// The modifier keys a shortcut can carry.
 ///
@@ -14,6 +13,10 @@ public struct ShortcutModifiers: OptionSet, Sendable, Hashable, Codable {
     public static let option = ShortcutModifiers(rawValue: 1 << 1)
     public static let shift = ShortcutModifiers(rawValue: 1 << 2)
     public static let command = ShortcutModifiers(rawValue: 1 << 3)
+
+    /// Every bit this type defines. A stored value with anything else set did
+    /// not come from this app and is not something to register.
+    public static let all: ShortcutModifiers = [.control, .option, .shift, .command]
 
     /// The ones that make a combination unlikely to be typed by accident.
     /// Shift is excluded deliberately — see `KeyboardShortcut.isValid`.

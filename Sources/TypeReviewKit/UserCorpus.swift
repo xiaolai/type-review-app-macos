@@ -81,9 +81,9 @@ public struct UserCorpusSource: CorpusSource, Sendable {
     }
 
     public func pick(_ context: CorpusContext, rng: inout Mulberry32) -> CorpusEntry? {
-        let candidates = context.filter.map { filter in
-            entries.filter { fitsAlphabet($0, filter) }
-        } ?? entries
-        return pickWeightedByLength(candidates, wantedChars: context.wantedChars, rng: &rng)
+        // The same selection the bundled sources use, and it has to stay the
+        // same: candidate order and RNG draw count are both pinned by the
+        // golden vectors. See `pickFromCorpus`.
+        pickFromCorpus(entries, context, rng: &rng)
     }
 }

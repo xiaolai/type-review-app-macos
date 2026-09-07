@@ -130,8 +130,21 @@ final class KeyboardDrawer {
             width: width, height: height)
     }
 
+    /// Whether the parent is full screen, asked of the window rather than
+    /// tracked.
+    ///
+    /// A tracked flag was the first attempt and it can go stale: entering full
+    /// screen can *fail* — a second display disappearing, another app taking
+    /// the space — and the notification that would clear the flag never
+    /// arrives, so the drawer stays hidden for the rest of the session. The
+    /// style mask cannot be wrong about this.
+    private var isFullScreen: Bool { parent?.styleMask.contains(.fullScreen) ?? false }
+    /// Set while an open or close animation is running, so a parent move
+    /// during one does not snap the drawer to its finished frame.
+    private var transition: Int = 0
+
     private func present() {
-        guard let parent else { return }
+        guard let parent, !isFullScreen else { return }
         reframe()
         parent.addChildWindow(window, ordered: .above)
     }
@@ -141,7 +154,22 @@ final class KeyboardDrawer {
     /// window's shape.
     func reframe() {
         keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
-        guard isOpen else { return }
+        guard isOpen, !isFullScreen else { return }
+        // Put back if it was hidden for a full-screen transition that then did
+        // not happen. `willEnterFullScreen` orders the drawer out before the
+        // system has committed, and a failed entry sends nothing afterwards —
+        // but it does move the window, which is what calls this.
+        if window.parent == nil { present() }
+        // Not while an animation is running. `reframe` is called from the
+        // parent's move and resize notifications, and moving the window is
+        // exactly what `makeRoomBelow` does at the start of an opening — so
+        // opening the drawer used to jump it straight to its finished frame
+        // and skip the reveal it had just started.
+        guard transition == 0 else { return }
+        // Clearance is rechecked, not assumed from when it opened. Widening
+        // the keyboard or the gap in Settings makes an already-open drawer
+        // taller, which can push it below the screen with nothing to notice.
+        if let parent { makeRoomBelow(parent, animated: false) }
         window.setFrame(frame(open: true), display: true)
     }
 
@@ -159,7 +187,7 @@ final class KeyboardDrawer {
 
         if open {
             keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
-            makeRoomBelow(parent)
+            makeRoomBelow(parent, animated: animated)
             // Ordered in shut, then grown: appearing at full size and then
             // animating would show the finished state for one frame first.
             window.setFrame(frame(open: false), display: false)
@@ -171,12 +199,18 @@ final class KeyboardDrawer {
             if open {
                 window.setFrame(frame(open: true), display: true)
             } else {
-                parent.removeChildWindow(window)
-                window.orderOut(nil)
+                dismiss(from: parent)
             }
             return
         }
 
+        // Identifies *this* transition. AppKit runs a completion handler for a
+        // cancelled animation too, so opening and then quickly closing used to
+        // let the opening's completion run last and hide a drawer that was
+        // meant to stay — it checked only the current `isOpen`, which by then
+        // said "closed" for the wrong reason.
+        transition += 1
+        let mine = transition
         NSAnimationContext.runAnimationGroup { context in
             context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
@@ -186,24 +220,48 @@ final class KeyboardDrawer {
             // and so cannot say that in the type system. Same reasoning as the
             // observers in `attach(to:)`.
             MainActor.assumeIsolated {
-                guard let self, !self.isOpen else { return }
-                parent.removeChildWindow(self.window)
-                self.window.orderOut(nil)
+                guard let self, self.transition == mine else { return }
+                self.transition = 0
+                guard !self.isOpen else { return }
+                self.dismiss(from: parent)
             }
         }
+    }
+
+    /// Takes the drawer off screen and out of the child-window relationship.
+    private func dismiss(from parent: NSWindow) {
+        parent.removeChildWindow(window)
+        window.orderOut(nil)
     }
 
     /// Nudges the window up if the drawer would open past the bottom of the
     /// screen. What Apple's own drawers did, and the alternative is a drawer
     /// the user cannot see and has no way to discover.
-    private func makeRoomBelow(_ parent: NSWindow) {
+    private func makeRoomBelow(_ parent: NSWindow, animated: Bool) {
         guard let screen = parent.screen else { return }
-        let needed = gap + keyboard.naturalHeight(forWidth: drawerWidth)
+        let drawerHeight = keyboard.naturalHeight(forWidth: drawerWidth)
+        let needed = gap + drawerHeight
+        // Moving the window up cannot help when the window and the drawer
+        // together are taller than the screen — it just clips the top instead
+        // of the bottom. Shortening the window is what actually fits them, and
+        // it is reversible: the height is derived from a preference, so the
+        // next preference change puts it back.
+        let available = screen.visibleFrame.height
+        if parent.frame.height + needed > available {
+            var shortened = parent.frame
+            shortened.size.height = max(200, available - needed)
+            shortened.origin.y = screen.visibleFrame.minY + needed
+            parent.setFrame(shortened, display: true, animate: animated)
+            return
+        }
         let shortfall = screen.visibleFrame.minY - (parent.frame.minY - needed)
         guard shortfall > 0 else { return }
         var moved = parent.frame
         moved.origin.y = min(
             moved.origin.y + shortfall, screen.visibleFrame.maxY - moved.height)
-        parent.setFrame(moved, display: true, animate: true)
+        // The caller's choice, not always animated. Opening with
+        // `animated: false` — which is what launch does — used to slide the
+        // window up anyway, so the app appeared to move itself on startup.
+        parent.setFrame(moved, display: true, animate: animated)
     }
 }

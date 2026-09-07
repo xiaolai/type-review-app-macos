@@ -13,7 +13,13 @@ final class PracticeViewController: NSViewController {
     /// anyone who wants it, and the accessibility description carries it for
     /// VoiceOver, so nothing is lost by not spelling it out.
     private let modeIcon = NSImageView()
-    private let hintLabel = NSTextField(labelWithString: "⇥ new text · ⏎ next run")
+    /// The two shortcuts, written once. Three copies of this string drifted
+    /// into two different orderings.
+    private enum Hint {
+        static let practising = "⇥ new text · ⏎ next run"
+        static let finished = "⏎ next run · ⇥ new text"
+    }
+    private let hintLabel = NSTextField(labelWithString: Hint.practising)
     private let resultsView = ResultsView()
     /// The on-screen keyboard. It lives in the drawer below the window, so
     /// this controller only drives it.
@@ -84,7 +90,19 @@ final class PracticeViewController: NSViewController {
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
         root.wantsLayer = true
+        styleReadouts()
+        let status = makeStatusBar()
+        // Results occupy the same space as the passage rather than a separate
+        // screen: after a run the number you want is where your eyes already
+        // are, and Enter starts the next one without moving anything.
+        resultsView.isHidden = true
+        install(status: status, in: root)
+        view = root
+    }
 
+    /// The live numbers and the hint line. Readouts, not headings, so they are
+    /// set in the secondary colour at the stat size.
+    private func styleReadouts() {
         for label in [wpmLabel, accuracyLabel] {
             label.font = Theme.statFont
             label.textColor = Theme.secondaryText
@@ -94,15 +112,16 @@ final class PracticeViewController: NSViewController {
         modeIcon.contentTintColor = Theme.secondaryText
         modeIcon.imageScaling = .scaleProportionallyDown
         modeIcon.setContentHuggingPriority(.required, for: .horizontal)
+    }
 
-        // A status bar, along the bottom, where a status bar goes. These are
-        // readouts, not headings: they change on every keystroke and are read
-        // by glancing, and putting them above the passage made the first line
-        // of text the second thing on the screen.
-        //
-        // The trailing half is the same label that already carried the
-        // attribution and any save error, so the credit for a passage now sits
-        // on the same line as the numbers rather than on a line of its own.
+    /// A status bar, along the bottom, where a status bar goes.
+    ///
+    /// These change on every keystroke and are read by glancing; putting them
+    /// above the passage made the first line of text the second thing on the
+    /// screen. The trailing half is the same label that carries the
+    /// attribution and any save error, so the credit for a passage sits on the
+    /// same line as the numbers rather than on a line of its own.
+    private func makeStatusBar() -> NSStackView {
         let metrics = NSStackView(views: [wpmLabel, accuracyLabel, modeIcon])
         metrics.spacing = 14
         metrics.alignment = .centerY
@@ -114,33 +133,30 @@ final class PracticeViewController: NSViewController {
         metrics.setContentCompressionResistancePriority(.required, for: .horizontal)
         hintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         hintLabel.lineBreakMode = .byTruncatingTail
+        return status
+    }
 
-        // Results occupy the same space as the passage rather than a separate
-        // screen: after a run the number you want is where your eyes already
-        // are, and Enter starts the next one without moving anything.
-        resultsView.isHidden = true
-
-        for subview in [typingView, resultsView, status] {
+    private func install(status: NSStackView, in root: NSView) {
+        for subview in [typingView, resultsView, status] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
         NSLayoutConstraint.activate([
             typingView.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            typingView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
-            typingView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            typingView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: PracticeWindowMetrics.horizontalInset),
+            typingView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -PracticeWindowMetrics.horizontalInset),
             typingView.bottomAnchor.constraint(
                 lessThanOrEqualTo: status.topAnchor, constant: -24),
 
             resultsView.topAnchor.constraint(equalTo: root.topAnchor, constant: 20),
-            resultsView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
-            resultsView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            resultsView.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: PracticeWindowMetrics.horizontalInset),
+            resultsView.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -PracticeWindowMetrics.horizontalInset),
             resultsView.heightAnchor.constraint(greaterThanOrEqualToConstant: 200),
 
-            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 32),
-            status.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -32),
+            status.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: PracticeWindowMetrics.horizontalInset),
+            status.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -PracticeWindowMetrics.horizontalInset),
             status.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
         ])
-        view = root
     }
 
     /// The symbol for a mode, with the word kept in the tooltip and the
@@ -210,13 +226,18 @@ final class PracticeViewController: NSViewController {
             }
             session = try Session(
                 profile: profile,
-                adaptiveSource: { [unowned self] filter, wordCount, _, rng in
-                    try adapter().adaptiveSource(filter: filter, wordCount: wordCount, rng: &rng)
+                adaptiveSource: { [unowned self] filter, wordCount, passageLength, rng in
+                    // The third argument used to be discarded, which is what
+                    // made Short, Medium and Long do nothing at all.
+                    try adapter().adaptiveSource(
+                        filter: filter, wordCount: wordCount, passageLength: passageLength,
+                        rng: &rng)
                 },
                 benchmarkSource: { [unowned self] wordCount, settings, rng in
                     try adapter().benchmarkSource(
                         wordCount: wordCount, settings: settings, rng: &rng)
                 })
+            entryBox.commit()
             refresh(resetPassage: true)
         } catch {
             hintLabel.stringValue = "could not start: \(error.localizedDescription)"
@@ -228,19 +249,46 @@ final class PracticeViewController: NSViewController {
     private func adapter() -> CorpusAdapter {
         let box = entryBox
         return CorpusAdapter(channel: channel, library: library.passages) { entry in
-            box.value = entry
+            box.staged = entry
         }
     }
 
     private func type(_ character: String) {
-        guard let session else { return }
+        guard let session, !hasFinished else { return }
         do {
             let feedback = try session.input(character, timeStamp: clock())
             refresh()
-            if feedback == .completed { finish() }
+            // Latched. `Session.input` goes on answering `.completed` for
+            // every further keystroke, and a single multi-character commit
+            // from an input method delivers several — so the results screen
+            // was rebuilt and the same profile saved synchronously once per
+            // surplus character.
+            if feedback == .completed {
+                hasFinished = true
+                finish()
+            }
         } catch {
             hintLabel.stringValue = "input failed: \(error.localizedDescription)"
         }
+    }
+
+    /// True between a run completing and the next one starting.
+    private var hasFinished = false
+
+    /// Per-key statistics, cached against the number of runs they were built
+    /// from.
+    ///
+    /// This walked the entire saved history on every keystroke *and* every
+    /// backspace, on the main thread, to redraw a keyboard whose input only
+    /// changes when a run finishes. The cost grew with the profile: the more
+    /// someone practises, the slower their typing surface gets.
+    private var cachedPerKey: (count: Int, stats: OrderedMap<PerKeyStat>)?
+
+    private func perKeyStats(for results: [RunResult]) -> OrderedMap<PerKeyStat> {
+        if let cachedPerKey, cachedPerKey.count == results.count { return cachedPerKey.stats }
+        let stats = aggregatePerKey(results)
+        cachedPerKey = (results.count, stats)
+        return stats
     }
 
     /// Credits the passage's source when there is one to credit.
@@ -251,12 +299,17 @@ final class PracticeViewController: NSViewController {
         return "\(name) · \(attribution.license)"
     }
 
+    /// Posted when a run finishes, so a Statistics window that is already open
+    /// can bring itself up to date.
+    static let runCompleted = Notification.Name("TypeRunCompleted")
+
     private func finish() {
         guard let session, let result = session.profile.results.last else { return }
+        defer { NotificationCenter.default.post(name: Self.runCompleted, object: nil) }
         resultsView.show(result: result, history: session.profile.results)
         typingView.isHidden = true
         resultsView.isHidden = false
-        hintLabel.stringValue = "⏎ next run · ⇥ new text"
+        hintLabel.stringValue = Hint.finished
         if let message = persist(session.profile) ?? libraryWarning {
             hintLabel.stringValue = message
         }
@@ -282,7 +335,6 @@ final class PracticeViewController: NSViewController {
     }
 
     /// The passage on screen. Used by `--selftest`, which drives the real
-    /// input path rather than reaching into the session.
     /// Runs recorded in memory. `--selftest` compares this against what
     /// reached disk, so a save failure is distinguishable from a run that
     /// never completed.
@@ -306,12 +358,16 @@ final class PracticeViewController: NSViewController {
             return false
         }
         if session.keystrokes == 0 {
+            // `updateSettings` assigns before it restarts, and the restart can
+            // fail — so a rejected value stayed installed, was read back by
+            // the Settings window as if it had been accepted, and could be
+            // saved by the next successful write. Put back on failure.
+            let previous = session.profile.settings
             do {
                 try session.updateSettings(validated)
+                entryBox.commit()
             } catch {
-                // `updateSettings` restarts the run, and sourcing text can
-                // fail. Reporting success here left the Settings window
-                // showing a value the engine had not accepted.
+                try? session.updateSettings(previous)
                 hintLabel.stringValue = "could not apply: \(error.localizedDescription)"
                 return false
             }
@@ -319,14 +375,13 @@ final class PracticeViewController: NSViewController {
         } else {
             session.stageSettings(validated)
         }
-        // A setting that cannot be written is not a setting that was changed,
-        // as far as the next launch is concerned — so the window is told. The
-        // read-only case is excepted: it is a state the user has already been
-        // shown a banner about, and beeping at every subsequent tweak would
-        // report the same known fact as a new failure.
+        // Applied but unsaved is not the same as rejected, and the window is
+        // told which it was. Returning false here made it re-read and display
+        // the *old* value, which was untrue — the setting was live, it just
+        // had not reached the disk. The message says so; the control keeps
+        // what the user chose.
         if let message = persist(session.profile) {
             hintLabel.stringValue = message
-            return profileIsReadOnly
         }
         return true
     }
@@ -348,7 +403,23 @@ final class PracticeViewController: NSViewController {
     }
 
     func startFreshRun() {
-        try? session?.start()
+        // A session that never started can still start later — the library
+        // passage that broke it may have been deleted, or the profile
+        // repaired. Without this, one bad startup meant "New Text" did
+        // nothing until the app was relaunched.
+        guard let session else { return start() }
+        do {
+            try session.start()
+            entryBox.commit()
+        } catch {
+            // Reported, and the screen left alone. `try?` here swallowed a
+            // failure to source text — a library passage containing an emoji
+            // fails `TextInput` — while `refresh(resetPassage:)` went ahead
+            // and presented the *previous* run as if it were the new one.
+            hintLabel.stringValue = "could not start a new run: \(error.localizedDescription)"
+            return
+        }
+        hasFinished = false
         refresh(resetPassage: true)
     }
 
@@ -363,20 +434,21 @@ final class PracticeViewController: NSViewController {
             keyboard?.setPressed(nil)
             let credit = attribution()
             hintLabel.stringValue = pendingSaveError ?? libraryWarning
-                ?? (credit.isEmpty ? "⇥ new text · ⏎ next run" : credit)
+                ?? (credit.isEmpty ? Hint.practising : credit)
             view.window?.makeFirstResponder(typingView)
         } else {
             typingView.update(statuses: snapshot.typing.statuses, cursor: snapshot.typing.pos)
         }
         // The keyboard highlights the character the passage wants next, and
         // tints every key by how that key is actually going.
-        let next = snapshot.typing.pos < snapshot.typing.expected.utf16.count
-            ? String(
-                utf16CodeUnits: [Array(snapshot.typing.expected.utf16)[snapshot.typing.pos]],
-                count: 1)
-            : nil
+        // Indexed, not materialised. Building the passage's whole UTF-16
+        // array to read one unit ran on every keystroke, and a long library
+        // passage made that a full allocation each time.
+        let units = snapshot.typing.expected.utf16
+        let next = units.index(units.startIndex, offsetBy: snapshot.typing.pos, limitedBy: units.endIndex)
+            .flatMap { $0 == units.endIndex ? nil : String(utf16CodeUnits: [units[$0]], count: 1) }
         keyboard?.update(
-            stats: aggregatePerKey(session.profile.results), plan: snapshot.plan,
+            stats: perKeyStats(for: session.profile.results), plan: snapshot.plan,
             expected: next?.lowercased(), targetWpm: session.profile.settings.targetWpm)
         wpmLabel.stringValue = String(format: "%.0f wpm", snapshot.liveMetrics.netWpm)
         accuracyLabel.stringValue = String(format: "%.0f%%", snapshot.liveMetrics.accuracy)
@@ -388,7 +460,6 @@ extension PracticeViewController {
     /// Pushes the stored sound preferences into the player. Called at load and
     /// again whenever the Settings window changes them, so a pack or volume
     /// picked mid-run takes effect on the very next keystroke rather than at
-    /// the next launch.
     /// Caret shape and whitespace marks. Both are pure presentation — the
     /// view redraws and nothing about the run changes — so they apply live
     /// rather than at the next passage.

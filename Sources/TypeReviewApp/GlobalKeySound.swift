@@ -25,7 +25,16 @@ import IOKit.hid
 /// what makes it global. On its own it would go silent the moment TYPE came
 /// to the front, which is the app someone is most likely to be looking at
 /// while deciding whether the setting works. The local monitor covers this
-/// app's own windows; between them every keystroke is heard exactly once.
+/// app's own windows; between them a keystroke is heard exactly once.
+///
+/// ## What is not covered
+///
+/// Keys consumed inside a nested event-tracking loop of *this* app — while a
+/// menu is open, or a window is being dragged — reach neither monitor: the
+/// local one is bypassed by the tracking loop and the global one excludes its
+/// own application. Those keystrokes are silent. It is a small hole (menus do
+/// not stay open long) and closing it would mean an event tap, which is a
+/// heavier permission and a worse trade for a sound.
 @MainActor
 final class GlobalKeySound {
     /// Called for each physical key press, with the code and nothing else.
@@ -33,9 +42,9 @@ final class GlobalKeySound {
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
-    /// Modifier state as of the last `.flagsChanged`, so a press can be told
-    /// from a release.
-    private var lastFlags: NSEvent.ModifierFlags = []
+    /// Modifier state as of the last `.flagsChanged`, as the *raw* mask, so a
+    /// press can be told from a release for each physical key.
+    private var lastRawFlags: UInt = 0
 
     init(play: @escaping (UInt16) -> Void) {
         self.play = play
@@ -45,7 +54,15 @@ final class GlobalKeySound {
 
     func start() {
         guard !isRunning else { return }
-        lastFlags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // One owner at a time, enforced rather than assumed. The monitor
+        // callbacks reach back through a single shared reference, so a second
+        // instance installed its own pair and then redirected *both* pairs to
+        // itself — two clicks per key, from monitors the first instance still
+        // believed it owned and would later remove.
+        precondition(
+            KeySoundMonitors.shared == nil,
+            "a GlobalKeySound is already running; stop it before starting another")
+        lastRawFlags = NSEvent.modifierFlags.rawValue
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) {
             event in
             MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
@@ -118,9 +135,8 @@ final class GlobalKeySound {
     /// of the two an event is has to be inferred: compare the flag this key
     /// owns against the flags seen last time.
     private func handleModifier(_ event: NSEvent) {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        defer { lastFlags = flags }
-        guard let flag = Self.flag(forModifierKeyCode: event.keyCode) else { return }
+        let raw = event.modifierFlags.rawValue
+        defer { lastRawFlags = raw }
         // Caps lock latches rather than being held, so its "release" event
         // arrives on the *next* press — the key really did move both times,
         // and both should sound.
@@ -128,24 +144,36 @@ final class GlobalKeySound {
             play(event.keyCode)
             return
         }
-        guard flags.contains(flag), !lastFlags.contains(flag) else { return }
+        // The device-specific bit for *this* key, not the shared one.
+        //
+        // `.shift` is one flag for two keys. Testing it meant that with left
+        // shift already held, pressing right shift changed nothing the test
+        // could see and made no sound — and the same for control, option and
+        // command. AppKit keeps a separate bit per physical key in the raw
+        // mask; those are what distinguish the two halves.
+        guard let mask = Self.deviceMask(forModifierKeyCode: event.keyCode) else { return }
+        guard raw & mask != 0, lastRawFlags & mask == 0 else { return }
         play(event.keyCode)
     }
 
-    /// Which flag a modifier key owns, or nil for a key that is not one.
+    /// The device-specific bit a modifier key sets, or nil if it is not one.
     ///
-    /// Left and right halves are separate keys with separate codes and one
-    /// shared flag, which is exactly why the press/release test above cannot
-    /// be `flags != lastFlags`: releasing left shift while right shift is
-    /// still held changes no flag at all.
-    private static func flag(forModifierKeyCode code: UInt16) -> NSEvent.ModifierFlags? {
+    /// These live in the raw modifier mask alongside the documented
+    /// device-*independent* flags, one bit per physical key. They are the only
+    /// way to tell left shift from right shift, which share `.shift`.
+    /// Values from `IOKit/hidsystem/IOLLEvent.h` (`NX_DEVICE…KEYMASK`).
+    private static func deviceMask(forModifierKeyCode code: UInt16) -> UInt? {
         switch Int(code) {
-        case kVK_Shift, kVK_RightShift: return .shift
-        case kVK_Control, kVK_RightControl: return .control
-        case kVK_Option, kVK_RightOption: return .option
-        case kVK_Command, kVK_RightCommand: return .command
-        case kVK_CapsLock: return .capsLock
-        case kVK_Function: return .function
+        case kVK_Shift: return 0x0000_0002
+        case kVK_RightShift: return 0x0000_0004
+        case kVK_Control: return 0x0000_0001
+        case kVK_RightControl: return 0x0000_2000
+        case kVK_Option: return 0x0000_0020
+        case kVK_RightOption: return 0x0000_0040
+        case kVK_Command: return 0x0000_0008
+        case kVK_RightCommand: return 0x0000_0010
+        // No device-specific bit; the shared flag is all there is.
+        case kVK_Function: return NSEvent.ModifierFlags.function.rawValue
         default: return nil
         }
     }

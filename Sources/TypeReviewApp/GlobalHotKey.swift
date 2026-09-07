@@ -1,4 +1,3 @@
-import AppKit
 import Carbon.HIToolbox
 
 /// A key combination that works when TYPE is not the front app.
@@ -29,14 +28,24 @@ final class GlobalHotKey {
     /// combination is already spoken for by another app, which is not an
     /// error worth failing over: the menu item still works.
     init?(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) {
-        Self.installHandlerIfNeeded()
+        // Before registering, not after. A hot key with no handler behind it
+        // registers perfectly well and then does nothing when pressed — the
+        // combination is claimed system-wide and silently dead, which is worse
+        // than not claiming it.
+        guard Self.installHandlerIfNeeded() else { return nil }
         id = Self.nextID
         Self.nextID += 1
 
         var hotKeyRef: EventHotKeyRef?
-        let hotKeyID = EventHotKeyID(signature: OSType(0x5459_5045), id: id)  // 'TYPE'
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
+        // Exclusive, which is what the comment above already promised.
+        // Registering with `0` asks for *non*-exclusive ownership: another
+        // app's binding fires alongside this one, and an exclusive owner
+        // elsewhere suppresses this one while registration still reports
+        // success — the one outcome the nil return exists to rule out.
         let status = RegisterEventHotKey(
-            keyCode, modifiers, hotKeyID, GetApplicationEventTarget(), 0, &hotKeyRef)
+            keyCode, modifiers, hotKeyID, GetApplicationEventTarget(),
+            OptionBits(kEventHotKeyExclusive), &hotKeyRef)
         guard status == noErr, let hotKeyRef else { return nil }
         ref = hotKeyRef
         Self.registry[id] = action
@@ -54,8 +63,17 @@ final class GlobalHotKey {
         Self.registry[id] = nil
     }
 
-    private static func installHandlerIfNeeded() {
-        guard eventHandler == nil else { return }
+    /// `'TYPE'`, the four-character signature this app's hot keys carry.
+    private static let signature = OSType(0x5459_5045)
+
+    /// Installs the shared Carbon handler, and says whether there is one.
+    ///
+    /// The status used to be discarded, so a failed installation left every
+    /// subsequent registration reporting success over a hot key that could
+    /// never fire.
+    @discardableResult
+    private static func installHandlerIfNeeded() -> Bool {
+        guard eventHandler == nil else { return true }
         var spec = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(
@@ -66,14 +84,25 @@ final class GlobalHotKey {
                     event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
                     nil, MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
                 guard status == noErr else { return status }
+                // Ours, and one we still have. The signature check keeps this
+                // handler from answering for another hot-key producer in the
+                // same process, and reporting `noErr` for an event it did not
+                // act on swallowed that other producer's key.
+                guard hotKeyID.signature == GlobalHotKey.signature else {
+                    return OSStatus(eventNotHandledErr)
+                }
                 // Carbon delivers this on the main thread, which is what the
                 // application event target means. Asserting it is cheaper than
                 // hopping, and it traps rather than racing if that ever stops
                 // being true.
-                MainActor.assumeIsolated {
-                    GlobalHotKey.registry[hotKeyID.id]?()
+                return MainActor.assumeIsolated {
+                    guard let action = GlobalHotKey.registry[hotKeyID.id] else {
+                        return OSStatus(eventNotHandledErr)
+                    }
+                    action()
+                    return noErr
                 }
-                return noErr
             }, 1, &spec, nil, &eventHandler)
+        return eventHandler != nil
     }
 }

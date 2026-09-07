@@ -80,13 +80,10 @@ enum KeyboardGeometry {
         }
     }
 
-    enum Shape: Hashable {
-        case ansi, iso, jis
-        static let all: Set<Shape> = [.ansi, .iso, .jis]
-        static let isoOnly: Set<Shape> = [.iso]
-        static let jisOnly: Set<Shape> = [.jis]
-        static let notISO: Set<Shape> = [.ansi, .jis]
-    }
+    /// The shapes a key appears on. `SystemKeyboard.Shape`, not a second
+    /// enum of the same three cases — that one existed only to be converted
+    /// back, case by case, on every call.
+    typealias Shape = SystemKeyboard.Shape
 
     /// A key with its width resolved — the slack-absorber has a number by the
     /// time a caller sees it.
@@ -96,13 +93,8 @@ enum KeyboardGeometry {
     }
 
     static func rows(for shape: SystemKeyboard.Shape) -> [[PlacedKey]] {
-        let current: Shape = switch shape {
-        case .ansi: .ansi
-        case .iso: .iso
-        case .jis: .jis
-        }
-        return allRows.map { row in
-            let keys = row.filter { $0.shapes.contains(current) }
+        allRows.map { row in
+            let keys = row.filter { $0.shapes.contains(shape) }
             let fixed = keys.reduce(0.0) { $0 + ($1.width ?? 0) }
             // Deliberately unclamped. The row total is `unitsPerRow` by
             // construction, so a floor here would turn "these keys do not fit"
@@ -135,7 +127,11 @@ enum KeyboardGeometry {
             Key(kVK_ANSI_8), Key(kVK_ANSI_9), Key(kVK_ANSI_0), Key(kVK_ANSI_Minus),
             Key(kVK_ANSI_Equal),
             // JIS keeps ¥ where ANSI ends the row.
-            Key(kVK_JIS_Yen, label: "¥", shapes: Shape.jisOnly),
+            // No label: the legend comes from `UCKeyTranslate` like every
+            // other character key. Hardcoding "¥" made the cap disagree with
+            // the character the heat map and the next-key highlight use, on
+            // any layout that maps this key to something else.
+            Key(kVK_JIS_Yen, shapes: Shape.jisOnly),
             Key(kVK_Delete, nil, label: "⌫", align: .end, vertical: .bottom, role: .modifier),
         ],
         [
@@ -144,10 +140,16 @@ enum KeyboardGeometry {
             Key(kVK_ANSI_R), Key(kVK_ANSI_T), Key(kVK_ANSI_Y), Key(kVK_ANSI_U),
             Key(kVK_ANSI_I), Key(kVK_ANSI_O), Key(kVK_ANSI_P), Key(kVK_ANSI_LeftBracket),
             Key(kVK_ANSI_RightBracket),
-            Key(kVK_ANSI_Backslash, nil, shapes: Shape.notISO),
-            // ISO's return is tall and L-shaped. Drawn as its two halves — a
-            // deliberate simplification, and the seam is one gap wide.
-            Key(kVK_Return, nil, label: "⏎", align: .end, vertical: .bottom, role: .modifier, shapes: Shape.isoOnly),
+            // Only ANSI has a backslash up here. JIS puts that position on
+            // the home row, under the lower half of its return key — this row
+            // used to include it for JIS as well, which both misplaced the key
+            // and left no room for the return to be tall.
+            Key(kVK_ANSI_Backslash, nil, shapes: Shape.ansiOnly),
+            // ISO's and JIS's return is tall and L-shaped. Drawn as its two
+            // halves — a deliberate simplification, and the seam is one gap
+            // wide. JIS shares that shape; it used to be given ANSI's
+            // single-row return, which is the wrong key on the wrong row.
+            Key(kVK_Return, nil, label: "⏎", align: .end, vertical: .bottom, role: .modifier, shapes: Shape.tallReturn),
         ],
         [
             Key(kVK_CapsLock, 1.75, label: "⇪", align: .start, vertical: .bottom, role: .modifier),
@@ -155,7 +157,7 @@ enum KeyboardGeometry {
             Key(kVK_ANSI_D), Key(kVK_ANSI_F), Key(kVK_ANSI_G), Key(kVK_ANSI_H),
             Key(kVK_ANSI_J), Key(kVK_ANSI_K), Key(kVK_ANSI_L), Key(kVK_ANSI_Semicolon),
             Key(kVK_ANSI_Quote),
-            Key(kVK_ANSI_Backslash, 1, shapes: Shape.isoOnly),
+            Key(kVK_ANSI_Backslash, 1, shapes: Shape.tallReturn),
             Key(kVK_Return, nil, label: "⏎", align: .end, vertical: .bottom, role: .modifier),
         ],
         [

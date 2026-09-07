@@ -102,12 +102,70 @@ final class KeySoundTests: XCTestCase {
             XCTAssertLessThanOrEqual(value, previous, "envelope rose again at frame \(frame)")
             previous = value
         }
-        // And it lands on Web Audio's floor rather than on zero, which is
-        // what keeps the tail the same length as the site's.
+        // And it lands on Web Audio's floor rather than on zero, which is what
+        // keeps the tail the same length as the site's.
+        //
+        // The floor is absolute. This asserted `peak * decayFloor`, which is
+        // the same mistake the implementation made:
+        // `exponentialRampToValueAtTime(0.0001, end)` ramps *to* 0.0001, not
+        // to a fraction of the peak — so a 0.4-peak voice ended at 0.00004 and
+        // the test agreed with it.
         XCTAssertEqual(
             SynthRenderer.envelope(
                 frame: frames, frames: frames, peak: peak, attackSeconds: attack, sampleRate: rate),
-            peak * SynthRenderer.decayFloor, accuracy: 1e-9)
+            SynthRenderer.decayFloor, accuracy: 1e-9)
+    }
+
+    /// The filters must stay finite everywhere, not only at the frequencies
+    /// the built-in packs happen to use.
+    ///
+    /// The state-variable bandpass this replaced reached infinity in 589
+    /// frames at a 20 kHz centre, and the built-in centres blew up at an 8 kHz
+    /// sample rate. Alternating ±1 is the worst case: full energy at Nyquist.
+    func testFiltersStayFiniteAtEveryFrequencyAndRate() {
+        let input = (0..<2000).map { $0 % 2 == 0 ? 1.0 : -1.0 }
+        for rate in [8000.0, 22_050, 44_100, 48_000] {
+            for frequency in [1.0, 200, 1200, 3500, 12_000, 20_000, rate, rate * 4] {
+                for q in [0.1, 1.0, 5.0, 30.0] {
+                    let band = SynthRenderer.bandpass(
+                        input, centre: frequency, q: q, sampleRate: rate)
+                    XCTAssertTrue(
+                        band.allSatisfy { $0.isFinite },
+                        "bandpass diverged at \(frequency) Hz, q \(q), rate \(rate)")
+                    let low = SynthRenderer.lowpass(
+                        input, cutoff: frequency, q: q, sampleRate: rate)
+                    XCTAssertTrue(
+                        low.allSatisfy { $0.isFinite },
+                        "lowpass diverged at \(frequency) Hz, q \(q), rate \(rate)")
+                }
+            }
+        }
+    }
+
+    /// A render must not trap or crash on values a caller can legally pass.
+    func testRenderRejectsImpossibleDurations() {
+        let bad = SynthVoice(
+            noise: NoiseVoice(durationMs: 35, filter: .lowpass, frequency: 1200, q: 1, peak: 0.25),
+            oscillator: OscillatorVoice(frequency: 400, durationMs: -50, peak: 0.2))
+        XCTAssertFalse(SynthRenderer.render(bad, sampleRate: 44_100, noise: { count in
+            [Double](repeating: 0.5, count: count)
+        }).isEmpty)
+
+        let nonsense = SynthVoice(
+            noise: NoiseVoice(
+                durationMs: .infinity, filter: .lowpass, frequency: 1200, q: 1, peak: 0.25))
+        XCTAssertTrue(SynthRenderer.render(nonsense, sampleRate: 44_100, noise: { count in
+            [Double](repeating: 0.5, count: count)
+        }).isEmpty)
+    }
+
+    /// A noise source that returns too few samples must be refused, not
+    /// subscripted past its end.
+    func testShortNoiseSourceIsRefused() {
+        let voice = SynthVoice(
+            noise: NoiseVoice(durationMs: 35, filter: .lowpass, frequency: 1200, q: 1, peak: 0.25))
+        let rendered = SynthRenderer.render(voice, sampleRate: 44_100, noise: { _ in [] })
+        XCTAssertTrue(rendered.allSatisfy { $0 == 0 })
     }
 
     // MARK: - Rendering

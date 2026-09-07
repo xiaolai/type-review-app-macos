@@ -108,18 +108,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
         _ identifier: NSToolbarItem.Identifier, label: String, symbol name: String,
         tip: String, action: Selector
     ) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: identifier)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = tip
-        item.image = symbol(name)
-        item.target = self
-        item.action = action
-        // Bordered, which is the macOS 11-and-later toolbar button: a capsule
-        // that reacts to the pointer. Unbordered items are the flat icons of
-        // the previous decade.
-        item.isBordered = true
-        return item
+        ToolbarItems.button(
+            identifier, label: label, symbol: name, tip: tip, target: self, action: action)
     }
 
     /// A missing symbol yields a label-only item rather than an invisible
@@ -154,7 +144,14 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
         guard let raw = sender.representedObject as? String,
             let channel = CorpusChannel(rawValue: raw)
         else { return }
+        // Choosing the source that is already ticked is not a change. The
+        // handler assigns `practice.channel`, whose setter starts a fresh run
+        // unconditionally — so clicking the current item threw away the
+        // passage the user was partway through.
+        guard channel != currentChannel() else { return }
+        // No `refresh()` here: `onChooseSource` marks the source menus, and
+        // that path already calls back into this controller. Refreshing again
+        // rebuilt the same menu twice for one click.
         onChooseSource(channel)
-        refresh()
     }
 }

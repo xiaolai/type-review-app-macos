@@ -21,6 +21,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// silence is a pack chosen blind — the whole point of the setting is
     /// what it sounds like, so choosing one plays it.
     var previewSound: () -> Void = {}
+    /// Asks the owner to stand the global hot key down while the recorder is
+    /// armed, and to put it back afterwards. Carbon hot keys are handled below
+    /// the Cocoa event stream, so without this the combination already in use
+    /// fires its action instead of being captured — making the one shortcut
+    /// you most want to change the one you cannot.
+    var suspendHotKey: (Bool) -> Void = { _ in }
 
     private let tabs = SettingsTabViewController()
     private var controls: [String: NSControl] = [:]
@@ -47,10 +53,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// The last registration error, kept until the next attempt. `status`
     /// alone cannot say why something failed.
     private var loginError: String?
+    /// Where the profile lives, resolved once when the Data pane is built.
+    private var profileURL: URL?
     private static let lastPaneKey = "SettingsLastPane"
     private static let paneWidth: CGFloat = 500
     private static let paneMargin: CGFloat = 22
-    private static let captionWidth: CGFloat = 260
     private static let pathWidth: CGFloat = 330
 
     init() {
@@ -93,7 +100,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let last = UserDefaults.standard.integer(forKey: Self.lastPaneKey)
         if last >= 0, last < tabs.tabViewItems.count { tabs.selectedTabViewItemIndex = last }
         showWindow(nil)
-        window?.center()
+        // Only when there is nothing to restore. The window has an autosave
+        // name, and centring unconditionally on every presentation meant the
+        // position it saved was overwritten before anyone could see it.
+        if window?.setFrameUsingName("TypeReviewSettings") != true { window?.center() }
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -111,7 +121,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - Building
 
+    /// Assembles the panes. Each is built by its own method: this was one
+    /// 107-line function holding four unrelated windows' worth of controls,
+    /// with the Data pane's file-store access inline in the middle of it.
     private func build() {
+        buildPracticePane()
+        buildAppearancePane()
+        buildSoundPane()
+        buildDataPane()
+    }
+
+    private func buildPracticePane() {
         addPane(title: "Practice", symbol: "keyboard") { grid in
             self.addRow(grid, "Mode", self.segmented("mode", SettingsSchema.modes.map(\.rawValue)))
             self.addRow(
@@ -149,6 +169,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // "Appearance", not "Window": it started as window shape alone and now
         // also holds how the typing surface itself is drawn. The website calls
         // its equivalent tab the same thing.
+    }
+
+    private func buildAppearancePane() {
         addPane(title: "Appearance", symbol: "macwindow") { grid in
             self.addRow(
                 grid, "Caret", self.caretPopup(),
@@ -176,6 +199,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // Window is: nothing here is part of the profile. The website keeps
         // sound in localStorage and gives it its own settings tab; this
         // mirrors both decisions.
+    }
+
+    private func buildSoundPane() {
         addPane(title: "Sound", symbol: "speaker.wave.2") { grid in
             self.addRow(
                 grid, "Keyboard", self.soundPackPopup(),
@@ -193,26 +219,41 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Shortcut", self.shortcutRecorder(),
                 hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
         }
+    }
 
+    private func buildDataPane() {
         addPane(title: "Data", symbol: "internaldrive") { grid in
-            let path = NSTextField(
-                labelWithString: (try? ProfileFileStore.standard().fileURL.path) ?? "")
+            // Resolved once. The store was constructed three times here — for
+            // the label, for the tooltip and again in the reveal action — and
+            // each one turned a failure into an empty string, so a store that
+            // could not be opened showed a blank path above a button that did
+            // nothing when clicked.
+            let location = Result { try ProfileFileStore.standard().fileURL }
+            let path = NSTextField(labelWithString: "")
             path.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-            path.textColor = Theme.secondaryText
             path.lineBreakMode = .byTruncatingMiddle
             let reveal = NSButton(
                 title: "Show in Finder", target: self, action: #selector(self.revealProfile(_:)))
             reveal.bezelStyle = .rounded
+            switch location {
+            case .success(let url):
+                path.stringValue = url.path
+                path.textColor = Theme.secondaryText
+                path.toolTip = url.path
+                self.profileURL = url
+            case .failure(let error):
+                path.stringValue = "unavailable — \(error.localizedDescription)"
+                path.textColor = .systemOrange
+                reveal.isEnabled = false
+            }
             // A file the user can point at is the difference between "we keep
             // your data safe" and showing them where it is. No web build can
             // offer this.
             // Wider than a caption: middle-truncated to 260 points this read as
-            // `/Users/joker/Library_type.app/profile.json`, which looks less
-            // like an abbreviated path than a wrong one.
+            // an abbreviated path that looked more like a wrong one.
             path.preferredMaxLayoutWidth = Self.pathWidth
             path.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             path.widthAnchor.constraint(equalToConstant: Self.pathWidth).isActive = true
-            path.toolTip = (try? ProfileFileStore.standard().fileURL.path) ?? ""
             let pathRow = grid.addRow(with: [NSTextField(labelWithString: "Profile:"), path])
             pathRow.yPlacement = .center
             let revealRow = grid.addRow(with: [NSGridCell.emptyContentView, reveal])
@@ -343,12 +384,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         ]
         popup.addItems(withTitles: choices.map(\.0))
         let current = AppPreferences.drawerSeconds.value
-        let nearest = choices.enumerated().min {
-            abs($0.element.1 - current) < abs($1.element.1 - current)
+        // A value with no preset gets an item of its own rather than being
+        // displayed as the nearest one. 0.01 seconds showed as "Off" while the
+        // drawer went on animating — the control reporting a setting the app
+        // was not using.
+        if let exact = choices.firstIndex(where: { abs($0.1 - current) < 0.0005 }) {
+            popup.selectItem(at: exact)
+        } else {
+            popup.menu?.addItem(.separator())
+            popup.addItem(withTitle: String(format: "Custom (%.2fs)", current))
+            popup.selectItem(at: popup.numberOfItems - 1)
         }
-        popup.selectItem(at: nearest?.offset ?? 2)
         bind(popup) {
-            AppPreferences.drawerSeconds.value = choices[popup.indexOfSelectedItem].1
+            let index = popup.indexOfSelectedItem
+            // The custom item displays the current value; selecting it is not
+            // a change and must not write a preset over it.
+            guard index >= 0, index < choices.count else { return }
+            AppPreferences.drawerSeconds.value = choices[index].1
         }
         return popup
     }
@@ -382,6 +434,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let packs = KeySoundPack.all
         popup.addItems(withTitles: packs.map(\.label))
         popup.selectItem(at: packs.firstIndex(of: AppPreferences.soundPack.value) ?? 0)
+        // Held so `refreshSoundScope` can put it back in step. The pack can be
+        // changed from either menu or from the global shortcut, and this
+        // picker was read once at construction — so reopening the retained
+        // Settings window showed whatever had been chosen the first time.
+        controls["soundPack"] = popup
         bind(popup) { [weak self] in
             let index = popup.indexOfSelectedItem
             guard index >= 0, index < packs.count else { return }
@@ -451,18 +508,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
-    /// The warning row for a missing Input Monitoring permission, with the
-    /// door to fix it. Built always and hidden most of the time, because a
-    /// row added and removed would re-order the pane under the pointer.
-    private func addPermissionRow(_ grid: NSGridView) {
+    /// A caption-and-button row, hidden until it has something to say.
+    ///
+    /// Built once and shown or hidden, because a row added and removed would
+    /// re-order the pane under the pointer. Written twice before — the Input
+    /// Monitoring warning and the login-item note differed only in their
+    /// button — which is two copies of the same styling to keep in step.
+    private func addStatusRow(
+        _ grid: NSGridView, button title: String, action: Selector
+    ) -> (label: NSTextField, row: NSGridRow) {
         let label = NSTextField(labelWithString: "")
         label.font = .preferredFont(forTextStyle: .caption1)
-        // The system's own warning colour rather than red: this is a setting
-        // that is not doing anything yet, not an error.
+        // The system's own warning colour rather than red: these are settings
+        // that are not doing anything yet, not errors.
         label.textColor = .systemOrange
         label.lineBreakMode = .byTruncatingTail
-        let button = NSButton(
-            title: "Allow…", target: self, action: #selector(openInputMonitoringSettings(_:)))
+        let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .small
         let stack = NSStackView(views: [label, button])
@@ -471,41 +532,40 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let row = grid.addRow(with: [NSGridCell.emptyContentView, stack])
         row.topPadding = 1
         row.bottomPadding = 4
-        permissionLabel = label
-        permissionRows = [row]
+        return (label, row)
     }
 
-    /// The note under "Start at login" — an approval macOS is waiting for, or
-    /// the reason it refused. Hidden when there is nothing to say.
+    private func addPermissionRow(_ grid: NSGridView) {
+        let made = addStatusRow(
+            grid, button: "Allow…", action: #selector(openInputMonitoringSettings(_:)))
+        permissionLabel = made.label
+        permissionRows = [made.row]
+    }
+
     private func addLoginNoteRow(_ grid: NSGridView) {
-        let label = NSTextField(labelWithString: "")
-        label.font = .preferredFont(forTextStyle: .caption1)
-        label.textColor = .systemOrange
-        label.lineBreakMode = .byTruncatingTail
-        let button = NSButton(
-            title: "Login Items…", target: self, action: #selector(openLoginItemsSettings(_:)))
-        button.bezelStyle = .rounded
-        button.controlSize = .small
-        let stack = NSStackView(views: [label, button])
-        stack.spacing = 8
-        stack.alignment = .centerY
-        let row = grid.addRow(with: [NSGridCell.emptyContentView, stack])
-        row.topPadding = 1
-        row.bottomPadding = 4
-        loginNoteLabel = label
-        loginNoteRows = [row]
+        let made = addStatusRow(
+            grid, button: "Login Items…", action: #selector(openLoginItemsSettings(_:)))
+        loginNoteLabel = made.label
+        loginNoteRows = [made.row]
     }
 
     /// Re-reads the two settings the system owns, and shows or hides the two
     /// rows that only exist when something is in the way.
     private func refreshSoundScope() {
+        if let popup = controls["soundPack"] as? NSPopUpButton {
+            popup.selectItem(at: KeySoundPack.all.firstIndex(of: AppPreferences.soundPack.value) ?? 0)
+        }
         let global = AppPreferences.globalSound.value
         (controls["globalSound"] as? NSSwitch)?.state = global ? .on : .off
         let blocked = global && !GlobalKeySound.isPermitted
         permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
         for row in permissionRows { row.isHidden = !blocked }
 
-        (controls["loginItem"] as? NSSwitch)?.state = LoginItem.isEnabled ? .on : .off
+        // Awaiting approval counts as on. It is a registration the user has
+        // asked for, so showing it off invited a second `register()` — and
+        // left no way to cancel the pending one, because switching an
+        // already-off switch off does nothing.
+        (controls["loginItem"] as? NSSwitch)?.state = LoginItem.isRequested ? .on : .off
         let note = loginNote
         loginNoteLabel?.stringValue = note ?? ""
         for row in loginNoteRows { row.isHidden = note == nil }
@@ -547,6 +607,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// how it stores itself.
     private func shortcutRecorder() -> NSControl {
         let recorder = ShortcutRecorder(shortcut: AppPreferences.soundShortcut.value)
+        recorder.onRecordingChanged = { [weak self] recording in self?.suspendHotKey(recording) }
         recorder.onChange = { shortcut in
             // Writing the preference posts `didChange`, which is what makes
             // the app re-register the hot key and relabel both menus. The
@@ -713,7 +774,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             SettingsSchema.modes.firstIndex(of: settings.mode) ?? 0
         (controls["testMode"] as? NSSegmentedControl)?.selectedSegment =
             SettingsSchema.testModes.firstIndex(of: settings.testMode) ?? 0
-        controls["targetWpm"]?.stringValue = String(Int(settings.targetWpm))
+        // Not `Int(…)`. The validator allows fractions, so 50.9 was shown as
+        // 50 and the next edit would have written that back — the display
+        // quietly rounding a value the user had set.
+        controls["targetWpm"]?.stringValue = settings.targetWpm == settings.targetWpm.rounded()
+            ? String(Int(settings.targetWpm)) : String(settings.targetWpm)
         // And the stepper beside it, or it keeps whatever it was built with
         // and the next click jumps the value back there.
         steppers["targetWpm"]?.integerValue = Int(settings.targetWpm)
@@ -793,13 +858,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func restoreDefaults(_ sender: Any?) {
-        _ = write(.default)
+        // Reported like any other edit. This discarded the result, so a reset
+        // the engine refused looked exactly like one it accepted.
+        if !write(.default) { NSSound.beep() }
         refresh()
     }
 
     @objc private func revealProfile(_ sender: Any?) {
-        guard let url = try? ProfileFileStore.standard().fileURL else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([url])
+        // Resolved when the pane was built; the button is disabled when there
+        // is nothing to reveal, so this cannot silently do nothing.
+        guard let profileURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([profileURL])
     }
 }
 
