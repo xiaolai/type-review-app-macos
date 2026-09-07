@@ -22,6 +22,24 @@ CONFIG   := release
 # keychain: a clone on another Mac still builds, ad hoc, with a warning that
 # says what it costs.
 SIGN_ID ?= Developer ID Application: HANDO K.K. (Y53RSUA3SM)
+
+# Credentials stored by `xcrun notarytool store-credentials`. Shared across
+# this developer's projects rather than duplicated per repository: the profile
+# authenticates the *account*, not the app, and a second copy of the same
+# password is a second thing to rotate.
+NOTARY_PROFILE ?= chase-notary
+
+# Apple's notary service drops connections, and notarytool has no internal
+# retry: a timed-out status poll fails the build even though the upload
+# succeeded and the submission is Accepted server-side. Retry the whole call
+# and fail loudly only once the attempts are spent.
+define retry
+	@for i in 1 2 3 4 5; do \
+		if $(1); then exit 0; fi; \
+		echo "attempt $$i failed, retrying in 10s"; sleep 10; \
+	done; \
+	echo "FAIL: gave up after 5 attempts: $(1)"; exit 1
+endef
 # Assembled here and published only when every check has passed. Writing
 # straight into $(APP) meant a failure half way through left a bundle that was
 # incomplete *and* newer than its sources — so the next `make`, `run` or
@@ -67,7 +85,7 @@ _ := $(shell mkdir -p .build; \
 endif
 endif
 
-.PHONY: all run selftest test icon clean
+.PHONY: all run selftest test icon clean notarize
 
 all: $(APP)
 
@@ -160,6 +178,37 @@ icon:
 	"$$work/make-icon" "$$work/TypeReview.iconset"; \
 	iconutil -c icns "$$work/TypeReview.iconset" -o Resources/TypeReview.icns; \
 	echo "wrote Resources/TypeReview.icns ($$(du -h Resources/TypeReview.icns | cut -f1))"
+
+# Notarised and stapled, so the app passes Gatekeeper on a Mac that has never
+# seen it — offline included. Without a stapled ticket it only passes while the
+# machine can reach Apple to look the ticket up, which is exactly the moment a
+# first launch tends not to be able to.
+#
+# Re-signs the bundle rather than rebuilding it. Notarisation requires a secure
+# timestamp and ordinary builds deliberately skip one, so this replaces the
+# signature in place — a rebuild here would also mean any later `make all`
+# silently discarding a stapled ticket it had just earned.
+notarize: $(APP)
+	@security find-identity -v -p codesigning | grep -q "$(SIGN_ID)" \
+		|| { echo "FAIL: signing identity not in the keychain: $(SIGN_ID)"; exit 1; }
+	codesign --force --options runtime --timestamp --sign "$(SIGN_ID)" $(APP)
+	codesign --verify --strict --verbose=2 $(APP)
+	# `get-task-allow` lets a debugger attach, and the notary service refuses
+	# any binary carrying it. Checked here so the refusal arrives in a second
+	# rather than after an upload.
+	@codesign -d --entitlements :- $(APP) 2>/dev/null | grep -q "get-task-allow" \
+		&& { echo "FAIL: get-task-allow present — this cannot be notarised"; exit 1; } \
+		|| echo "OK: hardened, no get-task-allow"
+	@mkdir -p .build/notary
+	rm -f .build/notary/$(BIN).zip
+	# `ditto`, not `zip`: the notary service needs the bundle's symlinks and
+	# extended attributes intact, and `zip` flattens both.
+	ditto -c -k --keepParent $(APP) .build/notary/$(BIN).zip
+	$(call retry,xcrun notarytool submit .build/notary/$(BIN).zip --keychain-profile $(NOTARY_PROFILE) --wait)
+	$(call retry,xcrun stapler staple $(APP))
+	xcrun stapler validate $(APP)
+	# The assessment a first launch actually performs.
+	spctl -a -vv $(APP)
 
 clean:
 	rm -rf $(APP) .build
