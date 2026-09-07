@@ -339,7 +339,7 @@ final class KeyboardView: NSView {
         // I am being asked to learn, and which one right now" — and both are
         // worth knowing at once, which is why neither replaces the other.
         if let focusLetter, character == focusLetter, !isPressed {
-            drawFocusRing(face, unit: unit)
+            drawFocusRing(faceRect, radii: radii, unit: unit)
         }
 
         if key.role == .touchID {
@@ -542,10 +542,33 @@ final class KeyboardView: NSView {
     /// compete with three others for the same pixels and would be read as a
     /// shade of them. An outline occupies the edge instead, which nothing else
     /// uses, and survives whatever colour the cap already carries.
-    private func drawFocusRing(_ face: NSBezierPath, unit: CGFloat) {
-        let ring = face.copy() as! NSBezierPath
-        ring.lineWidth = max(1.5, unit * 0.045)
-        Theme.correct.withAlphaComponent(0.55).setStroke()
+    /// The lesson's current letter, marked as an inner outline.
+    ///
+    /// Three things were wrong with the first version, and only the third was
+    /// obvious. It stroked the *face* path, so half the line fell outside the
+    /// face and sat on the cap's own separator lip — which is what made it
+    /// read as a hard border on the key rather than as a mark inside it. It
+    /// used `Theme.correct`, which resolves to `.labelColor`: the colour of
+    /// text, so the ring carried the same weight as the letter it surrounds.
+    /// And at 0.55 alpha over two points it was the highest-contrast thing on
+    /// the whole keyboard, louder than the heat tints it is supposed to sit
+    /// alongside rather than shout over.
+    ///
+    /// Now it is inset clear of the lip and drawn at about a third of the ink:
+    /// 1.4 points at 0.30 against 2.1 at 0.55. The numbers came from rendering
+    /// the candidates over no tint, a light one and a heavy one — a ring that
+    /// is quiet on a white cap and gone under a red one has only moved the
+    /// problem.
+    private func drawFocusRing(
+        _ faceRect: NSRect, radii: (CGFloat, CGFloat, CGFloat, CGFloat), unit: CGFloat
+    ) {
+        let inset: CGFloat = 1.5
+        let ring = capPath(
+            faceRect.insetBy(dx: inset, dy: inset),
+            (max(1, radii.0 - 1 - inset), max(1, radii.1 - 1 - inset),
+             max(1, radii.2 - 1 - inset), max(1, radii.3 - 1 - inset)))
+        ring.lineWidth = max(1, unit * 0.030)
+        Theme.correct.withAlphaComponent(0.30).setStroke()
         ring.stroke()
     }
 
