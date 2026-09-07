@@ -50,7 +50,9 @@ final class GlobalKeySound {
         self.play = play
     }
 
-    var isRunning: Bool { globalMonitor != nil || localMonitor != nil }
+    /// Running at all. The global half is absent until Input Monitoring is
+    /// granted, so the local monitor is what this tracks.
+    var isRunning: Bool { localMonitor != nil }
 
     func start() {
         guard !isRunning else { return }
@@ -63,9 +65,22 @@ final class GlobalKeySound {
             KeySoundMonitors.shared == nil,
             "a GlobalKeySound is already running; stop it before starting another")
         lastRawFlags = NSEvent.modifierFlags.rawValue
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .flagsChanged]) {
-            event in
-            MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
+        // Only when the system will actually deliver other applications' keys.
+        //
+        // Input Monitoring gates `.keyDown` but not `.flagsChanged`, so an
+        // ungranted app still receives modifier events — and installing this
+        // anyway produced the worst possible result: shift and caps lock
+        // clicked everywhere while letters were silent, which reads as a
+        // broken feature rather than as a permission nobody has granted. With
+        // the monitor left off, "on but not permitted" simply behaves like
+        // "off outside this app", and the Settings pane and the menu both say
+        // why.
+        if Self.isPermitted {
+            globalMonitor = NSEvent.addGlobalMonitorForEvents(
+                matching: [.keyDown, .flagsChanged]
+            ) { event in
+                MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
+            }
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) {
             event in
@@ -137,13 +152,6 @@ final class GlobalKeySound {
     private func handleModifier(_ event: NSEvent) {
         let raw = event.modifierFlags.rawValue
         defer { lastRawFlags = raw }
-        // Caps lock latches rather than being held, so its "release" event
-        // arrives on the *next* press — the key really did move both times,
-        // and both should sound.
-        if event.keyCode == UInt16(kVK_CapsLock) {
-            play(event.keyCode)
-            return
-        }
         // The device-specific bit for *this* key, not the shared one.
         //
         // `.shift` is one flag for two keys. Testing it meant that with left
@@ -152,6 +160,18 @@ final class GlobalKeySound {
         // command. AppKit keeps a separate bit per physical key in the raw
         // mask; those are what distinguish the two halves.
         guard let mask = Self.deviceMask(forModifierKeyCode: event.keyCode) else { return }
+        // Caps lock latches, so its bit goes up on one press and down on the
+        // next — either way the key moved once and should click once. Every
+        // other modifier is held, so only the press counts.
+        //
+        // It used to click on *any* `flagsChanged` carrying its code, and
+        // macOS sends two per press: one as the key goes down and one as it
+        // comes back up. Two clicks for one press.
+        if event.keyCode == UInt16(kVK_CapsLock) {
+            guard (raw ^ lastRawFlags) & mask != 0 else { return }
+            play(event.keyCode)
+            return
+        }
         guard raw & mask != 0, lastRawFlags & mask == 0 else { return }
         play(event.keyCode)
     }
@@ -172,6 +192,9 @@ final class GlobalKeySound {
         case kVK_RightOption: return 0x0000_0040
         case kVK_Command: return 0x0000_0008
         case kVK_RightCommand: return 0x0000_0010
+        // Latching, and with no left/right pair, so the shared flag is the
+        // only bit there is.
+        case kVK_CapsLock: return NSEvent.ModifierFlags.capsLock.rawValue
         // No device-specific bit; the shared flag is all there is.
         case kVK_Function: return NSEvent.ModifierFlags.function.rawValue
         default: return nil
