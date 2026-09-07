@@ -23,7 +23,7 @@ enum AppPreferences {
     static let drawerWidth = Preference(key: "DrawerWidthPercent", default: 95, range: 50...100)
     /// The air between the window's bottom edge and the drawer's top, in
     /// points. Zero is allowed: flush is a look, even if it is not this one.
-    static let drawerGap = Preference(key: "DrawerGap", default: 10, range: 0...60)
+    static let drawerGap = Preference(key: "DrawerGap", default: 2, range: 0...60)
 
     /// The shape of the caret on the typing surface.
     ///
@@ -45,7 +45,7 @@ enum AppPreferences {
     enum caretStyle {
         static let key = "CaretStyle"
         static var value: CaretStyle {
-            get { CaretStyle(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .vertical }
+            get { CaretStyle(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .block }
             set {
                 UserDefaults.standard.set(newValue.rawValue, forKey: key)
                 AppPreferences.announce(key)
@@ -80,7 +80,14 @@ enum AppPreferences {
 
         static var value: KeySoundPack {
             get {
-                let name = UserDefaults.standard.string(forKey: key) ?? KeySoundPack.off.name
+                let name = UserDefaults.standard.string(forKey: key) ?? KeySoundPack.mechvibe.name
+                // Two different fallbacks, and the difference is the point.
+                // A *missing* key means a fresh install, and gets the shipped
+                // default above. A key that is present but names a pack this
+                // build does not have — a stale name from an older version, or
+                // something typed into `defaults write` — is a broken setting
+                // rather than an absent one, and goes silent instead of
+                // quietly picking a sound the user never chose.
                 return KeySoundPack.named(name) ?? .off
             }
             set {
@@ -104,7 +111,7 @@ enum AppPreferences {
     /// `UserDefaults` key in three places, with its default spelled out at one
     /// of them. As a `Flag` the default lives once and the write announces
     /// itself like every other preference does.
-    static let showKeyboard = Flag(key: "ShowKeyboard", default: true)
+    static let showKeyboard = Flag(key: "ShowKeyboard")
 
     /// Whether launching TYPE puts a window on screen.
     ///

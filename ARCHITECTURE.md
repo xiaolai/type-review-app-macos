@@ -274,6 +274,48 @@ two different kinds depending on which pane it was in — and the stepper has to
 be moved by `refresh` alongside the field it mirrors, or its next click jumps
 the value back to whatever it was built with.
 
+### What a fresh install looks like
+
+The shipped defaults are not guesses about what a new user might want. They are
+what this app was actually left set to after months of use, adopted wholesale:
+
+| Preference | was | ships as |
+|---|---|---|
+| `CaretStyle` | bar | **block** |
+| `DrawerGap` | 10 | **2** |
+| `ShowKeyboard` | on | **off** |
+| `SoundPack` | off | **mechvibe** |
+
+`DrawerWidthPercent`, `PassageColumns`, `PassageRows` and `ShowWhitespace` were
+already at the values in use, so nothing moved.
+
+Three things in that same domain were deliberately *not* adopted.
+
+**The window frames and `SettingsLastPane` are session state, not settings.**
+A default screen position taken from one 2560-wide display is wrong on every
+other machine, and "the pane you had open last" has no meaning before a first
+launch.
+
+**`GlobalSound` stays off.** It was on in real use, but it is the preference
+that turns on the system-wide keystroke monitor, and switching it on is what
+asks macOS for Input Monitoring. Shipping it on would make a fresh install
+demand a keystroke-monitoring permission on first launch, from a user who never
+asked for the feature — and it would make the README's own promise false, which
+says in as many words that the setting is off until you switch it on.
+
+**The profile's settings are not ours to change.** `mode` and `testMode` were
+`adaptive` and `time` in use, against defaults of `benchmark` and `words`, but
+those live in `ProfileSettings` rather than in `UserDefaults`, and
+`Vectors/settings-schema.json` pins every one of them to the website. Changing
+them here would break the profile exchange the vectors exist to guarantee, and
+`SettingsSchemaTests` would fail — correctly. The place to answer that question
+is the engine, and the vectors get regenerated afterwards.
+
+The adoption was checked rather than assumed: clearing the direct channel's
+defaults domain entirely and running `--selftest` wrote back one key, the
+window frame, and no settings at all. Nothing in the app stamps a value at
+launch, so the declared defaults are what a first run actually gets.
+
 ## The icon set
 
 Neither icon is an SF Symbol any more, and the menu bar draws literally the
