@@ -35,7 +35,11 @@ public func aggregatePerKey(_ results: [RunResult]) -> OrderedMap<PerKeyStat> {
     var accumulator = OrderedMap<Accumulator>()
     for result in results {
         for (bigram, hit) in result.histogram {
-            guard bigram.utf16.count >= 2 else { continue }
+            // One check, and the local one. `secondCharacter` returns an empty
+            // string for anything shorter than two UTF-16 units, so testing
+            // the result covers what testing the input covered — without
+            // asking the reader to hold that function's precondition in their
+            // head to see that the other guard could never fire.
             let second = secondCharacter(of: bigram)
             guard !second.isEmpty else { continue }
             var entry = accumulator[second] ?? Accumulator()
@@ -162,6 +166,12 @@ public struct BigramStat: Sendable, Equatable {
 /// noise, and telling someone to drill it would be advice built on a single
 /// sample.
 public func slowestBigrams(_ results: [RunResult], count: Int, minHits: Int = 5) -> [BigramStat] {
+    // `prefix` traps on a negative count, and a `minHits` of zero would admit
+    // entries with no hits at all and then divide by them. Both are callable
+    // and neither is meaningful, so they are answered here rather than
+    // trusted.
+    guard count > 0 else { return [] }
+    let floor = max(1, minHits)
     struct Accumulator: Sendable, Equatable {
         var hits = 0
         var misses = 0
@@ -178,7 +188,7 @@ public func slowestBigrams(_ results: [RunResult], count: Int, minHits: Int = 5)
         }
     }
     var list: [(index: Int, stat: BigramStat)] = []
-    for (index, entry) in accumulator.entries.enumerated() where entry.value.hits >= minHits {
+    for (index, entry) in accumulator.entries.enumerated() where entry.value.hits >= floor {
         list.append(
             (index,
              BigramStat(

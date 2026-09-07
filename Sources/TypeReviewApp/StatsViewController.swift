@@ -40,6 +40,7 @@ final class StatsViewController: NSViewController {
     /// a run with Statistics on screen left it quietly stale.
     var history: () -> [RunResult] = { [] }
     private var runObserver: NSObjectProtocol?
+    private var dayObserver: NSObjectProtocol?
 
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
@@ -122,15 +123,36 @@ final class StatsViewController: NSViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
+        // A finished run is not the only thing that changes these numbers.
+        // Midnight changes the streak and the practice-day count without any
+        // run happening, and a window left open across it went on reporting
+        // yesterday's — the same staleness the run observer was added to fix,
+        // arriving by the clock instead of by the keyboard.
+        dayObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
     }
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
-        if let runObserver { NotificationCenter.default.removeObserver(runObserver) }
+        // Both, from one list. Removing them one named field at a time is how
+        // the second one gets forgotten — which it was, the moment it was
+        // added a few lines above.
+        for observer in [runObserver, dayObserver].compactMap({ $0 }) {
+            NotificationCenter.default.removeObserver(observer)
+        }
         runObserver = nil
+        dayObserver = nil
     }
 
     func present(results: [RunResult]) {
+        // Before the empty-history guard, not after. Switching to Fingers with
+        // no runs yet left the column headed "Key", which is the one case
+        // where the heading is the only thing on screen saying what the empty
+        // table would have contained.
+        table.tableColumns.first?.title = grouping.selectedSegment == 1 ? "Finger" : "Key"
         guard !results.isEmpty else {
             summary.stringValue = "No runs yet."
             streakLabel.stringValue = ""
@@ -180,7 +202,6 @@ final class StatsViewController: NSViewController {
                         avgMs: $0.value.avgMs, errorRate: $0.value.errorRate)
                 }
         }
-        table.tableColumns.first?.title = grouping.selectedSegment == 1 ? "Finger" : "Key"
         table.reloadData()
     }
 
@@ -200,7 +221,11 @@ extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {
         case "key": text = entry.label
         case "hits": text = String(entry.hits)
         case "avg": text = String(format: "%.0f", entry.avgMs)
-        default: text = String(format: "%.1f%%", entry.errorRate * 100)
+        case "err": text = String(format: "%.1f%%", entry.errorRate * 100)
+        // A column this method does not know about is a mistake in
+        // `configureTable`, and drawing it as an error rate would hide that
+        // behind a plausible-looking number.
+        default: return nil
         }
 
         let label = NSTextField(labelWithString: text)

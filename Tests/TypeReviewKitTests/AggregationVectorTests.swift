@@ -63,10 +63,13 @@ final class AggregationVectorTests: XCTestCase {
 
     private func vector(_ name: String) throws -> (Vector, Calendar) {
         guard let url = Bundle.module.url(forResource: "Vectors/\(name)", withExtension: "json")
-        else { throw XCTSkip("Vectors/\(name).json missing — see ARCHITECTURE.md — Regenerating a vector") }
+        else { throw VectorUnavailable(reason: "Vectors/\(name).json missing") }
         let vector = try JSONDecoder().decode(Vector.self, from: Data(contentsOf: url))
         guard let zone = TimeZone(identifier: vector.timeZone) else {
-            throw XCTSkip("unknown timezone \(vector.timeZone)")
+            // Also not a skip. The vector names an IANA zone that every macOS
+            // carries; failing to resolve it means the vector is wrong or the
+            // system is, and both deserve to be seen rather than stepped over.
+            throw VectorUnavailable(reason: "unknown timezone \(vector.timeZone)")
         }
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
@@ -83,10 +86,22 @@ final class AggregationVectorTests: XCTestCase {
     }
 
     private func runs(_ vector: Vector) -> [RunResult] {
+        // Paired by position, so a fixture with more histograms than
+        // timestamps would trap here rather than say what was wrong with it,
+        // and a fixture with more timestamps would drop them in silence.
+        // Asserted *and* paired safely. `XCTAssertEqual` records a failure and
+        // keeps going, so on its own it would have reported the mismatch and
+        // then trapped on the very indexing it was warning about — the report
+        // buried under a crash. `zip` stops at the shorter of the two.
+        XCTAssertEqual(
+            vector.histograms.count, vector.runTimestamps.count,
+            "vector has \(vector.histograms.count) histograms and "
+                + "\(vector.runTimestamps.count) timestamps")
         let metrics = RunMetrics(
             netWpm: 50, rawWpm: 52, accuracy: 96, consistency: 90, wpmStdDev: 3, wpmSeries: [50],
             correctChars: 10, incorrectChars: 1, durationMs: 12_000)
-        return vector.histograms.enumerated().map { index, raw in
+        return zip(vector.histograms, vector.runTimestamps).enumerated().map { index, pair in
+            let (raw, timestamp) = pair
             var histogram = Histogram()
             // Insertion order follows the vector's own JSON ordering, which is
             // what the weighted sums and the tie-break below depend on.
@@ -96,7 +111,7 @@ final class AggregationVectorTests: XCTestCase {
                     hitCount: hit.hitCount, missCount: hit.missCount, timeToType: hit.timeToType)
             }
             return RunResult(
-                index: index, mode: .benchmark, timestamp: vector.runTimestamps[index],
+                index: index, mode: .benchmark, timestamp: timestamp,
                 passageId: "p", text: "sample", metrics: metrics, histogram: histogram)
         }
     }
@@ -177,6 +192,11 @@ final class AggregationVectorTests: XCTestCase {
         try eachVector { vector, _, name in
             let results = runs(vector)
             let perKey = aggregatePerKey(results)
+            // The count as well as the contents. Walking only the expected
+            // entries meant a key this side invented — or one it should have
+            // dropped and did not — passed unnoticed, which is the half of
+            // conformance that checking values cannot reach.
+            XCTAssertEqual(perKey.keys.count, vector.perKey.count, "\(name): number of keys")
             for expected in vector.perKey {
                 let actual = try XCTUnwrap(perKey[expected.key], "\(name): \(expected.key)")
                 XCTAssertEqual(actual.hits, expected.hits, "\(name) hits \(expected.key)")
@@ -190,12 +210,18 @@ final class AggregationVectorTests: XCTestCase {
             XCTAssertEqual(
                 slow.map(\.bigram), vector.slowestBigrams.map(\.bigram), "\(name): slowest order")
             XCTAssertEqual(slow.map(\.avgMs), vector.slowestBigrams.map(\.avgMs), name)
+            // Decoded from the vector and, until now, never compared. Two
+            // fields the website emits that this side was free to get wrong.
+            XCTAssertEqual(slow.map(\.hits), vector.slowestBigrams.map(\.hits), "\(name): hits")
+            XCTAssertEqual(
+                slow.map(\.misses), vector.slowestBigrams.map(\.misses), "\(name): misses")
         }
     }
 
     func testDailyCountsMatch() throws {
         try eachVector { vector, calendar, name in
             let counts = dailyCounts(runs(vector), calendar: calendar)
+            XCTAssertEqual(counts.count, vector.dailyCounts.count, "\(name): number of days")
             for expected in vector.dailyCounts {
                 XCTAssertEqual(counts[expected.key], expected.count, "\(name): \(expected.key)")
             }
