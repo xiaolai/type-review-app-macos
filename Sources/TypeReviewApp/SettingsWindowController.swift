@@ -540,7 +540,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// Whether keystrokes are heard in every app.
     ///
-    /// Asks for Accessibility as part of switching on rather than leaving
+    /// Asks for Input Monitoring as part of switching on rather than leaving
     /// it as a second step to discover. Without the permission the monitor
     /// installs cleanly and is never called — the box would read ticked over
     /// a keyboard that stayed silent.
@@ -670,7 +670,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func addPermissionRow(_ grid: NSGridView) {
         let made = addStatusRow(
-            grid, button: "Allow…", action: #selector(openAccessibilitySettings(_:)))
+            grid, button: "Allow…", action: #selector(openInputMonitoringSettings(_:)))
         permissionLabel = made.label
         permissionRows = [made.row]
     }
@@ -700,7 +700,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             AppPreferences.releaseSound.value ? .on : .off
         mutedApps?.reload()
         let blocked = global && !GlobalKeySound.isPermitted
-        permissionLabel?.stringValue = "Accessibility is off — other apps are not heard."
+        permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
         for row in permissionRows { row.isHidden = !blocked }
 
         resizePanes()
@@ -750,7 +750,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Settings" button of its own and is the path most people will take. The
     /// pane is opened as well for anyone who has already answered once, since
     /// the prompt is shown only the first time a process asks.
-    @objc private func openAccessibilitySettings(_ sender: Any?) {
+    @objc private func openInputMonitoringSettings(_ sender: Any?) {
         GlobalKeySound.requestPermission()
         GlobalKeySound.openPermissionSettings()
     }

@@ -275,7 +275,7 @@ extension AppDelegate {
                     // otherwise see from here — the monitor is installed and
                     // never called. Say so where the switch is.
                     item.title = on && !GlobalKeySound.isPermitted
-                        ? "Sound in Every App (Needs Accessibility)" : "Sound in Every App"
+                        ? "Sound in Every App (Needs Input Monitoring)" : "Sound in Every App"
                 } else if item.action == #selector(toggleSound(_:)) {
                     item.state = AppPreferences.soundIsOn ? .on : .off
                     // The menu advertises whatever is actually registered, so

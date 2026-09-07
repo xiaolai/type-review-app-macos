@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 /// A key combination that works when TYPE is not the front app.
 ///
 /// `RegisterEventHotKey` rather than `NSEvent.addGlobalMonitorForEvents`, and
-/// the difference matters: the monitor needs Accessibility permission, which
+/// the difference matters: the keystroke monitor needs Input Monitoring, which
 /// means a trip to System Settings and a prompt that reads like the app wants
 /// to watch everything you type. This app *is* a typing app, so that is the
 /// last permission dialog it should ever raise. The Carbon call needs no

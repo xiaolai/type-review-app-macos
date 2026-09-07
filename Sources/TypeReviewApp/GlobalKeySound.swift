@@ -41,8 +41,15 @@ final class GlobalKeySound {
     /// Called for each physical key press, with the code and nothing else.
     private let play: (UInt16, Stroke) -> Void
 
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
+    /// One session-wide tap, where there used to be two `NSEvent` monitors.
+    ///
+    /// `.cgSessionEventTap` sees the whole login session, this app's own
+    /// window included, so the separate local monitor that existed to hear
+    /// TYPE's own keys is gone rather than ported. `.listenOnly` means the tap
+    /// cannot alter or swallow an event, which is what the local monitor's
+    /// "return it unchanged" was protecting against.
+    private var tap: CFMachPort?
+    private var tapSource: CFRunLoopSource?
     /// Modifier state as of the last `.flagsChanged`, as the *raw* mask, so a
     /// press can be told from a release for each physical key.
     private var lastRawFlags: UInt = 0
@@ -86,7 +93,7 @@ final class GlobalKeySound {
         self.play = play
     }
 
-    var isRunning: Bool { localMonitor != nil }
+    var isRunning: Bool { tap != nil }
 
     func start() {
         guard !isRunning else { return }
@@ -99,25 +106,19 @@ final class GlobalKeySound {
             KeySoundMonitors.shared == nil,
             "a GlobalKeySound is already running; stop it before starting another")
         lastRawFlags = NSEvent.modifierFlags.rawValue
-        // `.flagsChanged` only when modifiers are wanted, so the default
-        // configuration observes fewer kinds of keyboard event rather than
-        // observing them and throwing the result away.
-        let matching: NSEvent.EventTypeMask =
-            eventMask
-        // Installed whether or not the permission has been granted, and that
-        // is the point: *asking* for other applications' key events is what
-        // makes macOS record this app as a client of Accessibility, list it
-        // and offer its prompt. Skipping the install while ungranted was
-        // circular — nothing ever asked, so nothing was ever offered, and the
-        // Settings button sent the user to a list with nothing in it to switch
-        // on.
+        // Attempted whether or not the permission has been granted, and that
+        // is the point: *asking* is what makes macOS record this app as a
+        // client of Input Monitoring, list it, and offer its prompt. Skipping
+        // it while ungranted was circular — nothing ever asked, so nothing was
+        // ever offered, and the Settings button sent the user to a list with
+        // nothing in it to switch on.
         //
-        // What arrives without permission is discarded in `handleGlobal`. TCC
-        // gates `.keyDown` and not `.flagsChanged`, so an ungranted app still
-        // receives modifier events, and playing those was the worst available
-        // outcome: shift and caps lock clicking everywhere while letters
-        // stayed silent, which reads as a broken feature rather than as a
-        // permission nobody has granted.
+        // With a tap the ungranted case is cleaner than it was with `NSEvent`.
+        // A tap that cannot be enabled is discarded on the spot, so nothing is
+        // delivered at all — where the old monitors let modifier events
+        // through without permission and clicked for shift and caps lock while
+        // letters stayed silent, which reads as a broken feature rather than
+        // as a permission nobody has granted.
         // The frontmost application, tracked rather than polled. See
         // `frontmostBundleID`.
         frontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
@@ -143,29 +144,89 @@ final class GlobalKeySound {
             }
         }
         installGlobalMonitor()
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: matching) { event in
-            MainActor.assumeIsolated { KeySoundMonitors.shared?.handle(event) }
-            // Returned unchanged. A local monitor that swallowed the event
-            // would make the sound and eat the keystroke with it.
-            return event
-        }
         KeySoundMonitors.shared = self
     }
 
     /// Installs the monitor on other applications' keys, unless the
     /// application in front is one this app will not watch at all.
     private func installGlobalMonitor() {
-        guard globalMonitor == nil, !isProtectedAppInFront else { return }
-        let matching: NSEvent.EventTypeMask =
-            eventMask
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: matching) { event in
-            MainActor.assumeIsolated { KeySoundMonitors.shared?.handleGlobal(event) }
+        guard tap == nil, !isProtectedAppInFront else { return }
+        // The callback is a C function pointer and cannot capture, so it
+        // reaches the instance the same way the old monitors did — through the
+        // one shared reference.
+        guard
+            let port = CGEvent.tapCreate(
+                tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly,
+                eventsOfInterest: eventMask, callback: Self.tapCallback, userInfo: nil)
+        else { return }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
+        CGEvent.tapEnable(tap: port, enable: true)
+        // Enabling is the check that matters, not creating. Without Input
+        // Monitoring `tapCreate` still hands back a perfectly good port and
+        // the tap simply never turns on — measured, and the same shape as the
+        // hot key that registers and then never fires. Keeping a port that
+        // cannot be enabled would report a running monitor that hears nothing.
+        guard CGEvent.tapIsEnabled(tap: port) else {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+            return
         }
+        tap = port
+        tapSource = source
     }
 
     private func removeGlobalMonitor() {
-        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
-        globalMonitor = nil
+        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let tapSource { CFRunLoopRemoveSource(CFRunLoopGetCurrent(), tapSource, .commonModes) }
+        if let tap { CFMachPortInvalidate(tap) }
+        tap = nil
+        tapSource = nil
+    }
+
+    /// The C trampoline.
+    ///
+    /// Runs on whichever run loop the source was added to, which is the main
+    /// one, so the isolation assertion holds for the same reason it does in
+    /// `GlobalHotKey`.
+    ///
+    /// `NSEvent(cgEvent:)` is what keeps this a change of *source* rather than
+    /// a change of logic: every rule about key codes, auto-repeat and
+    /// device-specific modifier bits carries over untouched.
+    private static let tapCallback: CGEventTapCallBack = { _, type, event, _ in
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            // A failure mode `NSEvent` monitors do not have: the system
+            // switches off a tap whose callback was too slow, or one the user
+            // disabled, and it stays off until something turns it back on.
+            MainActor.assumeIsolated { KeySoundMonitors.shared?.reEnableTap() }
+            return nil
+        }
+        // Neither `CGEvent` nor `NSEvent` is `Sendable`, so the event cannot
+        // cross into the main actor's closure on its own. The box carries it
+        // across, and the claim it makes is true rather than convenient: the
+        // run-loop source is added to `CFRunLoopGetCurrent()` from
+        // `installGlobalMonitor()`, which is main-actor isolated, so this
+        // callback runs on the main thread and there is no second thread for
+        // the event to race against. `assumeIsolated` below traps if that ever
+        // stops being so.
+        let box = EventBox(event: event)
+        MainActor.assumeIsolated {
+            guard let nsEvent = NSEvent(cgEvent: box.event) else { return }
+            KeySoundMonitors.shared?.handleGlobal(nsEvent)
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    /// Carries one event from the tap callback to the main actor.
+    ///
+    /// `@unchecked` because the compiler cannot see what the run loop
+    /// guarantees. See the note at the call site for why the guarantee holds.
+    private struct EventBox: @unchecked Sendable {
+        let event: CGEvent
+    }
+
+    private func reEnableTap() {
+        guard let tap else { return }
+        CGEvent.tapEnable(tap: tap, enable: true)
     }
 
     /// Whether the application in front is one whose keystrokes are not to be
@@ -223,20 +284,17 @@ final class GlobalKeySound {
             NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
         }
         activationObserver = nil
-        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
-        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
-        globalMonitor = nil
-        localMonitor = nil
+        removeGlobalMonitor()
         if KeySoundMonitors.shared === self { KeySoundMonitors.shared = nil }
     }
 
     /// Tears the monitors down and puts them straight back.
     ///
-    /// For the moment Accessibility is granted while the app is already
-    /// running. The system decides what a monitor may see when it is
-    /// installed, so one installed before the grant stays deaf afterwards —
-    /// and nothing tells an app its permission changed, which is why this is
-    /// driven by the app coming back to the front rather than by an event.
+    /// For the moment Input Monitoring is granted while the app is already
+    /// running. A tap created before the grant cannot be enabled and is
+    /// thrown away, so nothing is listening afterwards — and nothing tells an
+    /// app its permission changed, which is why this is driven by the app
+    /// coming back to the front rather than by an event.
     func reinstall() {
         guard isRunning else { return }
         stop()
@@ -245,10 +303,10 @@ final class GlobalKeySound {
 
     /// The kinds of keyboard event this monitor asks for, which is as few as
     /// the current settings allow.
-    private var eventMask: NSEvent.EventTypeMask {
-        var mask: NSEvent.EventTypeMask = [.keyDown]
-        if soundsModifiers { mask.insert(.flagsChanged) }
-        if soundsRelease { mask.insert(.keyUp) }
+    private var eventMask: CGEventMask {
+        var mask: CGEventMask = 1 << CGEventType.keyDown.rawValue
+        if soundsModifiers { mask |= 1 << CGEventType.flagsChanged.rawValue }
+        if soundsRelease { mask |= 1 << CGEventType.keyUp.rawValue }
         return mask
     }
 
@@ -390,24 +448,27 @@ final class GlobalKeySound {
     /// Whether the system will actually deliver other applications' key
     /// events to this process.
     ///
-    /// Accessibility, and only Accessibility. That is what
-    /// `addGlobalMonitorForEvents` documents for key-related events, and it is
-    /// where macOS lists this app.
+    /// **Input Monitoring**, which is a change, and the second time this
+    /// question has been answered differently. The app used to name Input
+    /// Monitoring while calling an API gated on Accessibility, so the button
+    /// led to a pane that stayed empty; that was corrected to Accessibility.
+    /// Moving from `NSEvent.addGlobalMonitorForEvents` to `CGEventTap` moves
+    /// it back — the tap is gated on Input Monitoring — and this time the name
+    /// and the API agree.
     ///
-    /// It used to accept Input Monitoring as an alternative, and everything
-    /// downstream — the request, the button, the captions — named that
-    /// permission instead. It is the wrong one: this app never calls the API
-    /// that gates on it, so it never appeared in that list, and someone
-    /// following the button arrived at a pane that was empty and stayed empty.
-    /// Accepting it here would also have been wrong in the other direction:
-    /// granting Input Monitoring alone would have reported "permitted" over a
-    /// monitor that still received nothing.
+    /// It is also the better of the two to ask for. Accessibility can drive
+    /// other applications; Input Monitoring can only listen. Apple's own
+    /// guidance is to ask for the narrower privilege when it will do, and a
+    /// sandboxed app may hold this one at all, which is what makes an App
+    /// Store build possible.
     ///
-    /// The check matters because the failure is otherwise silent: the monitor
-    /// installs, returns a perfectly good object, and is never called.
-    static var isPermitted: Bool { AXIsProcessTrusted() }
+    /// The check matters because the failure is otherwise silent. `tapCreate`
+    /// hands back a usable port without permission; it is the *enable* that
+    /// fails, which is why `installGlobalMonitor` checks `tapIsEnabled` rather
+    /// than trusting a non-nil port.
+    static var isPermitted: Bool { CGPreflightListenEventAccess() }
 
-    /// Asks the system for Accessibility, with its prompt.
+    /// Asks the system for Input Monitoring, with its prompt.
     ///
     /// The prompt is what puts the app in front of the user with an "Open
     /// System Settings" button; the entry in the list is added by asking at
@@ -416,9 +477,7 @@ final class GlobalKeySound {
     /// System Settings door directly.
     @discardableResult
     static func requestPermission() -> Bool {
-        // The key by name. `kAXTrustedCheckOptionPrompt` is a global `var` in
-        // the SDK, which Swift 6 will not let a concurrent context read.
-        AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        CGRequestListenEventAccess()
     }
 
     /// Opens the pane where the permission is granted by hand.
@@ -426,7 +485,7 @@ final class GlobalKeySound {
         guard
             let url = URL(
                 string:
-                    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
         else { return }
         NSWorkspace.shared.open(url)
     }

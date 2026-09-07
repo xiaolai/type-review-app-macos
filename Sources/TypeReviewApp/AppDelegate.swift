@@ -54,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// preference change does not resize it. See `applyWindowSize`.
     private struct ShapePreference: Equatable { let columns: Int; let rows: Int }
     private var appliedShape: ShapePreference?
-    /// Accessibility as of the last time the app was frontmost, so a grant
+    /// Input Monitoring as of the last time the app was frontmost, so a grant
     /// made while it was in the background can be noticed on the way back.
     private var soundWasPermitted = false
 
@@ -496,7 +496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if AppPreferences.soundIsOn { previewSound() }
     }
 
-    /// Coming back to the front is the one moment Accessibility is likely
+    /// Coming back to the front is the one moment Input Monitoring is likely
     /// to have just been granted — the user has been in System Settings.
     ///
     /// There is no notification for it, and a monitor installed before the
