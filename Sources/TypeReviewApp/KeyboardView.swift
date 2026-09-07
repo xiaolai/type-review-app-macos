@@ -302,9 +302,30 @@ final class KeyboardView: NSView {
         let capRect = isPressed ? rect.offsetBy(dx: 0, dy: 1) : rect
         let radii = capRadii(corner, unit: unit)
 
+        // The character this physical key types under the *current* layout.
+        // Both of what this key can type. `!` lives on the `1` key and `A` on
+        // `a`; matching only the unshifted output meant an expected `!` never
+        // lit a key, and every capital letter's statistics were dropped on the
+        // floor instead of counting towards the key that produces it.
+        //
+        // Read before the cap is drawn rather than after, because the lesson's
+        // focus key is marked *by* its border rather than by a second ring
+        // inside it, and the border is the first thing down.
+        let character = key.types ? SystemKeyboard.character(forKeyCode: key.code) : nil
+        let shifted = key.types ? SystemKeyboard.character(forKeyCode: key.code, shift: true) : nil
+        let produced = [character, shifted].compactMap { $0 }
+        let isFocus = !isPressed && focusLetter != nil && character == focusLetter
+
         // The lip: the whole cap in the border colour, then the face inset by
         // one point on three sides and by the lip at the bottom.
-        NSColor.separatorColor.setFill()
+        //
+        // The lesson's focus key darkens this same edge instead of gaining a
+        // ring of its own. A ring drawn inside the face left the cap wearing
+        // two outlines, one of them the key's own — which reads as a rendering
+        // mistake rather than as emphasis, whatever the inner one's weight.
+        // Every cap already has exactly one border; this one is just told to
+        // speak up.
+        (isFocus ? Theme.correct.withAlphaComponent(0.38) : NSColor.separatorColor).setFill()
         capPath(capRect, radii).fill()
         let faceRect = NSRect(
             x: capRect.minX + 1, y: capRect.minY + 1,
@@ -313,15 +334,6 @@ final class KeyboardView: NSView {
             faceRect, (radii.0 - 1, radii.1 - 1, radii.2 - 1, radii.3 - 1))
         NSColor.textBackgroundColor.setFill()
         face.fill()
-
-        // The character this physical key types under the *current* layout.
-        // Both of what this key can type. `!` lives on the `1` key and `A` on
-        // `a`; matching only the unshifted output meant an expected `!` never
-        // lit a key, and every capital letter's statistics were dropped on the
-        // floor instead of counting towards the key that produces it.
-        let character = key.types ? SystemKeyboard.character(forKeyCode: key.code) : nil
-        let shifted = key.types ? SystemKeyboard.character(forKeyCode: key.code, shift: true) : nil
-        let produced = [character, shifted].compactMap { $0 }
         if let tint = heat(for: key, produced: produced), !isPressed {
             glaze(face, tint.color, strength: tint.strength)
         }
@@ -334,14 +346,6 @@ final class KeyboardView: NSView {
         if isPressed {
             glaze(face, Theme.caret, strength: 0.30)
         }
-        // The lesson layer, over the heat rather than instead of it. The heat
-        // answers "how is this key going"; this answers "is it one of the keys
-        // I am being asked to learn, and which one right now" — and both are
-        // worth knowing at once, which is why neither replaces the other.
-        if let focusLetter, character == focusLetter, !isPressed {
-            drawFocusRing(faceRect, radii: radii, unit: unit)
-        }
-
         if key.role == .touchID {
             drawTouchID(in: faceRect, unit: unit)
             return
@@ -542,36 +546,6 @@ final class KeyboardView: NSView {
     /// compete with three others for the same pixels and would be read as a
     /// shade of them. An outline occupies the edge instead, which nothing else
     /// uses, and survives whatever colour the cap already carries.
-    /// The lesson's current letter, marked as an inner outline.
-    ///
-    /// Three things were wrong with the first version, and only the third was
-    /// obvious. It stroked the *face* path, so half the line fell outside the
-    /// face and sat on the cap's own separator lip — which is what made it
-    /// read as a hard border on the key rather than as a mark inside it. It
-    /// used `Theme.correct`, which resolves to `.labelColor`: the colour of
-    /// text, so the ring carried the same weight as the letter it surrounds.
-    /// And at 0.55 alpha over two points it was the highest-contrast thing on
-    /// the whole keyboard, louder than the heat tints it is supposed to sit
-    /// alongside rather than shout over.
-    ///
-    /// Now it is inset clear of the lip and drawn at about a third of the ink:
-    /// 1.4 points at 0.30 against 2.1 at 0.55. The numbers came from rendering
-    /// the candidates over no tint, a light one and a heavy one — a ring that
-    /// is quiet on a white cap and gone under a red one has only moved the
-    /// problem.
-    private func drawFocusRing(
-        _ faceRect: NSRect, radii: (CGFloat, CGFloat, CGFloat, CGFloat), unit: CGFloat
-    ) {
-        let inset: CGFloat = 1.5
-        let ring = capPath(
-            faceRect.insetBy(dx: inset, dy: inset),
-            (max(1, radii.0 - 1 - inset), max(1, radii.1 - 1 - inset),
-             max(1, radii.2 - 1 - inset), max(1, radii.3 - 1 - inset)))
-        ring.lineWidth = max(1, unit * 0.030)
-        Theme.correct.withAlphaComponent(0.30).setStroke()
-        ring.stroke()
-    }
-
     /// A pane of tinted glass over the cap.
     ///
     /// Flat colour at the alpha these tints need reads as paint — the cap
