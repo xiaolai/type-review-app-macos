@@ -35,7 +35,16 @@ on; there is no universal binary yet.
 
 ## Installing
 
-There is no release build yet. Until there is, build it:
+```sh
+brew install --cask xiaolai/tap/type-review
+```
+
+Or take the `.zip` from [Releases](https://github.com/xiaolai/type-review-app-macos/releases)
+and drag `TYPE.app` to Applications. Either way the build is signed and
+notarised, so it opens without the "unidentified developer" dialogue.
+
+Or build it, which needs the Swift toolchain from Xcode or the Command Line
+Tools:
 
 ```sh
 git clone https://github.com/xiaolai/type-review-app-macos
@@ -44,9 +53,10 @@ make          # builds TYPE.app in the project directory
 open TYPE.app
 ```
 
-`make` needs the Swift toolchain that ships with Xcode or the Command Line
-Tools. A Homebrew cask and a Mac App Store release are both planned; the
-notes on how those two differ are in [ARCHITECTURE.md](ARCHITECTURE.md).
+A Mac App Store release is planned as well. It is the same source built a
+second way — sandboxed, and under its own bundle identifier, so the two can sit
+on one machine without fighting over preferences. [ARCHITECTURE.md](ARCHITECTURE.md)
+has the reasoning.
 
 ## Sound in every app, and what it costs
 
