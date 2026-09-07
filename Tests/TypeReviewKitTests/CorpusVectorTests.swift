@@ -43,7 +43,7 @@ final class CorpusVectorTests: XCTestCase {
 
     private func vector() throws -> Vector {
         guard let url = Bundle.module.url(forResource: "Vectors/corpus", withExtension: "json")
-        else { throw XCTSkip("Vectors/corpus.json missing — see ARCHITECTURE.md — Regenerating a vector") }
+        else { throw VectorUnavailable(reason: "Vectors/corpus.json missing") }
         return try JSONDecoder().decode(Vector.self, from: Data(contentsOf: url))
     }
 

@@ -18,7 +18,7 @@ final class MarkdownVectorTests: XCTestCase {
 
     func testMatchesTheWebsite() throws {
         guard let url = Bundle.module.url(forResource: "Vectors/library", withExtension: "json")
-        else { throw XCTSkip("Vectors/library.json missing — see ARCHITECTURE.md — Regenerating a vector") }
+        else { throw VectorUnavailable(reason: "Vectors/library.json missing") }
         let cases = try JSONDecoder().decode([Case].self, from: Data(contentsOf: url))
         XCTAssertGreaterThan(cases.count, 10, "vector file looks truncated")
         for testCase in cases {

@@ -69,7 +69,7 @@ final class ProfileCodecTests: XCTestCase {
 
     private func vector() throws -> ProfileVector {
         guard let url = Bundle.module.url(forResource: "Vectors/profile", withExtension: "json")
-        else { throw XCTSkip("Vectors/profile.json missing — see ARCHITECTURE.md — Regenerating a vector") }
+        else { throw VectorUnavailable(reason: "Vectors/profile.json missing") }
         return try JSONDecoder().decode(ProfileVector.self, from: Data(contentsOf: url))
     }
 

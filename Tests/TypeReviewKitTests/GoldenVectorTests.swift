@@ -13,7 +13,7 @@ final class GoldenVectorTests: XCTestCase {
     private func vector<T: Decodable>(_ name: String, as type: T.Type) throws -> T {
         guard let url = Bundle.module.url(forResource: "Vectors/\(name)", withExtension: "json")
         else {
-            throw XCTSkip("Vectors/\(name).json is missing — see ARCHITECTURE.md — Regenerating a vector")
+            throw VectorUnavailable(reason: "Vectors/\(name).json is missing")
         }
         return try JSONDecoder().decode(T.self, from: Data(contentsOf: url))
     }
@@ -46,7 +46,11 @@ final class GoldenVectorTests: XCTestCase {
         // reintroduce it and the suite would stay green.
         let cases = try vector("rng", as: [RNGCase].self)
         guard let seed42 = cases.first(where: { $0.seed == 42 }) else {
-            throw XCTSkip("no seed-42 vector")
+            // Not a skip. The comment directly above says the point is that a
+            // future refactor must not reintroduce the bug "and the suite stay
+            // green" — and a skip is exactly the suite staying green while
+            // this check does not run.
+            throw VectorUnavailable(reason: "Vectors/rng.json has no seed-42 case")
         }
         let first = try XCTUnwrap(seed42.draws.first)
         XCTAssertEqual(first, 0.6011037519201636)

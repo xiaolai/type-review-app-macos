@@ -47,6 +47,9 @@ CLAUDE.local.md
 # Audit findings files written by /cc-suite:audit and the audit-fix loop —
 # per-run working state (findings + fix statuses), not authored content.
 .cc-suite/audits/
+# The same class: tool configuration for whoever is holding the tools, not
+# something a clone of this repository needs.
+.cc-suite.md
 
 # cc-suite: PRIVATE mode — bridge artifacts not shared
 AGENTS.md

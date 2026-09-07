@@ -58,7 +58,7 @@ final class SettingsSchemaTests: XCTestCase {
     private func vector() throws -> Vector {
         guard let url = Bundle.module.url(
             forResource: "Vectors/settings-schema", withExtension: "json")
-        else { throw XCTSkip("Vectors/settings-schema.json missing — see ARCHITECTURE.md — Regenerating a vector") }
+        else { throw VectorUnavailable(reason: "Vectors/settings-schema.json missing") }
         return try JSONDecoder().decode(Vector.self, from: Data(contentsOf: url))
     }
 

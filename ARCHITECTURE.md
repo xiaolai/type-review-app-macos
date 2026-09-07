@@ -38,11 +38,9 @@ generated from the running TypeScript engine, and the tests compare **exactly**
 — no tolerances, since both sides run the same IEEE operations in the same
 order.
 
-Regenerate after any engine change in the web repo:
-
-```sh
-# see "Regenerating a vector" below
-```
+Regenerate them after any engine change in the web repo, by the procedure in
+[Regenerating a vector](#regenerating-a-vector) below. There is no one command
+that does it.
 
 The vectors cover the RNG across six seeds, the rounding and statistics
 primitives including negative halves, run metrics and per-second bins,
@@ -57,9 +55,14 @@ reproduce the original's bytes — key order included.
 ## Regenerating a vector
 
 There is no `pnpm emit:vectors`, and there never was — this document and nine
-test skip messages used to say there was. The vectors were produced by running
-the web implementation over chosen inputs and recording what it returned, and
-that is still the method:
+test skip messages used to say there was. Those skips are gone too: a missing
+vector now throws `VectorUnavailable` and fails the suite, because the vectors
+are committed and an absent one is a broken checkout rather than a
+configuration. `VectorCoverageTests` asserts the reverse — that no vector ships
+unread.
+
+The vectors were produced by running the web implementation over chosen inputs
+and recording what it returned, and that is still the method:
 
 1. Write a throwaway test **inside the web repository** — not a plain script.
    `tsx` cannot load `src/ui/stats/aggregations.ts`: something in its import
