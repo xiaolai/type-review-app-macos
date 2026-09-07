@@ -21,6 +21,19 @@ CONFIG   := release
 # Overridable, and honoured only if the certificate is actually in the
 # keychain: a clone on another Mac still builds, ad hoc, with a warning that
 # says what it costs.
+# The build number, which nothing used to move. `CFBundleVersion` sat at 1
+# through every commit this project has, and both channels care: the App Store
+# refuses an upload whose build number is not higher than the last, and a
+# Homebrew cask is a version plus a checksum that has to mean something.
+#
+# The commit count, because it is monotonic without anyone remembering to make
+# it so, and it is a number a human can still relate to a point in history.
+# Falls back to 1 outside a repository, so a tarball still builds.
+#
+# `CFBundleShortVersionString` stays hand-edited in Info.plist: what to call a
+# release is a decision, not a count.
+BUILD_NUMBER := $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
+
 SIGN_ID ?= Developer ID Application: HANDO K.K. (Y53RSUA3SM)
 
 # Credentials stored by `xcrun notarytool store-credentials`. Shared across
@@ -85,7 +98,14 @@ _ := $(shell mkdir -p .build; \
 endif
 endif
 
-.PHONY: all run selftest test icon clean notarize password-managers
+# Stated, not inferred from position. Twice now a new target has been added
+# above `all` and silently become the default — `make` printing a version, or
+# checking password managers, instead of building the app. Both times the
+# build looked like it succeeded. Make's rule is "the first target in the
+# file", which is a property of where a line was pasted rather than of intent.
+.DEFAULT_GOAL := all
+
+.PHONY: all run selftest test icon clean notarize password-managers version
 
 all: $(APP)
 
@@ -96,6 +116,17 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist \
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
 	@cp .build/$(CONFIG)/$(BIN) $(CONTENTS)/MacOS/$(BIN)
 	@cp Info.plist $(CONTENTS)/Info.plist
+	# Stamped into the copy, not into the tracked file: the repository's
+	# Info.plist would otherwise change on every commit, and a build number
+	# that is a property of the build does not belong in source control.
+	@/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_NUMBER)" \
+		$(CONTENTS)/Info.plist
+	# And check it landed. PlistBuddy reports success for a key it did not
+	# write when the type disagrees, which is the kind of silence this
+	# project has been bitten by before.
+	@test "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' $(CONTENTS)/Info.plist)" \
+		= "$(BUILD_NUMBER)" \
+		|| { echo "error: CFBundleVersion did not take"; exit 1; }
 	@cp Resources/TypeReview.icns $(CONTENTS)/Resources/TypeReview.icns
 	# The typewriter sound pack's recording. Loaded through `Bundle.main`,
 	# so it goes straight into Contents/Resources rather than through a
@@ -188,6 +219,15 @@ icon:
 # timestamp and ordinary builds deliberately skip one, so this replaces the
 # signature in place — a rebuild here would also mean any later `make all`
 # silently discarding a stapled ticket it had just earned.
+# What a build would call itself. Useful before tagging or submitting, and
+# cheap enough to run when a version number looks wrong.
+version:
+	@printf 'marketing : %s   (Info.plist, edited by hand)\n' \
+		"$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
+	@printf 'build     : %s   (git rev-list --count HEAD)\n' "$(BUILD_NUMBER)"
+	@printf 'tree      : %s\n' \
+		"$$(git diff --quiet 2>/dev/null && echo clean || echo 'DIRTY — a build from this is not reproducible')"
+
 # Re-check the password-manager list against Homebrew and the App Store.
 #
 # Not part of `make test`: it needs the network, and a gate that goes red
