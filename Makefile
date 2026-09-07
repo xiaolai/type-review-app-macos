@@ -85,7 +85,7 @@ _ := $(shell mkdir -p .build; \
 endif
 endif
 
-.PHONY: all run selftest test icon clean notarize
+.PHONY: all run selftest test icon clean notarize password-managers
 
 all: $(APP)
 
@@ -188,6 +188,19 @@ icon:
 # timestamp and ordinary builds deliberately skip one, so this replaces the
 # signature in place — a rebuild here would also mean any later `make all`
 # silently discarding a stapled ticket it had just earned.
+# Re-check the password-manager list against Homebrew and the App Store.
+#
+# Not part of `make test`: it needs the network, and a gate that goes red
+# because a CDN was slow is a gate people learn to ignore. Run it on its own —
+# before a release, or whenever a manager is added — and it exits non-zero when
+# the list has drifted, so it still works as a gate where one is wanted.
+password-managers:
+	@set -e; \
+	work=$$(mktemp -d); \
+	trap 'rm -rf "$$work"' EXIT; \
+	swiftc -O Tools/password-managers.swift -o "$$work/check"; \
+	"$$work/check"
+
 notarize: $(APP)
 	@security find-identity -v -p codesigning | grep -q "$(SIGN_ID)" \
 		|| { echo "FAIL: signing identity not in the keychain: $(SIGN_ID)"; exit 1; }

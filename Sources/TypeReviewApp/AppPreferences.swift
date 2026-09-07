@@ -160,9 +160,16 @@ enum AppPreferences {
     /// recalled: the Mac App Store's lookup API, or the `quit:`/`zap` stanzas
     /// of the app's Homebrew cask, both of which state the bundle identifier
     /// outright. That mattered — the LastPass desktop app is
-    /// `com.lastpass.lastpassmacdesktop`, not the `com.lastpass.LastPass` an
-    /// earlier version of this list guessed at, and a wrong identifier does
-    /// not fail loudly. It simply never matches, while looking like coverage.
+    /// `com.lastpass.lastpassmacdesktop`, and an earlier version of this list
+    /// carried only `com.lastpass.LastPass`, which is a container LastPass
+    /// also uses but not the application. A wrong identifier does not fail
+    /// loudly; it simply never matches, while looking like coverage.
+    ///
+    /// `make password-managers` re-checks every entry against those sources
+    /// and says what has drifted. It reports rather than rewrites: this list
+    /// decides when the machine stops listening, so each line is a human
+    /// decision, and a generator that silently produced an empty one would
+    /// leave a green build over no protection at all.
     ///
     /// A list still cannot be complete, which is why it is not the only
     /// mechanism: `GlobalKeySound.declaresCredentialProvider` asks the
@@ -186,8 +193,10 @@ enum AppPreferences {
         "com.agilebits.onepassword-osx",
         // Bitwarden
         "com.bitwarden.desktop",
-        // LastPass
+        // LastPass. Both: the desktop app, and the container the Homebrew
+        // cask still names, which older installs use.
         "com.lastpass.lastpassmacdesktop",
+        "com.lastpass.LastPass",
         // Dashlane
         "com.dashlane.dashlanephonefinal",
         // Keeper
@@ -198,11 +207,14 @@ enum AppPreferences {
         "com.nordsec.nordpass",
         // Enpass
         "in.sinew.Enpass-Desktop",
-        // The KeePass family
+        // The KeePass family. KeePassXC answers to its old `org.keepassx`
+        // preferences domain as well as its current identifier.
         "org.keepassxc.keepassxc",
+        "org.keepassx.keepassxc",
         "com.hicknhacksoftware.MacPass",
         "net.antelle.keeweb",
         "com.markmcguill.strongbox",
+        "com.markmcguill.strongbox.pro",
         "com.keepassium.ios",
         "com.keepassium.ios.pro",
         // Proton

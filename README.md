@@ -490,6 +490,71 @@ because every real passage uses letters their alphabet has not unlocked. In
 `auto` the curriculum still rules — an early learner should not be handed
 letters they have never been taught.
 
+## The applications the keyboard stays silent in
+
+Keystroke sound in every application means the app receives every keystroke in
+every application, which is the correct moment to be uneasy. The monitor reads
+`keyCode` and nothing else — never `characters` — so what reaches it is which
+key, never which letter. That is a real distinction, and it is not a sufficient
+one: knowing the physical keys pressed while a master password is typed is
+knowing the master password.
+
+So there are three defences, and only the third is a list.
+
+Two of them ask, rather than remember. `IsSecureEventInputEnabled()` is true
+whenever any application has claimed secure input — every password field in
+macOS does, including the ones in browsers — and it is checked on the event
+path, so it covers fields nobody enumerated. And any application shipping an
+`ASCredentialProviderExtension` has declared itself a password manager to the
+system; `GlobalKeySound.declaresCredentialProvider` reads that declaration
+rather than a name. Both work for software written after this list was.
+
+The third is `protectedApps` in `AppPreferences.swift`, and it exists because
+the first two have a gap in the same place: a manager's own window is not a
+password field, and an older manager may ship no extension. Vault search, a
+secure note, a card number, the label on a one-time code — ordinary text
+fields, at the highest stakes in the app. While one of these is frontmost the
+monitor is uninstalled outright, so the events are not received at all rather
+than received and discarded.
+
+### Keeping the list honest
+
+A list of identifiers rots quietly, and it rots in the direction that looks
+fine. A wrong identifier never matches anything, so it produces no error and no
+missing feature — it just silently stops protecting an application while
+occupying the line that claims to. This list carried exactly that for a while:
+`com.lastpass.LastPass` where the desktop app is
+`com.lastpass.lastpassmacdesktop`.
+
+`make password-managers` re-checks every entry against two sources that state
+bundle identifiers outright — the Homebrew cask API, whose `quit:` and `zap`
+stanzas name them so the uninstaller can find them, and the App Store lookup
+API. It reports three things:
+
+| Section | Question it answers |
+|---|---|
+| Per-manager coverage | Is each known manager protected by *some* entry? |
+| In the list, confirmed by nothing | Is any entry unsupported by any source? |
+| Found by a source, not in the list | Has a manager shipped an identifier we lack? |
+
+The middle one is the reason the routine exists. The other two catch what is
+missing, which is the failure that eventually announces itself; only that one
+catches what is wrong, which is the failure that never does. Its first real run
+found three: KeePassXC's legacy `org.keepassx` preferences domain, Strongbox's
+paid bundle, and the LastPass container the cask still names.
+
+It reports and never rewrites. The list decides when the machine stops
+listening, so each line should be a decision somebody made — and a generator
+that produced an empty list because an API changed shape would leave a green
+build over no protection at all. Entries deliberately kept without a live
+source, such as a legacy bundle ID or an Apple authentication agent, are
+recorded with their reason in `verifiedByHand` in the tool, so the loud output
+stays reserved for something genuinely unexplained.
+
+It needs the network, so it is not part of `make test`: a gate that goes red
+because a CDN was slow is a gate people learn to ignore. It exits non-zero on
+drift, so it still works as one where it is wanted.
+
 ## Drift between the two implementations
 
 Everything shared is pinned by a vector, including the settings surface itself
