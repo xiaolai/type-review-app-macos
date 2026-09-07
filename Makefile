@@ -194,7 +194,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg upload
+.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg validate upload
 
 all: $(APP)
 
@@ -514,7 +514,27 @@ pkg:
 # good one. `pkg` and `upload` are separate commands, so an hour and a rebuild
 # can sit between them, and the thing being sent is a file on disk rather than
 # something this invocation produced.
-upload:
+# Asks Apple whether it would accept the package, without submitting it.
+#
+# Worth its own step because the local checks in `upload` and the ones Apple
+# runs are different questions. Everything here passed locally and Apple still
+# refused the first attempt -- for an account-level reason no amount of reading
+# the artefact could have found. A validation costs nothing and does not
+# consume a submission.
+validate:
+	@test -f "$(STORE_PKG)" \
+		|| { echo "error: no package at $(STORE_PKG) — run 'make pkg' first"; exit 1; }
+	@if [ -n "$(ASC_KEY_ID)" ] && [ -n "$(ASC_ISSUER_ID)" ]; then \
+		xcrun altool --validate-app -f "$(STORE_PKG)" -t macos \
+			--apiKey "$(ASC_KEY_ID)" --apiIssuer "$(ASC_ISSUER_ID)"; \
+	elif [ -n "$(ASC_APPLE_ID)" ]; then \
+		xcrun altool --validate-app -f "$(STORE_PKG)" -t macos \
+			-u "$(ASC_APPLE_ID)" -p "@keychain:$(ASC_KEYCHAIN_ITEM)"; \
+	else \
+		echo "error: no credentials — see 'make upload' for the two forms"; exit 1; \
+	fi
+
+upload: validate
 	@test -f "$(STORE_PKG)" \
 		|| { echo "error: no package at $(STORE_PKG) — run 'make pkg' first"; exit 1; }
 	# The same three questions the store will ask, asked here where the
