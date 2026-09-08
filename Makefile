@@ -245,10 +245,17 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
 	# The partial plist goes beside the bundle, not inside it: $(STAGE) is
 	# the .app itself, and anything left in a bundle's root that signing was
 	# not told about is "unsealed contents" and fails codesign outright.
-	@xcrun actool --compile $(CONTENTS)/Resources --app-icon AppIcon \
-		--output-partial-info-plist $(dir $(STAGE))icon-partial.plist \
+	# Absolute paths, all three of them. actool resolves a relative path
+	# against a working directory it caches from an earlier invocation rather
+	# than against the current one, so building a second checkout of this
+	# project on a machine that has already built the first fails with "the
+	# output directory does not exist" naming the *other* checkout. Verified:
+	# from /tmp/fresh with the directory present, the relative form reported
+	# the original repository's path and the absolute form worked.
+	@xcrun actool --compile $(CURDIR)/$(CONTENTS)/Resources --app-icon AppIcon \
+		--output-partial-info-plist $(CURDIR)/$(dir $(STAGE))icon-partial.plist \
 		--platform macosx --minimum-deployment-target 14.0 --target-device mac \
-		--errors --warnings $(ICON_DOC) >/dev/null
+		--errors --warnings $(CURDIR)/$(ICON_DOC) >/dev/null
 	# actool also flattens the document to an .icns. We do not use it —
 	# CFBundleIconFile points at the hand-drawn tile, which is the whole
 	# reason both files exist — and an unreferenced 50 KB in a shipped
