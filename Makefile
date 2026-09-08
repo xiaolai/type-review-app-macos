@@ -103,8 +103,17 @@ BUNDLE_ID_STORE ?= review.type.app
 #             ~/.appstoreconnect/private_keys/. Nothing to type, nothing to
 #             expire in a year, and revocable on its own.
 #   Apple ID  ASC_APPLE_ID + a password stored under ASC_KEYCHAIN_ITEM by
-#             `altool --store-password-in-keychain-item`. Referenced as
-#             @keychain:, so the password itself never appears anywhere.
+#             `altool --store-password-in-keychain-item --item <name>`. Passed
+#             back as `@keychain --item <name>`, so the password itself never
+#             appears on a command line.
+#
+#             Both forms take the item name as `--item`, and altool's own help
+#             documents both as positional -- `--store-password-in-keychain-item
+#             <name>` and `-p @keychain:<name>`. Neither works: storing fails
+#             with "Expected item argument is missing, --item", and reading
+#             fails with "Failed to find item <name>", which reads like a
+#             missing keychain entry rather than a syntax error. Measured
+#             against altool from Xcode 26.
 ASC_KEY_ID       ?=
 ASC_ISSUER_ID    ?=
 ASC_APPLE_ID     ?=
@@ -588,7 +597,7 @@ validate: verify-pkg
 			--apiKey "$(ASC_KEY_ID)" --apiIssuer "$(ASC_ISSUER_ID)"; \
 	elif [ -n "$(ASC_APPLE_ID)" ]; then \
 		xcrun altool --validate-app -f "$(STORE_PKG)" -t macos \
-			-u "$(ASC_APPLE_ID)" -p "@keychain:$(ASC_KEYCHAIN_ITEM)"; \
+			-u "$(ASC_APPLE_ID)" -p @keychain --item "$(ASC_KEYCHAIN_ITEM)"; \
 	else \
 		echo "error: no credentials — see 'make upload' for the two forms"; exit 1; \
 	fi
@@ -633,7 +642,7 @@ upload: verify-pkg validate
 	elif [ -n "$(ASC_APPLE_ID)" ]; then \
 		echo "  uploading as $(ASC_APPLE_ID), password from the keychain"; \
 		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
-			-u "$(ASC_APPLE_ID)" -p "@keychain:$(ASC_KEYCHAIN_ITEM)"; \
+			-u "$(ASC_APPLE_ID)" -p @keychain --item "$(ASC_KEYCHAIN_ITEM)"; \
 	else \
 		echo "error: no upload credentials configured. Either:"; \
 		echo "  make upload ASC_KEY_ID=... ASC_ISSUER_ID=...   (App Store Connect API key)"; \
