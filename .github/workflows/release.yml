@@ -52,17 +52,20 @@ jobs:
       - name: Use an Xcode that understands .icon
         run: |
           set -euo pipefail
-          newest=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          # Resolved, because the image ships symlinks beside the real
+          # bundles -- Xcode_26.3.0.app points at Xcode_26.3.app, sorts higher,
+          # and then never matches the path xcrun reports back.
+          newest=$(for d in /Applications/Xcode_26*.app; do
+                     [ -d "$d" ] && readlink -f "$d"; done | sort -Vu | tail -1)
           [ -n "$newest" ] || { echo "::error::no Xcode 26 on this runner"; exit 1; }
           sudo xcode-select -s "$newest"
           xcodebuild -version | head -1
-          # Prove the selection took and that the tool it provides is the one
-          # that matters here.
-          xcrun --find actool
-          case "$(xcrun --find actool)" in
-            "$newest"*) ;;
-            *) echo "::error::actool is not coming from $newest"; exit 1 ;;
-          esac
+          # Prove the selection took. Comparing versions rather than paths:
+          # what matters is that actool is new enough to read an Icon Composer
+          # document, and the path it lives at is incidental.
+          major=$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')
+          [ "$major" -ge 26 ] || { echo "::error::selected Xcode is $major, need 26+"; exit 1; }
+          echo "actool: $(xcrun --find actool)"
 
       - name: Import the signing certificate
         env:
