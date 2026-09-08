@@ -34,8 +34,7 @@ final class StatsViewController: NSViewController {
     /// toolbar's segmented control switches what the *window* is showing, and
     /// two identical-looking controls up there, governing a table and a grid
     /// respectively, would leave neither obviously attached to anything.
-    private let metric = NSSegmentedControl(
-        labels: ["Sessions", "Characters"], trackingMode: .selectOne, target: nil, action: nil)
+    private let metric = NSPopUpButton(frame: .zero, pullsDown: false)
     /// One row shape for both groupings. The columns ask the same four
     /// questions either way, so the table does not need to know which it is
     /// showing — only the first column's heading changes.
@@ -114,12 +113,18 @@ final class StatsViewController: NSViewController {
         // instead of leaving the table pushed down by an invisible grid.
         calendar.heightAnchor.constraint(
             equalToConstant: calendar.intrinsicContentSize.height).isActive = true
-        metric.selectedSegment = AppPreferences.statsGridCountsCharacters.value ? 1 : 0
+        // A borderless pop-up, not a segmented control. A segmented control
+        // fills its selection with the accent colour, which is the same blue
+        // the grid six points below uses to mean "this many characters" — two
+        // different meanings for one colour, side by side. This reads as a
+        // caption that happens to be clickable, which is what it is.
+        metric.addItems(withTitles: ["Sessions", "Characters"])
+        metric.selectItem(at: AppPreferences.statsGridCountsCharacters.value ? 1 : 0)
         metric.target = self
         metric.action = #selector(metricChanged)
-        metric.segmentStyle = .automatic
+        metric.isBordered = false
         metric.controlSize = .small
-        metric.font = NSFont.systemFont(ofSize: 11)
+        metric.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         let header = NSStackView(views: [summary, streakLabel, metric, calendar])
         header.orientation = .vertical
         header.alignment = .leading
@@ -127,7 +132,7 @@ final class StatsViewController: NSViewController {
         // The grid is evidence for the streak line above it, not another line
         // of it, so it gets air the two labels do not.
         header.setCustomSpacing(14, after: streakLabel)
-        header.setCustomSpacing(8, after: metric)
+        header.setCustomSpacing(6, after: metric)
         // Full width, so the grid has room for all twenty columns rather than
         // being squeezed to the width of the longest label above it.
         calendar.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
@@ -282,14 +287,14 @@ final class StatsViewController: NSViewController {
     }
 
     @objc private func metricChanged() {
-        AppPreferences.statsGridCountsCharacters.value = metric.selectedSegment == 1
+        AppPreferences.statsGridCountsCharacters.value = metric.indexOfSelectedItem == 1
         refresh()
     }
 
     /// Keeps the segment in step with the preference, which is what `present`
     /// actually reads.
     private func markMetric() {
-        metric.selectedSegment = AppPreferences.statsGridCountsCharacters.value ? 1 : 0
+        metric.selectItem(at: AppPreferences.statsGridCountsCharacters.value ? 1 : 0)
     }
 
     @objc private func groupingChanged() { refresh() }

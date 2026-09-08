@@ -26,13 +26,14 @@ final class PracticeCalendarView: NSView {
     /// belongs to a period the reader remembers.
     static let windowDays = 60
 
-    private static let columns = 20
+    private static let columns = 30
     private static let rows = (windowDays + columns - 1) / columns
-    /// Capped rather than derived from the width. Cells that grow with the
-    /// window turn into tiles and stop reading as a calendar.
-    private static let maxCellSize: CGFloat = 18
+    /// Capped, then shrunk to fit. Cells that grow with the window turn into
+    /// tiles and stop reading as a calendar; cells that cannot shrink force a
+    /// minimum window width wider than anything else here needs.
+    private static let maxCellSize: CGFloat = 16
     private static let gap: CGFloat = 3
-    private static let legendHeight: CGFloat = 16
+    private static let legendHeight: CGFloat = 18
 
     /// What a cell's number counts. The grid draws identically either way, so
     /// the unit only exists to keep the tooltip honest — a cell reading
@@ -79,10 +80,17 @@ final class PracticeCalendarView: NSView {
     override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
-        let cell = Self.maxCellSize
-        let height =
-            CGFloat(Self.rows) * cell + CGFloat(Self.rows - 1) * Self.gap + Self.legendHeight
+        // Reserved at the cap, so the row does not change height as the window
+        // is resized and shove the table up and down under the reader.
+        let height = CGFloat(Self.rows) * Self.maxCellSize + CGFloat(Self.rows - 1) * Self.gap
+            + Self.legendHeight
         return NSSize(width: NSView.noIntrinsicMetric, height: height)
+    }
+
+    /// As large as fits, never larger than the cap.
+    private var cellSize: CGFloat {
+        let available = bounds.width - CGFloat(Self.columns - 1) * Self.gap
+        return max(4, min(Self.maxCellSize, (available / CGFloat(Self.columns)).rounded(.down)))
     }
 
     func show(_ days: [PracticeDay], unit: Unit = .sessions) {
@@ -110,15 +118,15 @@ final class PracticeCalendarView: NSView {
     /// the window, and the more obvious for being between two things that
     /// describe the same thing.
     private func gridRect() -> NSRect {
-        let cell = Self.maxCellSize
+        let cell = cellSize
         let width = CGFloat(Self.columns) * cell + CGFloat(Self.columns - 1) * Self.gap
         let height = CGFloat(Self.rows) * cell + CGFloat(Self.rows - 1) * Self.gap
-        return NSRect(x: 0, y: 0, width: min(width, bounds.width), height: height)
+        return NSRect(x: 0, y: 0, width: width, height: height)
     }
 
     private func cellRect(at index: Int) -> NSRect {
         let grid = gridRect()
-        let cell = Self.maxCellSize
+        let cell = cellSize
         let column = index % Self.columns
         let row = index / Self.columns
         return NSRect(
@@ -138,7 +146,7 @@ final class PracticeCalendarView: NSView {
 
         for (index, day) in days.enumerated() {
             let rect = cellRect(at: index)
-            let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+            let path = NSBezierPath(roundedRect: rect, xRadius: 2.5, yRadius: 2.5)
 
             // The unpractised colour goes down for every cell, and the accent
             // is laid over it at the day's intensity. That is the same result
@@ -157,7 +165,7 @@ final class PracticeCalendarView: NSView {
                 // colouring it would collide with the one thing colour already
                 // means here, which is how much was typed.
                 let ring = NSBezierPath(
-                    roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
+                    roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 2.5, yRadius: 2.5)
                 ring.lineWidth = 1.5
                 NSColor.labelColor.withAlphaComponent(0.55).setStroke()
                 ring.stroke()
@@ -188,10 +196,22 @@ final class PracticeCalendarView: NSView {
         end.draw(at: NSPoint(x: grid.maxX - end.size().width, y: baseline))
     }
 
-    /// Slightly stronger than a hairline separator: an unpractised day has to
-    /// be visible as a cell, or the grid loses its shape in a quiet fortnight
-    /// and the reader cannot tell sixty days from however many they managed.
-    private static var emptyFill: NSColor { NSColor.quaternaryLabelColor }
+    /// The unpractised day.
+    ///
+    /// Written per appearance rather than taken from `quaternaryLabelColor`,
+    /// which is one value used in both and lands differently in each: grey on
+    /// white carries more apparent contrast than near-black on near-black, so
+    /// the same token that reads as a quiet dark-mode cell made the light-mode
+    /// grid louder than the labels beside it — with fifty-seven empty cells to
+    /// one filled, the emptiness became the loudest thing on the window.
+    ///
+    /// Still clearly a cell in both. An unpractised day that fades out
+    /// entirely takes the grid's shape with it, and a reader cannot tell sixty
+    /// days from however many they managed.
+    private static let emptyFill = NSColor(name: "PracticeCalendarEmpty") { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.10) : NSColor(white: 0, alpha: 0.06)
+    }
 
     // MARK: - Off-screen probe
 

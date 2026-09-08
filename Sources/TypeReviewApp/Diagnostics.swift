@@ -878,13 +878,29 @@ enum Diagnostics {
             // same shape, so a grid fed characters while labelled sessions is
             // wrong only in its tooltip -- invisible to every pixel check
             // above, and the sort of thing a metric switch breaks silently.
-            let summary = statsController.calendarSummary
-            guard summary.contains("characters typed") else {
-                print(
-                    "SELFTEST FAIL: the grid defaults to characters but describes itself as "
-                        + "\"\(summary)\"")
-                exit(1)
+            // Pinned rather than assumed. This reads a real preference, so
+            // asserting the *default* made the check pass or fail on whether
+            // whoever ran it had touched the control -- a test that inherits
+            // the machine's state, which is the same fault the calendar's own
+            // tests avoid by pinning their timezone.
+            let metricBefore = UserDefaults.standard.volatileDomain(
+                forName: UserDefaults.argumentDomain)
+            for (wantsCharacters, expected) in [(true, "characters typed"), (false, "sessions")] {
+                var arguments = metricBefore
+                arguments[AppPreferences.statsGridCountsCharacters.key] = wantsCharacters
+                UserDefaults.standard.setVolatileDomain(
+                    arguments, forName: UserDefaults.argumentDomain)
+                statsController.refresh()
+                let summary = statsController.calendarSummary
+                guard summary.hasSuffix(expected) else {
+                    print(
+                        "SELFTEST FAIL: with characters=\(wantsCharacters) the grid describes "
+                            + "itself as \"\(summary)\"")
+                    exit(1)
+                }
             }
+            UserDefaults.standard.setVolatileDomain(
+                metricBefore, forName: UserDefaults.argumentDomain)
 
             // And the data that menu is built from. An empty group would draw a
             // language header with nothing under it; an identifier that does

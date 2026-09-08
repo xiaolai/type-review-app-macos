@@ -781,11 +781,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.toolbar = controller.makeToolbar()
             window.toolbarStyle = .unified
             window.setContentSize(NSSize(width: 560, height: 560))
-            // A floor, not a preference. The practice grid is a fixed 417pt
-            // wide and the header above it is fixed too, so below this the
-            // grid clips and the table is left showing a row or two. The
-            // saved frame is restored after this is set, so it applies to
-            // windows sized before the grid existed as well as new ones.
+            // A floor, not a preference. The grid shrinks its cells to fit,
+            // so it no longer sets the width — but below about this the cells
+            // are too small to read as days, and the header plus grid leave
+            // the table showing a row or two. The saved frame is restored
+            // after this is set, so it applies to windows sized before the
+            // grid existed as well as to new ones.
             window.contentMinSize = NSSize(width: 480, height: 400)
             window.setFrameAutosaveName("TypeReviewStats")
             // Or closing Statistics deallocates the window while `statsWindow`
