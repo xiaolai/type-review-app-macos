@@ -316,3 +316,61 @@ private func subtractOneDay(_ key: String, calendar: Calendar) -> String {
     else { return key }
     return dayKey(previous.timeIntervalSince1970 * 1000, calendar: calendar)
 }
+
+/// One cell of the practice calendar.
+public struct PracticeDay: Sendable, Equatable {
+    /// `YYYY-MM-DD` in local time, the same key `dailyCounts` is built on.
+    public let key: String
+    /// Sessions finished on this day.
+    public let count: Int
+    /// Whether this is the anchor day the window ends on.
+    public let isToday: Bool
+    /// `0` for a day with no sessions, otherwise `0.25...1`, scaled against
+    /// the busiest day *in this window*.
+    ///
+    /// The 0.25 floor is not decoration: without it a day holding one session
+    /// out of a twenty-session maximum draws at 5% tint, which is
+    /// indistinguishable from having practised nothing at all. The distinction
+    /// the grid exists to show is practised-or-not, and only then how much.
+    public let intensity: Double
+
+    public init(key: String, count: Int, isToday: Bool, intensity: Double) {
+        self.key = key
+        self.count = count
+        self.isToday = isToday
+        self.intensity = intensity
+    }
+}
+
+/// The last `days` local days ending at `now`, oldest first.
+///
+/// The maximum that scales intensity is taken over the returned window rather
+/// than over all of history. A single enormous day from six months ago would
+/// otherwise flatten every visible cell against a reference the reader cannot
+/// see, and the grid would report a quiet fortnight as no practice at all.
+///
+/// Days are walked with `dayKeyBack`, which is calendar arithmetic rather than
+/// subtracting 86,400,000 milliseconds — across a daylight-saving change the
+/// latter lands on the wrong date and the window silently repeats or skips a
+/// day.
+public func practiceCalendar(
+    _ results: [RunResult], now: Double, days: Int, calendar: Calendar
+) -> [PracticeDay] {
+    guard days > 0 else { return [] }
+    let counts = dailyCounts(results, calendar: calendar)
+    let today = dayKey(now, calendar: calendar)
+
+    let keys = (0..<days).map { dayKeyBack(now, days - 1 - $0, calendar: calendar) }
+    let maximum = keys.reduce(0) { max($0, counts[$1] ?? 0) }
+
+    return keys.map { key in
+        let count = counts[key] ?? 0
+        // `maximum` is zero only when every day in the window is, in which
+        // case this branch is unreachable — but dividing by it would be a
+        // silent NaN into a drawing routine, so it is guarded rather than
+        // reasoned about.
+        let intensity = count == 0 || maximum == 0
+            ? 0 : 0.25 + (Double(count) / Double(maximum)) * 0.75
+        return PracticeDay(key: key, count: count, isToday: key == today, intensity: intensity)
+    }
+}
