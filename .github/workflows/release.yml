@@ -59,8 +59,14 @@ jobs:
         # release with no icon rather than a failure.
         run: |
           set -euo pipefail
-          xcodebuild -version | head -1
-          major=$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')
+          # Captured whole, then read. `xcodebuild -version | head -1` aborts:
+          # head closes the pipe after one line and xcodebuild does not handle
+          # SIGPIPE, so it throws and exits 134 -- which pipefail then makes
+          # fatal. The toolchain was fine; the diagnostic was killing the step.
+          ver=$(xcodebuild -version)
+          printf '%s\n' "$ver" | head -1
+          major=$(printf '%s\n' "$ver" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')
+          [ -n "$major" ] || { echo "::error::could not read the Xcode version"; exit 1; }
           [ "$major" -ge 26 ] || { echo "::error::Xcode $major cannot compile .icon, need 26+"; exit 1; }
           sw_vers -productVersion
 
