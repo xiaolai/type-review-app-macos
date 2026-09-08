@@ -21,6 +21,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// silence is a pack chosen blind — the whole point of the setting is
     /// what it sounds like, so choosing one plays it.
     var previewSound: () -> Void = {}
+    /// Says which voice is now in effect, in that voice. A voice picker that
+    /// made no sound would be asking the user to choose from 180 names.
+    var previewSpeech: () -> Void = {}
     /// Asks the owner to stand the global hot key down while the recorder is
     /// armed, and to put it back afterwards. Carbon hot keys are handled below
     /// the Cocoa event stream, so without this the combination already in use
@@ -104,6 +107,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    /// How many panes were built. Read by `--selftest`, which constructs this
+    /// window to prove every pane lays out — including the voice picker, whose
+    /// menu is assembled from whatever voices the machine happens to have.
+    var paneCount: Int { panes.count }
+
     func present() {
         refresh()
         // Both ends checked. `UserDefaults.integer` happily returns whatever
@@ -126,6 +134,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// rather than trusted from when it was built.
     func windowDidBecomeKey(_ notification: Notification) {
         refreshSoundScope()
+        // Voices are installed and removed in System Settings, which is the
+        // third thing that can change behind this window's back. The menu was
+        // built once at construction and this controller is retained, so a
+        // voice downloaded while it was open never appeared and a removed one
+        // stayed selectable.
+        refreshVoiceMenu()
         // The login item is the other thing System Settings can change behind
         // this window's back, and it lives in General. Refreshing only Sound
         // left that row showing what it read when the window opened.
@@ -226,6 +240,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Keyboard", self.soundPackPopup(),
                 hint: "Heard on every keystroke. Picking one plays it.")
             self.addRow(grid, "Volume", self.volumeSlider())
+            // Above the system-wide rows rather than below them: everything
+            // from here down is about the keystroke click in other
+            // applications, and this is not that. The volume it follows is the
+            // one immediately above it.
+            self.addRow(
+                grid, "Speak words", self.speakWordsToggle(),
+                hint: "A word is read aloud when it is finished and correct. "
+                    + "Not in code or generated drills.")
+            self.addRow(
+                grid, "Voice", self.speechVoicePopup(),
+                hint: "Automatic follows the language of the text. Picking one says its name.")
             self.addRow(
                 grid, "Sound in every app", self.globalSoundToggle(),
                 hint: "Clicks wherever you type, not only in this window.")
@@ -565,6 +590,83 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             if NSApp.currentEvent?.type == .leftMouseUp { self?.previewSound() }
         }
         return slider
+    }
+
+    /// Whether a finished word is read aloud.
+    ///
+    /// No permission to ask for and no preview to play: this speaks the
+    /// passage being typed, and there is nothing to demonstrate without one.
+    private func speakWordsToggle() -> NSControl {
+        let toggle = checkbox()
+        toggle.state = AppPreferences.speakWords.value ? .on : .off
+        bind(toggle) { AppPreferences.speakWords.value = toggle.state == .on }
+        return toggle
+    }
+
+    /// Rebuilds the voice menu against the voices installed right now, keeping
+    /// the selection by identifier. Silent: rebuilding is not choosing, so it
+    /// must not fire the preview.
+    private func refreshVoiceMenu() {
+        guard let popup = controls["speechVoice"] as? NSPopUpButton else { return }
+        let action = popup.action
+        popup.action = nil
+        populateVoices(popup)
+        popup.action = action
+    }
+
+    /// Which voice reads the words.
+    ///
+    /// Grouped by language rather than listed flat: this machine offers 180
+    /// voices across 49 languages, and a flat popup of 180 is a list you scroll
+    /// past rather than choose from. The languages the user actually reads come
+    /// first, so the common case is at the top.
+    ///
+    /// The identifier travels in `representedObject`, never the title. Four of
+    /// the voices installed here are called Eddy, and the title is localised.
+    private func speechVoicePopup() -> NSControl {
+        let popup = NSPopUpButton()
+        populateVoices(popup)
+        controls["speechVoice"] = popup
+        bind(popup) { [weak self] in
+            AppPreferences.speechVoice.value =
+                popup.selectedItem?.representedObject as? String ?? ""
+            self?.previewSpeech()
+        }
+        return popup
+    }
+
+    private func populateVoices(_ popup: NSPopUpButton) {
+        let menu = NSMenu()
+        // Headers are items that cannot be picked, which only holds with
+        // automatic enabling switched off — left on, AppKit enables everything
+        // it can find a target for and the language names become choosable.
+        menu.autoenablesItems = false
+        let automatic = NSMenuItem(title: "Automatic", action: nil, keyEquivalent: "")
+        automatic.representedObject = ""
+        automatic.isEnabled = true
+        menu.addItem(automatic)
+
+        let current = AppPreferences.speechVoice.value
+        var chosen: NSMenuItem?
+        for group in SpeechVoices.grouped() {
+            menu.addItem(.separator())
+            let header = NSMenuItem(title: group.language, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            for voice in group.voices {
+                let item = NSMenuItem(title: voice.name, action: nil, keyEquivalent: "")
+                item.representedObject = voice.identifier
+                item.indentationLevel = 1
+                item.isEnabled = true
+                menu.addItem(item)
+                if voice.identifier == current { chosen = item }
+            }
+        }
+        popup.menu = menu
+        // Falls back to Automatic when the stored identifier names a voice this
+        // machine no longer has — the same answer the player gives, so the
+        // control cannot claim a voice that is not being used.
+        popup.select(chosen ?? automatic)
     }
 
     /// Whether keystrokes are heard in every app.

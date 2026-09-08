@@ -50,6 +50,17 @@ public struct SessionSnapshot {
     public let remainingSec: Double?
     public let plan: LessonPlan?
     public let lastResult: RunResult?
+    /// Which passage is being typed — `q-twain-travel`, `code-fizzbuzz-py`,
+    /// `pseudo:…`.
+    ///
+    /// Additive, and deliberately: the golden vectors pin the *shape* of what
+    /// crosses this boundary, and a new field on a struct nothing serializes
+    /// leaves them untouched. `Step` and the step log stay private.
+    ///
+    /// It exists because the app cannot otherwise see which passage it is
+    /// serving. `RunResult` carries the id, but only once the run is over —
+    /// too late for anything that has to decide during it.
+    public let passageId: String
 }
 
 /// Orchestrates one practice run at a time: builds the lesson plan from
@@ -242,7 +253,11 @@ public final class Session {
     }
 
     public func snapshot() throws -> SessionSnapshot {
-        guard let textInput else { throw SessionError.noActiveRun }
+        // Both, not just the input. They are assigned together and only after
+        // every throwing step of `start()` has succeeded, so one without the
+        // other means the invariant has already broken — and reporting an
+        // empty id would hand the caller a passage name that names nothing.
+        guard let textInput, let passage else { throw SessionError.noActiveRun }
         let typing = textInput.snapshot()
         let elapsedMs = textInput.elapsedMs
         let remainingSec =
@@ -257,7 +272,8 @@ public final class Session {
             elapsedMs: elapsedMs,
             remainingSec: remainingSec,
             plan: plan,
-            lastResult: lastResult)
+            lastResult: lastResult,
+            passageId: passage.id)
     }
 
     private func buildPlan() -> LessonPlan {

@@ -88,8 +88,12 @@ final class StatsViewController: NSViewController {
         grouping.selectedSegment = 0
         grouping.target = self
         grouping.action = #selector(groupingChanged)
-        grouping.segmentStyle = .rounded
-        let header = NSStackView(views: [summary, streakLabel, grouping])
+        // `.automatic` in a toolbar, which is what draws the current macOS
+        // segmented picker rather than the older rounded capsule.
+        grouping.segmentStyle = .automatic
+        // The grouping control is not in here: it belongs in the toolbar, which
+        // is where macOS puts a control that switches what a window is showing.
+        let header = NSStackView(views: [summary, streakLabel])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
@@ -206,6 +210,91 @@ final class StatsViewController: NSViewController {
     }
 
     @objc private func groupingChanged() { refresh() }
+}
+
+/// The window's toolbar.
+///
+/// A window with no `NSToolbar` gets the short opaque title bar macOS drew
+/// before Big Sur — title centred in its own strip, traffic lights in a band
+/// doing nothing else. The practice window and the Library both carry a unified
+/// toolbar for exactly that reason, and this window was the one left behind, so
+/// it read as the odd one out in its own app.
+///
+/// The grouping picker moves in here rather than sitting in an improvised row
+/// above the table. A control that switches what the window is showing is a
+/// toolbar control on macOS; below the title it is a widget somebody drew.
+extension StatsViewController: NSToolbarDelegate {
+    static let groupingItem = NSToolbarItem.Identifier("grouping")
+
+    func makeToolbar() -> NSToolbar {
+        let toolbar = NSToolbar(identifier: "TypeReviewStats")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        return toolbar
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [.flexibleSpace, Self.groupingItem]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        toolbarDefaultItemIdentifiers(toolbar)
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard identifier == Self.groupingItem else { return nil }
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        item.label = "Group by"
+        item.paletteLabel = item.label
+        item.toolTip = "Show the numbers per key or per finger"
+        item.view = grouping
+        // Off for the same reason the keyboard toggle sets it: with a custom
+        // view AppKit disables the item unless the target implements
+        // validation, and there is no state in which this picker is
+        // unavailable.
+        item.autovalidates = false
+        // A segmented control has no menu form of its own, so in a window
+        // narrow enough to push it into the toolbar's overflow it becomes a
+        // "Group by" entry that cannot group by anything. This is the same two
+        // choices as a menu.
+        let overflow = NSMenuItem(title: item.label, action: nil, keyEquivalent: "")
+        let submenu = NSMenu(title: item.label)
+        // Ticked when the menu is about to be shown rather than when it is
+        // built. Built once, the checkmark froze at whatever was selected at
+        // construction and went on claiming Keys after the user chose Fingers.
+        submenu.delegate = self
+        for (index, title) in ["Keys", "Fingers"].enumerated() {
+            let choice = NSMenuItem(
+                title: title, action: #selector(groupingPicked(_:)), keyEquivalent: "")
+            choice.target = self
+            choice.tag = index
+            submenu.addItem(choice)
+        }
+        overflow.submenu = submenu
+        item.menuFormRepresentation = overflow
+        return item
+    }
+}
+
+extension StatsViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        for item in menu.items {
+            item.state = item.tag == grouping.selectedSegment ? .on : .off
+        }
+    }
+}
+
+extension StatsViewController {
+    /// The overflow menu's half of the grouping picker. Moves the segmented
+    /// control with it, so the two cannot disagree about what is shown.
+    @objc fileprivate func groupingPicked(_ sender: NSMenuItem) {
+        grouping.selectedSegment = sender.tag
+        groupingChanged()
+    }
 }
 
 extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {

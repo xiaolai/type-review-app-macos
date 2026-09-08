@@ -1,3 +1,4 @@
+import AVFoundation
 import AppKit
 import TypeReviewKit
 
@@ -15,6 +16,28 @@ import TypeReviewKit
 /// which is exactly the question no unit test can answer.
 @MainActor
 enum Diagnostics {
+    /// The command-line checks, named once.
+    ///
+    /// Read by `main.swift` before the app is configured, by the launch path
+    /// that decides whether to come to the front, and by the mutual-exclusion
+    /// check. Three copies of this list is three chances for a new check to be
+    /// forgotten by one of them.
+    static let flags = ["--soundcheck", "--selftest", "--speechbench"]
+
+    /// Whether this launch is a check rather than somebody opening the app.
+    ///
+    /// **A check does not take the screen.** These run beside whatever the
+    /// person at the keyboard is actually doing — often in a loop, while
+    /// developing the very thing being checked — and an app that activates
+    /// itself and steals focus once per run makes the machine unusable for as
+    /// long as the loop lasts. Nothing any of them measures needs the app to be
+    /// frontmost: the self-test types through `insertText` rather than through
+    /// key events, and renders the view with `cacheDisplay`, which does not
+    /// require the window to be on screen.
+    static var isRunningCheck: Bool {
+        CommandLine.arguments.contains(where: flags.contains)
+    }
+
     /// Proves every pack can actually produce sound in the built app.
     ///
     /// The unit tests cover the synthesis arithmetic, and they would pass just
@@ -84,6 +107,541 @@ enum Diagnostics {
         {
             try? await Task.sleep(for: .milliseconds(50))
         }
+    }
+
+    /// Times the keystroke path with word speech off and then on.
+    ///
+    /// §6 of the speech plan makes an asynchronous promise: nothing on the
+    /// keystroke path waits on speech — no synthesizer construction, no voice
+    /// lookup, no dictionary call. That promise is the kind that holds on the
+    /// day it is written and quietly stops holding when somebody moves a line,
+    /// so it is measured rather than asserted.
+    ///
+    /// Through `insertText`, the same entry point AppKit uses, so what is
+    /// timed is the path a real keystroke takes.
+    static func runSpeechBench(practice: PracticeViewController) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard let view = practice.view.subviews.compactMap({ $0 as? TypingView }).first else {
+                print("SPEECHBENCH FAIL: no typing surface")
+                exit(1)
+            }
+            // The benchmark's settings go in the *argument* domain, which sits
+            // above the persistent one in `UserDefaults`' search order and is
+            // never written to disk. So the user's real Speak Words and source
+            // channel are not touched at all, and there is nothing to put back
+            // — not on the timeout, not on Ctrl-C, not on a crash. The previous
+            // arrangement wrote the real preferences and restored them on the
+            // two programmed exits, which left somebody's channel switched to
+            // Quotes if they interrupted the run.
+            //
+            // Overlaid on whatever is already there, not written over it:
+            // `setVolatileDomain` *replaces* a domain's contents, and the
+            // argument domain is where a real `-SpeechVoice …` on the command
+            // line lands — so replacing it wholesale discarded the override the
+            // person running the benchmark had just asked for.
+            let argumentsBefore = UserDefaults.standard.volatileDomain(
+                forName: UserDefaults.argumentDomain)
+            var benchArguments = argumentsBefore
+            benchArguments["CorpusChannel"] = CorpusChannel.quotes.rawValue
+            benchArguments[AppPreferences.speakWords.key] = false
+            UserDefaults.standard.setVolatileDomain(
+                benchArguments, forName: UserDefaults.argumentDomain)
+            // The newest run's index, not how many runs there are. History is
+            // trimmed at `maxHistory`, so past the cap a recorded run replaces
+            // an older one and the *count* does not move — an assertion that
+            // subtracted counts would pass over a real write. The index is
+            // monotonic and never reused.
+            let indexBefore = practice.history.map(\.index).max() ?? -1
+            // These are the user's real settings, so putting them back is not
+            // tidiness. Registered here rather than at the top level so the
+            // timeout can restore them too: leaving somebody's source channel
+            // switched to Quotes because a benchmark hung is a side effect
+            // they would never connect to running one.
+            let restore = {
+                UserDefaults.standard.setVolatileDomain(
+                    argumentsBefore, forName: UserDefaults.argumentDomain)
+                practice.applyTypingPreferences()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 180) {
+                restore()
+                print("SPEECHBENCH FAIL: timed out")
+                exit(2)
+            }
+            // Quotes, because the provenance gate refuses a generated drill —
+            // and `auto` in an early curriculum serves exactly that. Left on
+            // `auto` the measurement would compare silence against silence and
+            // report a pass.
+            //
+            // Not sufficient on its own: a profile in benchmark mode with
+            // numbers, punctuation or a timed test is served generated text
+            // whatever the channel says. The rounds count what the gate
+            // actually accepted, so that case is named rather than reported as
+            // a failure of the code.
+            practice.applyTypingPreferences()
+
+            let utterancesFrom = practice.spokenWordCount
+            runRound(
+                practice, view, startedAt: Date(), round: 0, state: BenchState(),
+                restore: restore
+            ) { state in
+                // The rounds' utterances, counted before the clipping check
+                // speaks a word of its own. Read afterwards, its two
+                // `speakWord` calls satisfied the "speech reached the
+                // synthesizer" assertion by themselves — so the rounds could
+                // have produced nothing and the check would still have passed.
+                //
+                // One turn first, so the last round's queued handoffs land.
+                DispatchQueue.main.async {
+                    let roundUtterances = practice.spokenWordCount - utterancesFrom
+                    // The clipping check speaks, so it runs before the settings
+                    // go back — and it needs real time, because what it
+                    // measures is whether an utterance was allowed to finish.
+                    checkNothingIsClipped(practice) { clip in
+                        restore()
+                        report(
+                            state: state, clip: clip,
+                            utterances: roundUtterances,
+                            runsRecorded: (practice.history.map(\.index).max() ?? -1)
+                                - indexBefore)
+                    }
+                }
+            }
+        }
+    }
+
+    /// What the rounds accumulate.
+    private struct BenchState {
+        var silent: [Double] = []
+        var speaking: [Double] = []
+        var passages = 0
+        var speakable = 0
+        /// Words *offered* to the player during the off passes. Any at all
+        /// means the setting is not doing what the measurement assumes.
+        ///
+        /// Offers rather than utterances, because only an offer can be pinned
+        /// to a pass: it happens inside the keystroke, while the utterance is
+        /// enqueued a runloop turn later — deliberately, so that speech cannot
+        /// run inside the typing. The utterances are checked separately, in
+        /// total, once the queue has drained.
+        var silentWords = 0
+        /// And during the on passes.
+        var spokenWords = 0
+        /// Voices resolved at all, whenever they were resolved.
+        ///
+        /// Separate from `lateResolutions`, and both are needed. Late ones
+        /// catch work on the keystroke path; this catches the other failure —
+        /// resolving once for the whole session and reusing that voice for
+        /// every later passage, which is silent, wrong, and produces no late
+        /// lookups whatsoever.
+        var resolutions = 0
+        /// Voices resolved *while keystrokes were being timed*.
+        ///
+        /// The number §6 is actually about. It should be zero: a passage
+        /// arrives, `prepare()` resolves its voice on the next turn of the
+        /// runloop, and the typist reaches the first word long after that.
+        var lateResolutions = 0
+    }
+
+    /// Practice, Appearance, Sound, General, Data, About.
+    ///
+    /// Named once rather than written into both the check and its message,
+    /// which is how the first version of this reported "built 6 panes, expected
+    /// 6" — a failure message that argued with itself.
+    private static let expectedSettingsPanes = 6
+
+    /// Flips Speak Words for the benchmark without touching what is on disk.
+    private static func setBenchSpeech(_ on: Bool) {
+        var domain = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        domain[AppPreferences.speakWords.key] = on
+        UserDefaults.standard.setVolatileDomain(domain, forName: UserDefaults.argumentDomain)
+    }
+
+    /// How many passages each mode is measured over. A single quote is about a
+    /// hundred keystrokes, which is too few to read a tail from.
+    private static let benchPasses = 12
+
+    /// How long the whole measurement may take before it gives up.
+    ///
+    /// Checked between rounds rather than only by the watchdog, which sits on
+    /// the same main queue the measurement uses. This does not survive a call
+    /// that blocks for ever — nothing on this queue does — but it turns
+    /// "unusably slow" into a bounded failure with a number attached.
+    private static let benchDeadlineSeconds: Double = 120
+
+    /// One interleaved round: the same measurement with speech off, then on.
+    ///
+    /// Chained through the main queue rather than run in a loop, and that is
+    /// the measurement rather than a matter of style. `prepare()` defers the
+    /// synthesizer and the voice by one turn of the runloop — which is how a
+    /// real passage has both ready long before the typist reaches its first
+    /// word — and a synchronous loop never yields, so it would time the
+    /// fallback path on every passage and never the one that actually runs.
+    ///
+    /// Interleaved, not one mode after the other: each round draws a fresh
+    /// passage and the machine drifts under load, so two consecutive blocks
+    /// would compare different workloads on a differently-warmed machine and
+    /// call the difference speech.
+    private static func runRound(
+        _ practice: PracticeViewController, _ view: TypingView, startedAt: Date,
+        round: Int, state: BenchState, restore: @escaping () -> Void,
+        finish: @escaping (BenchState) -> Void
+    ) {
+        guard round < benchPasses else { return finish(state) }
+        guard Date().timeIntervalSince(startedAt) < benchDeadlineSeconds else {
+            // Through `restore` like every other way out of here. These are the
+            // user's real settings, and an exit that skipped this would leave
+            // their source channel switched to Quotes with nothing to connect
+            // it to.
+            restore()
+            print(
+                "SPEECHBENCH FAIL: gave up after "
+                    + String(format: "%.0fs", benchDeadlineSeconds))
+            exit(2)
+        }
+
+        setBenchSpeech(false)
+        // Applied here rather than waited for: the volatile write posts no
+        // notification, and the pass below would otherwise measure the state
+        // this line is trying to leave.
+        practice.applyTypingPreferences()
+        practice.startFreshRun()
+        DispatchQueue.main.async {
+            let silentWordsBefore = practice.wordsOffered
+            let off = typePassage(practice, view)
+            let silentWords = practice.wordsOffered - silentWordsBefore
+
+            setBenchSpeech(true)
+            practice.applyTypingPreferences()
+            practice.startFreshRun()
+            let speakable = practice.passageIsSpeakable
+            // Before the hop that runs `prepare()`, so the window covers this
+            // passage's resolution and nothing that was already in flight.
+            let resolutionsBefore = practice.voiceResolutions
+            DispatchQueue.main.async {
+                // Read after the turn, not before it: everything `prepare()`
+                // was going to do has happened by now, so anything resolved
+                // from here on was resolved on the keystroke path.
+                let voicesBefore = practice.voiceResolutions
+                let spokenWordsBefore = practice.wordsOffered
+                let on = typePassage(practice, view)
+                // One turn before the next round replaces the passage, so the
+                // words this pass queued are actually spoken.
+                //
+                // Speech is handed off a runloop turn after the keystroke, and
+                // a word whose passage has already been replaced is dropped —
+                // correctly, since it is no longer the word on screen. But this
+                // loop types a whole passage without yielding, so *every* word
+                // it queued was still pending when the next round started, and
+                // all of them were dropped: 356 words offered and 29 spoken.
+                // The measurement has to let them land.
+                DispatchQueue.main.async {
+                var next = state
+                next.silent += off.samples
+                next.speaking += on.samples
+                next.passages += on.typed ? 1 : 0
+                next.speakable += speakable ? 1 : 0
+                next.silentWords += silentWords
+                next.spokenWords += practice.wordsOffered - spokenWordsBefore
+                next.lateResolutions += practice.voiceResolutions - voicesBefore
+                next.resolutions += practice.voiceResolutions - resolutionsBefore
+                runRound(
+                    practice, view, startedAt: startedAt, round: round + 1,
+                    state: next, restore: restore, finish: finish)
+                }
+            }
+        }
+    }
+
+    /// One passage, typed through the real input path and timed per keystroke.
+    private static func typePassage(
+        _ practice: PracticeViewController, _ view: TypingView
+    ) -> (samples: [Double], typed: Bool) {
+        // Newlines are not typed: `TextInput` steps over them by itself, so
+        // sending one would be scored against the wrong character and every
+        // word after it would be wrong — and silent.
+        let units = Array(practice.currentPassage.utf16).filter { $0 != 0x0A }
+        guard units.count > 1 else { return ([], false) }
+        var samples: [Double] = []
+        samples.reserveCapacity(units.count - 1)
+        // All but the last. Finishing a run records a result and saves the
+        // profile, and a benchmark has no business writing to it.
+        //
+        // The clock cannot finish one either: a timed benchmark needs ten
+        // seconds of active typing at the shortest the settings allow, and a
+        // passage here accumulates tens of milliseconds. `runsRecorded` is the
+        // loud backstop if that ever stops being true.
+        for unit in units.dropLast() {
+            let text = String(utf16CodeUnits: [unit], count: 1)
+            let start = DispatchTime.now().uptimeNanoseconds
+            view.insertText(text, replacementRange: NSRange())
+            samples.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000)
+        }
+        return (samples, true)
+    }
+
+    /// Interrupts a word on purpose, and measures how much of it survived.
+    ///
+    /// This is the check the plural bug needed, and the only shape of check
+    /// that can see it. Every other number here is blind: the word rule
+    /// produces `cats`, the player is handed `cats`, the synthesizer is asked
+    /// for `cats`, and what leaves the speaker is `ca` — because the next word
+    /// cut it off partway through.
+    ///
+    /// **Counting cancellations does not work.** Measured against the real
+    /// framework, an utterance stopped with `.immediate` is reported through
+    /// `didFinish` exactly like one that ran to the end. The first version of
+    /// this check counted starts against finishes, found them equal under both
+    /// policies, and passed against the very bug it was written for. Only the
+    /// duration tells them apart: 267ms of a 607ms `cats` against 597ms.
+    ///
+    /// The interrupt is fired from `onWordStarted` rather than after a fixed
+    /// delay, because a word can only be clipped while it is genuinely in
+    /// flight — and an interrupt that lands before the utterance begins clips
+    /// nothing and passes.
+    private static let clipInterruptSeconds: Double = 0.25
+
+    /// How much longer than the interrupt the word has to keep going.
+    ///
+    /// Relative, not an absolute floor: a faster voice says the same word in
+    /// less time, and a fixed 450ms would start failing on one. A word cut off
+    /// at the interrupt lasts about as long as the interrupt; a word left alone
+    /// runs well past it.
+    private static let clipSurvivalFactor: Double = 1.4
+
+    private static func checkNothingIsClipped(
+        _ practice: PracticeViewController,
+        then finish: @escaping ((audibleMs: Int, interruptedAfter: Double?)?) -> Void
+    ) {
+        // The timing rounds just spoke four hundred words and the last of them
+        // is still in flight. Without this pause its ending lands on the
+        // callbacks below and is measured instead — a stale duration of
+        // effectively zero, which fails the check under every policy. That is
+        // how this check first came to fail against its own fix.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            var audible: Int?
+            var started = 0
+            var startedAt: Date?
+            var interruptedAfter: Double?
+            practice.onWordStarted = {
+                started += 1
+                guard started == 1 else { return }
+                startedAt = Date()
+                DispatchQueue.main.asyncAfter(deadline: .now() + clipInterruptSeconds) {
+                    // When it *actually* fired, not when it was scheduled to.
+                    // A main queue busy with the tail of the timed rounds can
+                    // deliver this late, and measuring survival against the
+                    // scheduled 250ms would then let a word cut off at 400ms
+                    // clear a 350ms bar and pass.
+                    interruptedAfter = startedAt.map { Date().timeIntervalSince($0) }
+                    // The interrupt is just another finished word, which is
+                    // exactly what happens when somebody types the next one.
+                    practice.speakWord("next")
+                }
+            }
+            practice.onWordEnded = { milliseconds in
+                // Only once the word this check started has begun, so an
+                // ending left over from the rounds cannot be mistaken for it.
+                guard started >= 1, audible == nil else { return }
+                audible = milliseconds
+            }
+            practice.speakWord("elephants")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                practice.onWordStarted = nil
+                practice.onWordEnded = nil
+                finish(audible.map { (audibleMs: $0, interruptedAfter: interruptedAfter) })
+            }
+        }
+    }
+
+    /// One sort, three statistics. Sorting per percentile meant sorting each
+    /// sample array three times to print numbers that were already known.
+    private struct Timings {
+        let median: Double
+        let p95: Double
+        let slowest: Double
+        let count: Int
+
+        init(_ samples: [Double]) {
+            let sorted = samples.sorted()
+            count = sorted.count
+            median = Timings.at(0.5, of: sorted)
+            p95 = Timings.at(0.95, of: sorted)
+            slowest = sorted.last ?? 0
+        }
+
+        private static func at(_ fraction: Double, of sorted: [Double]) -> Double {
+            guard !sorted.isEmpty else { return 0 }
+            return sorted[min(sorted.count - 1, max(0, Int(fraction * Double(sorted.count - 1))))]
+        }
+    }
+
+    /// What speech is allowed to add to a typical keystroke, in microseconds.
+    ///
+    /// A budget, not a measurement of today's machine. 60 wpm is five
+    /// keystrokes a second, so 250µs is a twentieth of a percent of the time
+    /// between two keys — far below anything a typist could feel, and far above
+    /// the enqueue this should be.
+    private static let medianBudgetMicroseconds: Double = 250
+
+    /// And what it may add to the slowest twentieth.
+    ///
+    /// The median alone cannot answer this. Speech happens on word boundaries —
+    /// roughly one keystroke in five — so a cost paid only when a word finishes
+    /// barely moves the median and would pass. It lands squarely in the tail.
+    ///
+    /// Looser than the median's, because the tail is where scheduler noise
+    /// lives: an unrelated page fault shows up here, and a regression worth
+    /// catching is a synchronous call, which costs milliseconds.
+    private static let tailBudgetMicroseconds: Double = 2_000
+
+    /// And what it may add to the single slowest keystroke of the run.
+    ///
+    /// The tail is not enough either. The per-passage voice resolution is one
+    /// keystroke in about a hundred and fifty, so it sits past the 99th
+    /// percentile and p95 cannot see it — and it is exactly the shape of the
+    /// thing §6 forbids. Only the extreme catches a cost paid once per passage.
+    ///
+    /// 25ms is loose on purpose: it is far above the millisecond-scale hiccups
+    /// a busy machine produces and far below what the work this guards against
+    /// actually costs — building a synthesizer or walking the installed voice
+    /// catalogue are tens to hundreds of milliseconds.
+    private static let slowestBudgetMicroseconds: Double = 25_000
+
+    private static func report(
+        state: BenchState, clip: (audibleMs: Int, interruptedAfter: Double?)?,
+        utterances: Int, runsRecorded: Int
+    ) {
+        let words = state.spokenWords
+        let (silent, speaking) = (state.silent, state.speaking)
+        let (passages, speakable) = (state.passages, state.speakable)
+        guard !silent.isEmpty, !speaking.isEmpty else {
+            print("SPEECHBENCH FAIL: no keystrokes were timed")
+            exit(1)
+        }
+        // Said before anything else, because it is the one failure that is not
+        // about the code. A profile in benchmark mode with numbers or
+        // punctuation is served generated text whatever the channel says, and
+        // the gate is right to refuse it.
+        guard speakable > 0 else {
+            print(
+                "SPEECHBENCH FAIL: the provenance gate refused all \(passages) passages, "
+                    + "so there was nothing to measure. This profile is most likely in "
+                    + "benchmark mode with numbers, punctuation or a timed test, which is "
+                    + "served generated text whatever the source channel says.")
+            exit(1)
+        }
+        // Without this the whole check is vacuous: speech that never happened
+        // and speech that costs nothing produce the same timings. The count
+        // comes from the player, so it is utterances handed to the synthesizer
+        // rather than words offered to the player and possibly dropped.
+        guard words > 0 else {
+            print("SPEECHBENCH FAIL: speech was on and not one word was offered")
+            exit(1)
+        }
+        // And the stronger claim, in total rather than per pass: words were
+        // not merely offered, they reached the synthesizer. Checked here
+        // because `report` runs after the clipping check's own wait, by which
+        // time everything queued during the rounds has drained.
+        guard utterances > 0 else {
+            print(
+                "SPEECHBENCH FAIL: \(words) words were offered and none became an "
+                    + "utterance — the player dropped every one of them")
+            exit(1)
+        }
+        // The other half of that, and it is not symmetric noise: without it,
+        // speech left switched on through the off passes produces two nearly
+        // identical timings and a confident green.
+        guard state.silentWords == 0 else {
+            print(
+                "SPEECHBENCH FAIL: \(state.silentWords) words were spoken with the "
+                    + "setting off, so the two measurements are of the same thing")
+            exit(1)
+        }
+        // Once per passage, counted whenever it happened. `lateResolutions`
+        // below says none of it was on the keystroke path; this says it
+        // happened at all, per passage — the failure it catches is resolving
+        // once for the session and reusing that voice for every later passage,
+        // which produces no late lookups and reads a French quote in English.
+        guard state.resolutions == speakable else {
+            print(
+                "SPEECHBENCH FAIL: the voice was resolved \(state.resolutions) times over "
+                    + "\(speakable) speakable passages — expected once each")
+            exit(1)
+        }
+        // §6's promise, stated directly: the voice is resolved when the
+        // passage arrives, not while somebody is typing it. `prepare()` had a
+        // full turn of the runloop before each round's keystrokes, so anything
+        // resolved during them was resolved on the path that is supposed to
+        // stay clear. The latency gates below would miss it — one slow key in a
+        // hundred and fifty sits past the 95th percentile — so it is counted
+        // rather than inferred.
+        guard state.lateResolutions == 0 else {
+            print(
+                "SPEECHBENCH FAIL: \(state.lateResolutions) voice lookups happened "
+                    + "on the keystroke path — preparation is not running ahead of the typing")
+            exit(1)
+        }
+        // A benchmark has no business in the user's history.
+        guard runsRecorded == 0 else {
+            print("SPEECHBENCH FAIL: the benchmark recorded \(runsRecorded) run(s)")
+            exit(1)
+        }
+
+        guard let clip else {
+            print("SPEECHBENCH FAIL: the interrupted word never started speaking")
+            exit(1)
+        }
+        guard let interruptedAfter = clip.interruptedAfter else {
+            print("SPEECHBENCH FAIL: the interrupt never fired, so nothing was tested")
+            exit(1)
+        }
+        // Against when the interrupt actually landed, not when it was asked to.
+        let interruptMs = Int(interruptedAfter * 1000)
+        let survived = Int(Double(interruptMs) * clipSurvivalFactor)
+        guard clip.audibleMs >= survived else {
+            print(
+                "SPEECHBENCH FAIL: a word interrupted after \(interruptMs)ms was audible for "
+                    + "only \(clip.audibleMs)ms — it is being cut off partway through, "
+                    + "which is heard as a missing plural")
+            exit(1)
+        }
+
+        let off = Timings(silent)
+        let on = Timings(speaking)
+        let median = on.median - off.median
+        let tail = on.p95 - off.p95
+        let slowest = on.slowest - off.slowest
+        print(
+            String(
+                format: "SPEECHBENCH off: median %.1fµs p95 %.1fµs max %.1fµs (%d keystrokes)",
+                off.median, off.p95, off.slowest, off.count))
+        print(
+            String(
+                format:
+                    "SPEECHBENCH on:  median %.1fµs p95 %.1fµs max %.1fµs "
+                    + "(%d keystrokes, %d words offered, %d spoken, "
+                    + "%d speakable passages, 0 late voice lookups)",
+                on.median, on.p95, on.slowest, on.count, words, utterances, speakable))
+        guard median <= medianBudgetMicroseconds, tail <= tailBudgetMicroseconds,
+            slowest <= slowestBudgetMicroseconds
+        else {
+            print(
+                String(
+                    format: "SPEECHBENCH FAIL: speech adds %.1fµs median (budget %.0f), "
+                        + "%.1fµs at p95 (budget %.0f), %.1fµs at the slowest key (budget %.0f)",
+                    median, medianBudgetMicroseconds, tail, tailBudgetMicroseconds,
+                    slowest, slowestBudgetMicroseconds))
+            exit(1)
+        }
+        print(
+            "SPEECHBENCH clip: a word interrupted after \(interruptMs)ms still ran "
+                + "\(clip.audibleMs)ms — not cut off")
+        print(
+            String(
+                format: "SPEECHBENCH OK: speech adds %.1fµs median, %.1fµs at p95, "
+                    + "%.1fµs at the slowest key",
+                median, tail, slowest))
+        exit(0)
     }
 
     /// Drives a full run through the real UI and reports what reached disk.
@@ -246,6 +804,67 @@ enum Diagnostics {
                 exit(1)
             }
 
+            // The Settings window builds, every pane of it.
+            //
+            // Nothing else here touches it: the practice screen is what
+            // `--selftest` drives, and a pane that traps while being laid out
+            // would ship green and only be found by opening Settings. The voice
+            // picker is the reason this was added — it builds a 230-item menu
+            // from whatever voices the machine has, which is the most
+            // machine-dependent thing in this app.
+            let settings = SettingsWindowController()
+            guard settings.paneCount == expectedSettingsPanes else {
+                print(
+                    "SELFTEST FAIL: Settings built \(settings.paneCount) panes, expected "
+                        + "\(expectedSettingsPanes)")
+                exit(1)
+            }
+
+            // The Statistics window too, for the same reason — it is built
+            // lazily when somebody clicks, so a toolbar or a moved control that
+            // traps would ship green and be found by a user.
+            let statsController = StatsViewController()
+            statsController.history = { [] }
+            statsController.refresh()
+            let statsToolbar = statsController.makeToolbar()
+            guard
+                statsToolbar.delegate != nil,
+                statsController.toolbarDefaultItemIdentifiers(statsToolbar)
+                    .contains(StatsViewController.groupingItem),
+                statsController.toolbar(
+                    statsToolbar, itemForItemIdentifier: StatsViewController.groupingItem,
+                    willBeInsertedIntoToolbar: true)?.view != nil
+            else {
+                print("SELFTEST FAIL: the Statistics toolbar has no grouping control")
+                exit(1)
+            }
+
+            // And the data that menu is built from. An empty group would draw a
+            // language header with nothing under it; an identifier that does
+            // not resolve is a row that silently selects nothing.
+            let voiceGroups = SpeechVoices.grouped()
+            guard !voiceGroups.isEmpty, voiceGroups.allSatisfy({ !$0.voices.isEmpty }) else {
+                print("SELFTEST FAIL: \(voiceGroups.count) voice groups, some empty")
+                exit(1)
+            }
+            // English only. The picker offers a voice to choose deliberately,
+            // and 180 voices across 49 languages is a list nobody chooses from.
+            let foreign = voiceGroups.flatMap(\.voices)
+                .filter { AVSpeechSynthesisVoice(identifier: $0.identifier)
+                    .map { !($0.language == "en" || $0.language.hasPrefix("en-")) } ?? false }
+            guard foreign.isEmpty else {
+                print("SELFTEST FAIL: \(foreign.count) non-English voices in the picker")
+                exit(1)
+            }
+            let unresolvable = voiceGroups.flatMap(\.voices)
+                .filter { AVSpeechSynthesisVoice(identifier: $0.identifier) == nil }
+            guard unresolvable.isEmpty else {
+                print(
+                    "SELFTEST FAIL: \(unresolvable.count) voices do not resolve by identifier, "
+                        + "e.g. \(unresolvable[0].name)")
+                exit(1)
+            }
+
             // The library round-trip, through the real file store: add,
             // reload from disk, confirm the corpus serves it, delete. The unit
             // tests cover the parser and the picker; only this can tell
@@ -299,7 +918,19 @@ enum Diagnostics {
                 print("SELFTEST FAIL: no passage")
                 exit(1)
             }
-            for unit in Array(expected.utf16) {
+            // Newlines are not typed. `TextInput` steps over them by itself —
+            // Enter is reserved for advancing — so sending one is scored
+            // against the character *after* it, and every keystroke from there
+            // on lands one position out.
+            //
+            // Quotes have no newlines, which is why this passed for as long as
+            // it did. Code passages preserve their layout and are full of
+            // them, so with the Code channel selected the self-test reported a
+            // perfectly typed passage at 7% accuracy: a check failing on the
+            // app being right.
+            let passageBefore = practice.currentPassageId
+            let typeable = Array(expected.utf16).filter { $0 != 0x0A }
+            for unit in typeable {
                 view.insertText(String(utf16CodeUnits: [unit], count: 1), replacementRange: NSRange())
             }
 
@@ -327,11 +958,20 @@ enum Diagnostics {
                 // that showed up before, because the only assertion was that
                 // *a* run reached disk. One run at 1% accuracy was reported as
                 // OK before this line existed.
-                guard metrics.accuracy > 99.9, metrics.correctChars == expected.utf16.count else {
+                // Against the typeable count, not the passage's. A skipped
+                // newline stays `.untyped` and is counted as neither correct
+                // nor wrong, so a passage with layout can never reach its own
+                // length here.
+                guard metrics.accuracy > 99.9, metrics.correctChars == typeable.count else {
+                    let recorded = profile.results.last!
                     print(
-                        "SELFTEST FAIL: typed \(expected.utf16.count) characters exactly but the "
+                        "SELFTEST FAIL: typed \(typeable.count) characters exactly but the "
                             + "run recorded \(Int(metrics.accuracy))% accuracy "
                             + "(\(metrics.correctChars) correct, \(metrics.incorrectChars) wrong)")
+                    print("  passage read:     \(passageBefore)")
+                    print("  passage recorded: \(recorded.passageId)")
+                    print("  expected head:    \(String(expected.prefix(50)).debugDescription)")
+                    print("  recorded head:    \(String(recorded.text.prefix(50)).debugDescription)")
                     exit(1)
                 }
                 // The status item's mark, before the summary. A template
@@ -374,7 +1014,7 @@ enum Diagnostics {
                     exit(1)
                 }
                 print(
-                    "SELFTEST OK: typed \(expected.utf16.count) chars — "
+                    "SELFTEST OK: typed \(typeable.count) chars — "
                         + "\(Int(metrics.netWpm)) wpm, \(Int(metrics.accuracy))% accuracy, "
                         + "\(profile.results.count) run(s) on disk")
                 exit(0)

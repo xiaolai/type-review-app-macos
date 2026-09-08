@@ -46,6 +46,41 @@ final class PracticeViewController: NSViewController {
     var onKeyStruck: ((UInt16) -> Void)?
     var onKeyReleased: ((UInt16) -> Void)?
 
+    /// Reads a finished word aloud.
+    ///
+    /// This screen's own rather than the app's, unlike the keystroke player:
+    /// there is one practice window, what it speaks is the passage in it, and
+    /// nothing outside it has anything to say.
+    private let speech = SpeechPlayer()
+    /// Which passage a queued word belongs to.
+    ///
+    /// Speech is handed off a runloop turn after the keystroke, so between the
+    /// two the passage can be replaced — by Tab, by a settings change, by the
+    /// source channel changing. Without this the queued word is still spoken,
+    /// in the *new* passage's voice, and it resolves that passage's voice from
+    /// inside the handoff rather than from `prepare()`.
+    private var passageGeneration = 0
+    /// Which words have already been spoken in this run.
+    private var tracker = SpokenWordTracker()
+    /// The typing state as of the last refresh — the cursor *before* the next
+    /// keystroke, and the statuses to test it against.
+    ///
+    /// Kept rather than re-read. `Session.snapshot()` recomputes the live
+    /// metrics, and asking for one before every keystroke as well as after
+    /// would double that per key to learn a number the last refresh already
+    /// knew.
+    private var lastTyping: TypingSnapshot?
+    /// Whether the passage on screen is prose worth reading aloud. Decided once
+    /// when it arrives, because provenance does not change mid-run.
+    private var passageMaySpeak = false
+    /// The setting, cached.
+    ///
+    /// Read from `UserDefaults` per keystroke it would be two dictionary
+    /// lookups a key to answer a question that only changes when the user
+    /// opens Settings — and `applyTypingPreferences` already runs on every
+    /// preference change, so there is a place to keep the answer.
+    private var speaksWords = false
+
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
     /// wpm, which is not a measurement of anything.
@@ -257,9 +292,13 @@ final class PracticeViewController: NSViewController {
 
     private func type(_ character: String) {
         guard let session, !hasFinished else { return }
+        // Where the cursor was before this keystroke moved it. Taken from the
+        // last refresh rather than from a fresh snapshot — see `lastTyping`.
+        let cursorBefore = lastTyping?.pos ?? 0
         do {
             let feedback = try session.input(character, timeStamp: clock())
             refresh()
+            speakFinishedWord(after: cursorBefore)
             // Latched. `Session.input` goes on answering `.completed` for
             // every further keystroke, and a single multi-character commit
             // from an input method delivers several — so the results screen
@@ -276,6 +315,133 @@ final class PracticeViewController: NSViewController {
 
     /// True between a run completing and the next one starting.
     private var hasFinished = false
+
+    // MARK: - Speech
+
+    /// The word this keystroke finished, read aloud.
+    ///
+    /// The whole of what speech costs on the typing path: three cached
+    /// booleans, a scan of the token around the cursor, and an asynchronous
+    /// `speak`. Everything that is not cheap — the synthesizer, the language,
+    /// the voice, the provenance decision — was settled when the passage
+    /// arrived. `make speechbench` is what keeps that true.
+    private func speakFinishedWord(after cursorBefore: Int) {
+        guard speaksWords, passageMaySpeak, let typing = lastTyping else { return }
+        guard
+            let word = tracker.wordToSpeak(
+                expected: typing.expected, statuses: typing.statuses,
+                oldPos: cursorBefore, newPos: typing.pos)
+        else { return }
+        // Off this stack, not merely asynchronous once it gets there.
+        //
+        // §6 asks that nothing on the keystroke path wait on speech, and
+        // calling the player from inside `type` satisfies that only as long as
+        // `AVSpeechSynthesizer` never does anything re-entrant. Measured, it
+        // does not honour that: with speech on, `--selftest` desynced its input
+        // stream in roughly one run in fifteen — the same passage, typed
+        // correctly, coming back at 3% accuracy — and never once with speech
+        // off. The keystroke returns first now, and the word is spoken on the
+        // next turn of the runloop, which is a delay no typist can perceive and
+        // the only arrangement that keeps the two genuinely separate.
+        wordsOffered += 1
+        let text = word.text
+        let generation = passageGeneration
+        DispatchQueue.main.async { [weak self] in
+            // The passage this word came from is still the one on screen, and
+            // the setting is still on. Either can have changed in the turn
+            // between the keystroke and here.
+            guard let self, self.passageGeneration == generation, self.speaksWords else { return }
+            self.speech.speak(word: text)
+        }
+    }
+
+    /// Words the player actually asked the synthesizer to say.
+    ///
+    /// Exists for `--speechbench`, the way `runCount` exists for `--selftest`.
+    /// A measurement showing that speech costs nothing is worthless unless it
+    /// can also show that speech happened, and "no words were spoken" and "the
+    /// gate refused every passage" produce the same timings.
+    ///
+    /// Read from the player rather than counted here, so it cannot claim more
+    /// than happened: a word handed over while a passage is being read is
+    /// dropped, and a count kept at the call site would still have counted it.
+    var spokenWordCount: Int { speech.wordsSpoken }
+
+    /// Words this screen *offered* the player, counted before the hop.
+    ///
+    /// The weaker claim of the two, and it is kept because it is the only one
+    /// that can be attributed to a particular stretch of typing: the offer
+    /// happens inside the keystroke, the enqueue happens a runloop turn later.
+    /// `--speechbench` uses this to show the setting gates per pass, and
+    /// `spokenWordCount` to show utterances really reached the synthesizer.
+    private(set) var wordsOffered = 0
+
+    /// How many times a passage's language has been resolved, for the same
+    /// check. §6 says once per passage; once per launch and once per word are
+    /// both plausible-looking bugs that nothing else would notice.
+    var voiceResolutions: Int { speech.voiceResolutions }
+
+    /// Told when a word begins and when it ends, with how long it was audible.
+    /// `--speechbench` uses these to interrupt a word on purpose and measure
+    /// how much of it survived.
+    var onWordStarted: (() -> Void)? {
+        get { speech.onWordStarted }
+        set { speech.onWordStarted = newValue }
+    }
+    var onWordEnded: ((Int) -> Void)? {
+        get { speech.onWordEnded }
+        set { speech.onWordEnded = newValue }
+    }
+
+    /// Says one word, for the clipping check.
+    ///
+    /// Straight at the player rather than through the typing path: what is
+    /// being checked is the interrupt policy between two utterances, and
+    /// driving that through a passage would mean typing two words a fraction of
+    /// a second apart.
+    func speakWord(_ word: String) {
+        speech.speak(word: word)
+    }
+
+    /// Says which voice is in effect, in that voice.
+    func previewSpeech() {
+        speech.prepare()
+        speech.preview()
+    }
+
+    /// Everything speech needs for a passage that has just arrived.
+    ///
+    /// Called from `refresh(resetPassage:)`, which is every path that sources
+    /// new text — a new run, a settings change that restarts one, a failed
+    /// start being put back.
+    private func beginSpeech(for snapshot: SessionSnapshot) {
+        passageGeneration += 1
+        tracker.startPassage()
+        // The gate is provenance, not vocabulary: a generated drill is not
+        // prose whichever channel served it, and the channel alone cannot tell
+        // — `auto` falls back to the generator, and reaches the code corpus.
+        passageMaySpeak = passageMayBeSpoken(channel: channel, passageId: snapshot.passageId)
+        speech.setPassage(snapshot.typing.expected)
+        readySpeechIfWanted()
+    }
+
+    /// Builds the synthesizer and resolves the voice while there is time to.
+    ///
+    /// Only when words are actually going to be spoken: resolving a voice
+    /// means walking every installed voice, and a passage of Python with the
+    /// setting off needs none of it. The Settings preview prepares on its own,
+    /// since it can be used with the setting either way.
+    private func readySpeechIfWanted() {
+        guard speaksWords, passageMaySpeak else { return }
+        speech.prepare()
+    }
+
+    /// Whether the passage on screen passed the provenance gate.
+    ///
+    /// Read by `--speechbench`, which has to tell "speech costs nothing" apart
+    /// from "the gate refused every passage, so nothing was measured". Those
+    /// two produce identical timings.
+    var passageIsSpeakable: Bool { passageMaySpeak }
 
     /// Per-key statistics, cached against the number of runs they were built
     /// from.
@@ -419,6 +585,10 @@ final class PracticeViewController: NSViewController {
         return object["settings"]
     }
 
+    var currentPassageId: String {
+        (try? session?.snapshot().passageId) ?? ""
+    }
+
     var currentPassage: String {
         (try? session?.snapshot().typing.expected) ?? ""
     }
@@ -446,7 +616,11 @@ final class PracticeViewController: NSViewController {
 
     private func refresh(resetPassage: Bool = false) {
         guard let session, let snapshot = try? session.snapshot() else { return }
+        // Before the branch, so `speakFinishedWord` reads the cursor and the
+        // statuses this refresh was given rather than the previous ones.
+        lastTyping = snapshot.typing
         if resetPassage {
+            beginSpeech(for: snapshot)
             typingView.setPassage(
                 snapshot.typing.expected, statuses: snapshot.typing.statuses,
                 cursor: snapshot.typing.pos)
@@ -484,5 +658,15 @@ extension PracticeViewController {
     func applyTypingPreferences() {
         typingView.caretStyle = AppPreferences.caretStyle.value
         typingView.showsWhitespace = AppPreferences.showWhitespace.value
+        // Speech rides the same notification. Switching it on mid-passage has
+        // to build the synthesizer and resolve the voice here, or the first
+        // word after the switch would pay for both on the typing path.
+        //
+        // Switching it *off* stops nothing already in flight: a word is under a
+        // second, and silencing here would mean that nudging the volume slider
+        // cut off whatever was being said. Words queued but not yet spoken are
+        // dropped by the guard in `speakFinishedWord`.
+        speaksWords = AppPreferences.speakWords.value
+        readySpeechIfWanted()
     }
 }

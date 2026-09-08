@@ -105,6 +105,51 @@ enum AppPreferences {
         }
     }
 
+    /// Whether a word is read aloud once it has been typed correctly.
+    ///
+    /// For children learning to read and type: the reward for finishing a word
+    /// is hearing it. Off by default, because hearing every word you type is a
+    /// taste rather than an improvement — not because it is unreliable at
+    /// speed. Words are no longer cut off when the next one arrives; see the
+    /// note on the interrupt policy in `SpeechPlayer`.
+    ///
+    /// Its own switch rather than a mode of the key sound: a child may want the
+    /// words without the clicks. It shares the volume slider, so one control
+    /// governs everything audible.
+    ///
+    /// In `UserDefaults`, not in `ProfileSettings`, for the same reason sound
+    /// is: that schema is shared with the website and pinned by golden vector.
+    static let speakWords = Flag(key: "SpeakWords")
+
+    /// Which voice reads the words, by `AVSpeechSynthesisVoice.identifier`.
+    ///
+    /// Empty means automatic — follow the language of the passage, which is
+    /// what §6 of the speech plan describes and remains the default. An
+    /// explicit choice outranks it, because a person who picks a voice has
+    /// said something more specific than a language detector can infer: which
+    /// voice they want to listen to.
+    ///
+    /// Its own accessor rather than a `Flag`, and the identifier rather than
+    /// the name: names are not unique across languages — this machine has four
+    /// voices called Eddy — and a name is localised, so it would stop matching
+    /// when the system language changed.
+    ///
+    /// An identifier this machine does not have resolves to nil at the point of
+    /// use and falls back to automatic. Same discipline as `soundPack`: a
+    /// setting that has gone stale should behave like a setting that was never
+    /// made, not like silence nobody can explain.
+    enum speechVoice {
+        static let key = "SpeechVoice"
+
+        static var value: String {
+            get { UserDefaults.standard.string(forKey: key) ?? "" }
+            set {
+                UserDefaults.standard.set(newValue, forKey: key)
+                AppPreferences.announce(key)
+            }
+        }
+    }
+
     /// Whether the keyboard drawer is out.
     ///
     /// The last preference that was still being read and written as a raw

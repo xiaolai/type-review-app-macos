@@ -276,6 +276,41 @@ public enum CorpusChannel: String, Sendable, CaseIterable {
     }
 }
 
+/// Ids that mean "this text was generated, or is not prose".
+///
+/// `pseudo:` and `plain:` are the two generators; `code-` is the bundled code
+/// corpus. All three are structural facts about where a passage came from
+/// rather than guesses about what it contains.
+private let unspokenPassagePrefixes = ["pseudo:", "plain:", "code-"]
+
+/// Whether a passage may be read aloud as prose.
+///
+/// **Provenance, not vocabulary.** Two dictionaries were measured before this
+/// rule was written and neither is a membership test: `NSSpellChecker` accepts
+/// `123`, `3.14` and `42nd`, and `DCSCopyTextDefinition` — expected to be the
+/// strict fallback — accepted 58 of 240 generated drill tokens against the
+/// spell checker's 21, including `cdt`, `csc` and `hrt`. It does fuzzy lookup.
+///
+/// So the question is answered from where the text came from. Tokens in a
+/// prose passage are words because the passage is prose; tokens in a generated
+/// drill are not, because the drill is generated.
+///
+/// Both halves are needed. The channel excludes `code` — a passage of Python
+/// read aloud is noise — and `generated`. The id excludes what the channel
+/// cannot see: `auto` asks the corpus first and falls back to a generated
+/// drill whenever the unlocked alphabet has no real sentence in it, and it
+/// reaches the code corpus too.
+public func passageMayBeSpoken(channel: CorpusChannel, passageId: String) -> Bool {
+    switch channel {
+    case .quotes, .user, .auto:
+        break
+    case .code, .generated:
+        return false
+    }
+    guard !passageId.isEmpty else { return false }
+    return !unspokenPassagePrefixes.contains(where: passageId.hasPrefix)
+}
+
 /// Bridges the corpus to the shape `Session` expects.
 ///
 /// Falls back to the generators whenever the corpus cannot answer — an

@@ -117,7 +117,11 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
                 tip: "Your own practice text", action: #selector(libraryPressed))
         case Self.stats:
             return button(
-                identifier, label: "Statistics", symbol: "chart.bar",
+                // A trend line, not `chart.bar`. Bars at toolbar size read as
+                // signal strength or a level meter — a status indicator rather
+                // than somewhere to go — and what this window actually shows is
+                // speed over time.
+                identifier, label: "Statistics", symbol: "chart.line.uptrend.xyaxis",
                 tip: "Speed, streaks and slowest keys", action: #selector(statsPressed))
         default:
             return nil

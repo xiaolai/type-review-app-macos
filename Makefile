@@ -202,7 +202,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest speechbench quit-running test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -339,8 +339,51 @@ run: $(APP)
 # Drives a complete run through the real input path and checks what reached
 # disk. Unit tests cover the engine exhaustively and none of them can tell
 # whether the app is wired to it.
-selftest: $(APP)
+# Quits a running TYPE before a check, because a check refuses to start beside
+# one — they share the profile on disk, and two copies writing it is how a check
+# corrupts what it came to verify.
+#
+# Its own target rather than a line in each recipe: three checks, and the one
+# that forgot would be the one that surprises somebody.
+quit-running:
+	@# `pkill -x`, matching the executable name exactly, rather than `-f` over
+	@# the whole command line: `-f '$(BIN)$$'` missed any copy started with an
+	@# argument and would have matched an unrelated process whose command line
+	@# happened to end the same way.
+	@#
+	@# Then polled rather than slept past. A fixed sleep cannot tell "gone" from
+	@# "still going", and the check that follows refuses to start beside a live
+	@# copy -- so a termination that had not finished would fail the build with
+	@# a message about something else.
+	@# The final check is outside the branch on purpose. Nested inside it, a
+	@# `pkill` that failed while the process was still alive skipped
+	@# verification entirely and this target exited 0 -- so the check that
+	@# follows would refuse to start and blame something else.
+	@if pgrep -x $(BIN) >/dev/null 2>&1; then \
+		echo "quitting the running TYPE"; \
+		pkill -x $(BIN) >/dev/null 2>&1 || true; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			pgrep -x $(BIN) >/dev/null 2>&1 || break; \
+			sleep 0.2; \
+		done; \
+	fi
+	@if pgrep -x $(BIN) >/dev/null 2>&1; then \
+		echo "error: TYPE is still running -- quit it by hand"; exit 1; \
+	fi
+
+selftest: $(APP) quit-running
 	@./$(APP)/Contents/MacOS/$(BIN) --selftest
+
+# Times the keystroke path with word speech off and then on.
+#
+# Speaking a word is meant to cost the typist nothing: the synthesizer, the
+# voice and the provenance decision are all settled when the passage arrives,
+# and the keystroke itself only enqueues. That is a promise which holds the day
+# it is written and stops holding when somebody moves a line, so it is measured.
+# The check counts the words it spoke as well as the microseconds, because
+# "speech is free" and "speech never happened" produce the same timings.
+speechbench: $(APP) quit-running
+	@./$(APP)/Contents/MacOS/$(BIN) --speechbench
 
 test:
 	swift test

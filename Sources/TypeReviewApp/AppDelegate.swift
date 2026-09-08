@@ -69,7 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // A login launch never opens a window; the setting says whether an
         // ordinary launch does either. Read once, so the two branches below
         // cannot disagree about it.
-        let menuBarOnly = atLogin || AppPreferences.startInMenuBar.value
+        // A check never opens a window and never comes forward — see
+        // `Diagnostics.isRunningCheck`. Folded in here so every branch below
+        // that would show or activate something is skipped at once.
+        let runningCheck = Diagnostics.isRunningCheck
+        let menuBarOnly = atLogin || AppPreferences.startInMenuBar.value || runningCheck
         let practice = PracticeViewController()
         self.practice = practice
 
@@ -129,7 +133,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Before the drawer's state is applied: both menus that offer the
         // keyboard toggle have to exist by the time the checkmark is set, or
         // the one built later starts out lying about it.
-        installStatusItem()
+        // Not for a check. A status item appearing in the menu bar for the
+        // two seconds a check runs is visible clutter, and the menu it carries
+        // reaches `showMainWindow` and "Quit TYPE" — one of which activates the
+        // app past `applyDockPolicy`'s guard, and the other of which would end
+        // the check before it reported, silently and with exit 0.
+        if !runningCheck { installStatusItem() }
         let drawer = KeyboardDrawer()
         self.drawer = drawer
         practice.keyboard = drawer.keyboard
@@ -151,7 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let showKeyboard = AppPreferences.showKeyboard.value
         drawer.setOpen(showKeyboard, animated: false)
         markKeyboardMenus(showKeyboard)
-        if menuBarOnly {
+        if runningCheck {
+            // Ordered out, but not retreated to the menu bar: a check has no
+            // business installing a status item either.
+            window.orderOut(nil)
+        } else if menuBarOnly {
             window.orderOut(nil)
             retreatToMenuBar()
         } else {
@@ -198,7 +211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         observeWindowClosing()
-        registerShortcuts()
+        // Nor does a check take the global shortcuts. They are registered
+        // system-wide, so a check would take ⌃⌥⌘T away from the copy the user
+        // is actually using — and the summon shortcut activates this app, which
+        // is the one thing a check must never do.
+        if !runningCheck { registerShortcuts() }
         // Pack, volume and — the new part — scope. This is what starts the
         // system-wide monitor when the setting says so, and what decides
         // whether the typing surface makes its own sound or leaves it to the
@@ -206,19 +223,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applySoundPreferences()
         soundWasPermitted = GlobalKeySound.isPermitted
 
-        // One at a time. Both scheduled together, the sound check exits at
+        // One at a time. Two scheduled together, the sound check exits at
         // ~0.2s and the self-test does not start until 0.5s — so asking for
         // both reported the sound check's success and silently never ran the
         // self-test at all. A diagnostic that skips without saying so is worse
         // than one that refuses.
-        let soundcheck = CommandLine.arguments.contains("--soundcheck")
-        let selftest = CommandLine.arguments.contains("--selftest")
-        if soundcheck, selftest {
-            print("error: --soundcheck and --selftest cannot be combined — run them separately")
+        //
+        // `Diagnostics.flags`, not a second copy of it. This was written out
+        // again here, so a fourth check added to one list and not the other
+        // would either launch with the check protections and never run, or run
+        // without them.
+        let checks = Diagnostics.flags.filter(CommandLine.arguments.contains)
+        if checks.count > 1 {
+            print(
+                "error: \(checks.joined(separator: " and ")) cannot be combined"
+                    + " — run them separately")
             exit(2)
         }
-        if soundcheck { Diagnostics.runSoundCheck() }
-        if selftest { Diagnostics.runSelfTest(practice: practice) }
+        switch checks.first {
+        case "--soundcheck": Diagnostics.runSoundCheck()
+        case "--selftest": Diagnostics.runSelfTest(practice: practice)
+        case "--speechbench": Diagnostics.runSpeechBench(practice: practice)
+        default: break
+        }
     }
 
 
@@ -261,6 +288,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Reconciles the Dock tile with the setting and with what is on screen.
     func applyDockPolicy(windowComing: Bool = false) {
+        // A check stays an accessory from launch to exit. Nothing below should
+        // reach a live policy change while one is running — no window is
+        // visible, so `desiredPolicy` already answers `.accessory` — but this
+        // method is the one place in the app that calls `activate`, so the
+        // invariant is stated here rather than inferred from two other files.
+        guard !Diagnostics.isRunningCheck else { return }
         // `windowComing` because the caller knows something `NSApp.windows`
         // does not yet: a window is about to be ordered front. Asking only
         // what is visible *now* answers for the moment before, which is how
@@ -705,6 +738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.read = { [weak self] in self?.practice?.currentSettings ?? .default }
         controller.write = { [weak self] next in self?.practice?.applySettings(next) ?? false }
         controller.previewSound = { [weak self] in self?.previewSound() }
+        controller.previewSpeech = { [weak self] in self?.practice?.previewSpeech() }
         controller.suspendHotKey = { [weak self] suspended in
             self?.setShortcutsSuspended(suspended)
         }
@@ -734,6 +768,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let window = NSWindow(contentViewController: controller)
             window.title = "Statistics"
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            // The unified toolbar, which this window was the only one in the
+            // app without — see the note on `StatsViewController`'s toolbar.
+            window.toolbar = controller.makeToolbar()
+            window.toolbarStyle = .unified
             window.setContentSize(NSSize(width: 560, height: 480))
             window.setFrameAutosaveName("TypeReviewStats")
             // Or closing Statistics deallocates the window while `statsWindow`
