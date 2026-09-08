@@ -839,6 +839,149 @@ enum Diagnostics {
                 exit(1)
             }
 
+            // The practice grid, both ways round. `refresh` above ran on an
+            // empty history, which is the state that hides it.
+            guard statsController.calendarState == (hidden: true, cells: 0) else {
+                print(
+                    "SELFTEST FAIL: an empty history should hide the practice grid, got "
+                        + "\(statsController.calendarState)")
+                exit(1)
+            }
+            // With runs it has to be shown *and* filled. Checking only that it
+            // is visible would pass against a controller that stopped calling
+            // `show(_:)` — a grid drawing nothing, raising nothing.
+            statsController.history = { selftestHistory() }
+            statsController.refresh()
+            let filled = statsController.calendarState
+            guard filled.hidden == false, filled.cells == PracticeCalendarView.windowDays else {
+                print(
+                    "SELFTEST FAIL: a history with runs should show a "
+                        + "\(PracticeCalendarView.windowDays)-cell practice grid, got \(filled)")
+                exit(1)
+            }
+            // And that it draws. At the probe's 460pt width the grid is 150
+            // cells of 12pt, a little over 21,000 pixels before the legend and
+            // before any Retina scaling. A floor of 15,000 catches a blank or
+            // half-laid-out grid on a 1x display without pinning geometry that
+            // is meant to change.
+            let ink = statsController.calendarInk()
+            guard ink.ink > 15_000 else {
+                print("SELFTEST FAIL: the practice grid drew \(ink.ink) pixels — it is blank")
+                exit(1)
+            }
+            // The run typed above lands on today, so exactly one cell is
+            // tinted. If flattening every intensity changes nothing, the tint
+            // never reached the screen and the grid is sixty identical squares.
+            guard ink.tinted > 0 else {
+                print("SELFTEST FAIL: the practice grid renders identically with no intensity")
+                exit(1)
+            }
+            // And that it knows what it is counting. Both metrics draw the
+            // same shape, so a grid fed characters while labelled sessions is
+            // wrong only in its tooltip -- invisible to every pixel check
+            // above, and the sort of thing a metric switch breaks silently.
+            // The keystroke counter, end to end: count, reach disk, come back.
+            // Nothing else covers the write path, and a counter that silently
+            // fails to persist looks exactly like a user who did not type.
+            let countDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TypeReviewCount-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: countDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: countDirectory) }
+
+            // A clock the check owns, so the day boundary is a fact rather
+            // than whatever time the check happens to run at.
+            var clock = Date(timeIntervalSince1970: 1_773_500_000)
+            let counter = KeystrokeCounter(directory: countDirectory, now: { clock })
+            for _ in 0..<7 { counter.record() }
+            guard counter.snapshot().total == 7 else {
+                print("SELFTEST FAIL: counted 7 keys, snapshot says \(counter.snapshot().total)")
+                exit(1)
+            }
+            // Across midnight the count must split between two days rather
+            // than following the clock into one bucket or being lost.
+            clock = clock.addingTimeInterval(36 * 60 * 60)
+            counter.record()
+            let split = counter.snapshot()
+            guard split.days.count == 2, split.total == 8 else {
+                print(
+                    "SELFTEST FAIL: a day boundary should split the count, got "
+                        + "\(split.days.count) day(s) totalling \(split.total)")
+                exit(1)
+            }
+            counter.flush()
+            let reloaded = KeystrokeCounter(directory: countDirectory, now: { clock })
+            guard reloaded.snapshot() == split else {
+                print("SELFTEST FAIL: the keystroke counts did not survive a save and load")
+                exit(1)
+            }
+            reloaded.erase()
+            guard reloaded.isEmpty,
+                !FileManager.default.fileExists(
+                    atPath: countDirectory.appendingPathComponent("keystrokes.json").path)
+            else {
+                print("SELFTEST FAIL: erasing the keystroke counts left something behind")
+                exit(1)
+            }
+
+            // The link from the preference to the tap. Pinned through the
+            // volatile domain and restored after, so a check never writes a
+            // real setting, and the sound is pinned *off* so nothing here can
+            // put a permission prompt on screen.
+            if let delegate = NSApp.delegate as? AppDelegate {
+                let soundBefore = UserDefaults.standard.volatileDomain(
+                    forName: UserDefaults.argumentDomain)
+                for wantsCounting in [true, false] {
+                    var arguments = soundBefore
+                    arguments[AppPreferences.globalSound.key] = false
+                    arguments[AppPreferences.countKeystrokes.key] = wantsCounting
+                    UserDefaults.standard.setVolatileDomain(
+                        arguments, forName: UserDefaults.argumentDomain)
+                    delegate.applySoundPreferences()
+                    let installed = delegate.globalSound.onKeyPressed != nil
+                    guard installed == wantsCounting else {
+                        print(
+                            "SELFTEST FAIL: with counting=\(wantsCounting) the key hook is "
+                                + "\(installed ? "installed" : "absent")")
+                        exit(1)
+                    }
+                }
+                UserDefaults.standard.setVolatileDomain(
+                    soundBefore, forName: UserDefaults.argumentDomain)
+                delegate.applySoundPreferences()
+            }
+
+            // Pinned rather than assumed. This reads a real preference, so
+            // asserting the *default* made the check pass or fail on whether
+            // whoever ran it had touched the control -- a test that inherits
+            // the machine's state, which is the same fault the calendar's own
+            // tests avoid by pinning their timezone.
+            let metricBefore = UserDefaults.standard.volatileDomain(
+                forName: UserDefaults.argumentDomain)
+            for (wanted, expected) in [
+                (AppPreferences.StatsMetric.characters, "characters typed"),
+                (.sessions, "sessions"),
+                // Keystrokes with the counter off must fall back to characters
+                // rather than drawing an empty grid under a heading claiming
+                // to show every key pressed.
+                (.keystrokes, "characters typed"),
+            ] {
+                var arguments = metricBefore
+                arguments[AppPreferences.statsMetric.key] = wanted.rawValue
+                UserDefaults.standard.setVolatileDomain(
+                    arguments, forName: UserDefaults.argumentDomain)
+                statsController.refresh()
+                let summary = statsController.calendarSummary
+                guard summary.hasSuffix(expected) else {
+                    print(
+                        "SELFTEST FAIL: with metric=\(wanted.rawValue) the grid describes "
+                            + "itself as \"\(summary)\"")
+                    exit(1)
+                }
+            }
+            UserDefaults.standard.setVolatileDomain(
+                metricBefore, forName: UserDefaults.argumentDomain)
+
             // And the data that menu is built from. An empty group would draw a
             // language header with nothing under it; an identifier that does
             // not resolve is a row that silently selects nothing.
@@ -1025,4 +1168,25 @@ enum Diagnostics {
             exit(2)
         }
     }
+}
+
+/// One finished run, for the checks that need a non-empty history.
+///
+/// Driven through the engine rather than fabricated. `RunResult` has no public
+/// initialiser, and adding one so a check could build a fake would widen the
+/// engine's surface for the benefit of the check alone. Typing a passage is
+/// also the more honest fixture — it is the shape a real history has, produced
+/// the way a real history is produced.
+@MainActor
+private func selftestHistory() -> [RunResult] {
+    let text = "the quick brown fox"
+    guard let session = try? Session(profile: Profile()),
+        (try? session.startWithText(text)) != nil
+    else { return [] }
+    var clock: Double = 0
+    for character in text {
+        clock += 150
+        _ = try? session.input(String(character), timeStamp: clock)
+    }
+    return session.profile.results
 }

@@ -115,6 +115,21 @@ final class GlobalKeySound {
     /// setting on before granting the permission, nudge the volume, crash.
     private(set) var isRunning = false
 
+    /// Called for every key press this tap is allowed to see.
+    ///
+    /// Installed after the mute rules, so it inherits all of them: nothing is
+    /// counted while secure input is on, while a password manager is in front,
+    /// or while this copy has stood down for a sibling. That makes the total
+    /// "keys we were allowed to see" rather than "keys pressed", which is the
+    /// honest description and the one the interface uses.
+    var onKeyPressed: (() -> Void)?
+
+    /// Whether the tap is being kept alive to count, independently of sound.
+    private var countsKeystrokes = false
+    /// Whether the tap should make a noise. Separate from being installed:
+    /// counting can hold the tap open with the sound switched off.
+    private var soundsKeys = false
+
     /// Whether a tap is actually installed and hearing keys. What the caller
     /// of `setRunning` wants to know: "on" and "heard" are not the same thing
     /// while the permission is missing or another copy holds the tap.
@@ -427,10 +442,15 @@ final class GlobalKeySound {
     /// Starts or stops to match `wanted`, and reports whether sound is now
     /// running. Idempotent, because it is called from every place the setting
     /// can change and from the launch path as well.
+    /// Returns whether the tap is *sounding* keys — not merely whether it is
+    /// installed. The practice window silences its own click when this is
+    /// true, so a tap held open purely to count must report false or the app
+    /// goes silent in both places at once.
     @discardableResult
-    func setRunning(_ wanted: Bool, soundsModifiers modifiers: Bool, soundsRelease release: Bool)
-        -> Bool
-    {
+    func setRunning(
+        _ wanted: Bool, countsKeystrokes counting: Bool = false,
+        soundsModifiers modifiers: Bool, soundsRelease release: Bool
+    ) -> Bool {
         // Asking is what registers the app in Input Monitoring and puts the
         // prompt on screen. The old `NSEvent` monitors got that for free —
         // installing one was itself the act that listed the app under
@@ -453,8 +473,14 @@ final class GlobalKeySound {
         if isRunning, modifiers != soundsModifiers || release != soundsRelease { stop() }
         soundsModifiers = modifiers
         soundsRelease = release
-        if wanted { start() } else { stop() }
-        return isListening
+        soundsKeys = wanted
+        countsKeystrokes = counting
+        // Either reason keeps the tap. Counting was originally bolted onto the
+        // sound switch, which meant a user with the sound off got a chart full
+        // of holes that looked exactly like days they had not typed — a gap
+        // indistinguishable from a real zero.
+        if wanted || counting { start() } else { stop() }
+        return isListening && wanted
     }
 
     /// Events from another application, which arrive whether or not the
@@ -505,14 +531,20 @@ final class GlobalKeySound {
             // app, and a keyboard that goes quiet for every shortcut is not
             // the thing this setting promises.
             guard !event.isARepeat else { return }
+            // Auto-repeat is excluded from the count as well as from the
+            // sound. A held key is one press; counting its repeats would let
+            // somebody leaning on a key outscore a day of real typing.
+            onKeyPressed?()
+            guard soundsKeys else { return }
             play(event.keyCode, .press)
         case .keyUp:
             // No `isARepeat` to check: a held key repeats its `keyDown` and
             // comes up exactly once, so the release is one sound however long
             // the key was held.
+            guard soundsKeys else { return }
             play(event.keyCode, .release)
         case .flagsChanged:
-            guard soundsModifiers else { return }
+            guard soundsKeys, soundsModifiers else { return }
             handleModifier(event)
         default:
             break

@@ -50,6 +50,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var sounds = KeySoundPlayer()
     // Not private: the menu extension reads which application was last in
     // front, to name the item that silences it.
+    /// Counts keys pressed anywhere, when the user has asked for it.
+    ///
+    /// Built lazily and always, but it counts nothing until
+    /// `applySoundPreferences` installs the hook — constructing it only reads
+    /// a file that may not exist. It shares `ProfileFileStore`'s directory, so
+    /// the self-test's redirect to a scratch folder covers this file too and a
+    /// check cannot inflate the user's real totals.
+    private(set) lazy var keystrokes: KeystrokeCounter? = {
+        guard let directory = try? ProfileFileStore.standard().directory else { return nil }
+        return KeystrokeCounter(directory: directory)
+    }()
+
     lazy var globalSound = GlobalKeySound { [weak self] code, stroke in
         self?.playKey(code, stroke)
     }
@@ -608,12 +620,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// surface wired as well would click twice for every key pressed in the
     /// practice window. `onKeyStruck` is therefore set to nil, not merely
     /// ignored, so the ownership is visible rather than conditional.
-    private func applySoundPreferences() {
+    /// Internal rather than private so `--selftest` can drive it. It is the
+    /// one place that connects the counting preference to the tap's hook, and
+    /// a hook that never gets installed counts nothing while looking exactly
+    /// like somebody who did not type.
+    func applySoundPreferences() {
         sounds.setPack(AppPreferences.soundPack.value)
         sounds.setVolume(AppPreferences.soundVolume.value)
 
         let global = AppPreferences.globalSound.value
+        let counting = AppPreferences.countKeystrokes.value
         globalSound.mutedApps = Set(AppPreferences.mutedApps.value)
+        // The hook is installed only while counting is wanted, so switching it
+        // off stops the counting immediately rather than at the next flush.
+        globalSound.onKeyPressed = counting ? { [weak self] in self?.keystrokes?.record() } : nil
+        if counting { keystrokes?.start() } else { keystrokes?.stop() }
         // What came back, not what was asked for. `setRunning` reports whether
         // a tap is actually listening, and it can fail for ordinary reasons —
         // no Input Monitoring yet, or the other channel holding the tap.
@@ -621,7 +642,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // started left the app silent in both places at once, which reads as
         // the feature being broken rather than as a permission not granted.
         let heard = globalSound.setRunning(
-            global, soundsModifiers: AppPreferences.modifierSound.value,
+            global, countsKeystrokes: counting,
+            soundsModifiers: AppPreferences.modifierSound.value,
             soundsRelease: AppPreferences.releaseSound.value)
         // Silent here when *anything* is already sounding these keys — this
         // app's own tap, or the other channel's. `heard` alone was not enough:
@@ -771,6 +793,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let controller = stats ?? StatsViewController()
         stats = controller
         controller.history = { [weak self] in self?.practice?.history ?? [] }
+        // Nil while counting is off, so the grid can tell "switched off" from
+        // "typed nothing" — the two look identical once they are both an empty
+        // map.
+        controller.keystrokes = { [weak self] in
+            guard AppPreferences.countKeystrokes.value else { return nil }
+            return self?.keystrokes?.snapshot()
+        }
         controller.refresh()
         if statsWindow == nil {
             let window = NSWindow(contentViewController: controller)
@@ -780,7 +809,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // app without — see the note on `StatsViewController`'s toolbar.
             window.toolbar = controller.makeToolbar()
             window.toolbarStyle = .unified
-            window.setContentSize(NSSize(width: 560, height: 480))
+            window.setContentSize(NSSize(width: 560, height: 560))
+            // A floor, not a preference. The grid shrinks its cells to fit,
+            // so it no longer sets the width — but below about this the cells
+            // are too small to read as days, and the header plus grid leave
+            // the table showing a row or two. The saved frame is restored
+            // after this is set, so it applies to windows sized before the
+            // grid existed as well as to new ones.
+            window.contentMinSize = NSSize(width: 480, height: 400)
             window.setFrameAutosaveName("TypeReviewStats")
             // Or closing Statistics deallocates the window while `statsWindow`
             // still points at it, and reopening from the menu reaches freed

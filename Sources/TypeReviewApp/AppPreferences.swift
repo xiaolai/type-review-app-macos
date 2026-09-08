@@ -164,6 +164,41 @@ enum AppPreferences {
     /// the second person.
     static let showKeyboard = Flag(key: "ShowKeyboard", default: true)
 
+    /// What the practice grid counts.
+    ///
+    /// Characters by default. Sessions answers "did I show up", which the
+    /// streak line beside the grid already answers in words; characters
+    /// answers "how much did I do", which nothing else on the window says. A
+    /// day of one long passage and a day of three warm-ups are the same cell
+    /// under sessions and visibly different under characters.
+    enum StatsMetric: String, CaseIterable {
+        /// Practice runs finished that day.
+        case sessions = "Sessions"
+        /// Characters typed inside TYPE that day.
+        case characters = "Characters"
+        /// Keys pressed anywhere, when `countKeystrokes` is on.
+        case keystrokes = "Keystrokes"
+
+        var label: String {
+            switch self {
+            case .sessions: return "Sessions"
+            case .characters: return "Characters here"
+            case .keystrokes: return "All keystrokes"
+            }
+        }
+    }
+
+    enum statsMetric {
+        static let key = "StatsMetric"
+        static var value: StatsMetric {
+            get { StatsMetric(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .characters }
+            set {
+                UserDefaults.standard.set(newValue.rawValue, forKey: key)
+                AppPreferences.announce(key)
+            }
+        }
+    }
+
     /// Whether launching TYPE puts a window on screen.
     ///
     /// Off, so a double-click does what a double-click does. On, the app goes
@@ -205,6 +240,20 @@ enum AppPreferences {
     /// Orthogonal to the pack: `off` still means silence everywhere, so the
     /// global shortcut mutes the whole machine without this having to know.
     static let globalSound = Flag(key: "GlobalSound")
+
+    /// Whether the app keeps a per-day count of keys pressed in other
+    /// applications.
+    ///
+    /// Off, and it stays off unless somebody switches it on. It is the only
+    /// setting here that makes the app write down anything about what happens
+    /// outside its own window, so it is the one setting whose default is not a
+    /// matter of taste.
+    ///
+    /// Independent of `globalSound` on purpose. Riding on that switch would
+    /// have meant counting only while the keyboard sound was on, and a chart
+    /// with holes wherever the sound was off looks exactly like days the user
+    /// did not type.
+    static let countKeystrokes = Flag(key: "CountKeystrokes")
 
     /// Whether keys are heard coming back up.
     ///

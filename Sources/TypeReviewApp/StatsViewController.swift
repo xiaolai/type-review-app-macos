@@ -1,8 +1,8 @@
 import AppKit
 import TypeReviewKit
 
-/// The statistics window: totals, streaks, and one table that answers the same
-/// four questions about either a key or a finger.
+/// The statistics window: totals, streaks, a sixty-day practice grid, and one
+/// table that answers the same four questions about either a key or a finger.
 ///
 /// Two views of one set of numbers, because `aggregatePerFinger` is built on
 /// `aggregatePerKey` — the same data regrouped. A finger view is what turns a
@@ -16,10 +16,25 @@ import TypeReviewKit
 /// Everything here comes from the ported aggregations, so the numbers are the
 /// website's numbers — including the day-level ones, which are computed in
 /// local calendar days rather than fixed 24-hour blocks.
+///
+/// The grid is the last of those to arrive. `dailyCounts` was already being
+/// computed here and immediately reduced to `.count` for "N days practised",
+/// which threw the distribution away on the line that built it; the website
+/// had been drawing that distribution all along.
 final class StatsViewController: NSViewController {
     private let summary = NSTextField(labelWithString: "")
     private let streakLabel = NSTextField(labelWithString: "")
     private let table = NSTableView()
+    /// The sixty-day grid. Hidden rather than emptied when there is no
+    /// history: the empty branch below blanks the streak label for the same
+    /// reason, and sixty grey squares saying "you have never practised" is a
+    /// worse first launch than not raising the subject.
+    private let calendar = PracticeCalendarView()
+    /// What the grid counts. Beside the grid rather than in the toolbar: the
+    /// toolbar's segmented control switches what the *window* is showing, and
+    /// two identical-looking controls up there, governing a table and a grid
+    /// respectively, would leave neither obviously attached to anything.
+    private let metric = NSPopUpButton(frame: .zero, pullsDown: false)
     /// One row shape for both groupings. The columns ask the same four
     /// questions either way, so the table does not need to know which it is
     /// showing — only the first column's heading changes.
@@ -39,6 +54,10 @@ final class StatsViewController: NSViewController {
     /// totals as they were when it opened and never moved again, so finishing
     /// a run with Statistics on screen left it quietly stale.
     var history: () -> [RunResult] = { [] }
+    /// The system-wide counts, or nil when the user has not switched counting
+    /// on. Nil rather than an empty log, so "off" and "nothing typed" stay
+    /// distinguishable — they draw the same grid otherwise.
+    var keystrokes: () -> KeystrokeLog? = { nil }
     private var runObserver: NSObjectProtocol?
     private var dayObserver: NSObjectProtocol?
 
@@ -63,13 +82,21 @@ final class StatsViewController: NSViewController {
         // which is the older list shape and made the two tables in one app
         // look like they came from different decades.
         table.style = .inset
-        for (identifier, title, width) in [
-            ("key", "Key", CGFloat(90)), ("hits", "Typed", 80), ("avg", "Avg ms", 90),
-            ("err", "Errors", 90),
+        // Columns share the width instead of keeping fixed sizes. Four fixed
+        // columns came to 350pt in a table around 520 wide, so every row hugged
+        // the left with a third of the window empty beside it — centring the
+        // text alone would have centred it inside that same left-hand block.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        for (identifier, title) in [
+            ("key", "Key"), ("hits", "Typed"), ("avg", "Avg ms"), ("err", "Errors"),
         ] {
             let column = NSTableColumn(identifier: .init(identifier))
             column.title = title
-            column.width = width
+            column.width = 120
+            // Below this the headings truncate before the numbers do, which
+            // reads as a broken table rather than a narrow one.
+            column.minWidth = 64
+            column.headerCell.alignment = .center
             table.addTableColumn(column)
         }
         table.dataSource = self
@@ -93,10 +120,34 @@ final class StatsViewController: NSViewController {
         grouping.segmentStyle = .automatic
         // The grouping control is not in here: it belongs in the toolbar, which
         // is where macOS puts a control that switches what a window is showing.
-        let header = NSStackView(views: [summary, streakLabel])
+        // An arranged subview rather than a plain one: NSStackView collapses
+        // a hidden arranged subview, so the no-history case closes the gap
+        // instead of leaving the table pushed down by an invisible grid.
+        calendar.heightAnchor.constraint(
+            equalToConstant: calendar.intrinsicContentSize.height).isActive = true
+        // A borderless pop-up, not a segmented control. A segmented control
+        // fills its selection with the accent colour, which is the same blue
+        // the grid six points below uses to mean "this many characters" — two
+        // different meanings for one colour, side by side. This reads as a
+        // caption that happens to be clickable, which is what it is.
+        metric.addItems(withTitles: AppPreferences.StatsMetric.allCases.map(\.label))
+        markMetric()
+        metric.target = self
+        metric.action = #selector(metricChanged)
+        metric.isBordered = false
+        metric.controlSize = .small
+        metric.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let header = NSStackView(views: [summary, streakLabel, metric, calendar])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
+        // The grid is evidence for the streak line above it, not another line
+        // of it, so it gets air the two labels do not.
+        header.setCustomSpacing(14, after: streakLabel)
+        header.setCustomSpacing(6, after: metric)
+        // Full width, so the grid has room for all twenty columns rather than
+        // being squeezed to the width of the longest label above it.
+        calendar.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         header.translatesAutoresizingMaskIntoConstraints = false
         return header
     }
@@ -118,6 +169,21 @@ final class StatsViewController: NSViewController {
     /// Re-reads and redisplays. Called when the window opens and whenever a
     /// run finishes while it is open.
     func refresh() { present(results: history()) }
+
+    // MARK: - Probes
+    //
+    // Read by `--selftest` and by nothing else. The Statistics window is built
+    // lazily when somebody clicks, so everything in it is one refactor away
+    // from being broken in a build that otherwise passes.
+
+    /// Whether the practice grid is showing, and how many cells it holds.
+    var calendarState: (hidden: Bool, cells: Int) { (calendar.isHidden, calendar.cellCount) }
+
+    /// What the grid actually draws. See `PracticeCalendarView.renderProbe`.
+    func calendarInk() -> (ink: Int, tinted: Int) { calendar.renderProbe() }
+
+    /// The grid's own description of what it is counting.
+    var calendarSummary: String { calendar.summaryText }
 
     override func viewDidAppear() {
         super.viewDidAppear()
@@ -160,10 +226,15 @@ final class StatsViewController: NSViewController {
         guard !results.isEmpty else {
             summary.stringValue = "No runs yet."
             streakLabel.stringValue = ""
+            calendar.isHidden = true
+            metric.isHidden = true
             rows = []
             table.reloadData()
             return
         }
+        calendar.isHidden = false
+        metric.isHidden = false
+        markMetric()
 
         let best = results.map(\.metrics.netWpm).max() ?? 0
         let recent = results.suffix(10).map(\.metrics.netWpm)
@@ -172,9 +243,36 @@ final class StatsViewController: NSViewController {
             format: "%d runs · best %.0f wpm · last 10 average %.0f wpm", results.count, best,
             average)
 
-        let calendar = localStatisticsCalendar()
-        let days = streak(results, now: Date().timeIntervalSince1970 * 1000, calendar: calendar)
-        let practiceDays = dailyCounts(results, calendar: calendar).count
+        // Named to avoid shadowing the calendar *view* this controller now
+        // holds. The two are one letter apart and mean entirely different
+        // things.
+        let statsCalendar = localStatisticsCalendar()
+        let now = Date().timeIntervalSince1970 * 1000
+        let days = streak(results, now: now, calendar: statsCalendar)
+        let practiceDays = dailyCounts(results, calendar: statsCalendar).count
+        // The preference, not the control. `makeHeader` is what seeds the
+        // segment, and it runs lazily on first view access -- so anything
+        // asking before the window is on screen read segment 0 and got
+        // sessions regardless of what the user had chosen.
+        // Keystrokes falls back to characters when the counter is off, rather
+        // than drawing an empty grid: an all-grey chart under a heading that
+        // says "All keystrokes" reads as "you have typed nothing", not as
+        // "this is switched off".
+        var chosen = AppPreferences.statsMetric.value
+        let log = chosen == .keystrokes ? keystrokes() : nil
+        if chosen == .keystrokes, log == nil { chosen = .characters }
+
+        let perDay: OrderedMap<Int>
+        switch chosen {
+        case .sessions: perDay = dailyCounts(results, calendar: statsCalendar)
+        case .characters: perDay = charactersPerDay(results, calendar: statsCalendar)
+        case .keystrokes: perDay = log?.countsByDay() ?? OrderedMap<Int>()
+        }
+        calendar.show(
+            practiceCalendar(
+                countsByDay: perDay, now: now, days: PracticeCalendarView.windowDays,
+                calendar: statsCalendar),
+            unit: PracticeCalendarView.Unit(chosen))
         streakLabel.stringValue =
             "\(days.current)-day streak · longest \(days.longest) · \(practiceDays) days practised"
 
@@ -207,6 +305,19 @@ final class StatsViewController: NSViewController {
                 }
         }
         table.reloadData()
+    }
+
+    @objc private func metricChanged() {
+        let all = AppPreferences.StatsMetric.allCases
+        AppPreferences.statsMetric.value = all[min(max(0, metric.indexOfSelectedItem), all.count - 1)]
+        refresh()
+    }
+
+    /// Keeps the segment in step with the preference, which is what `present`
+    /// actually reads.
+    private func markMetric() {
+        let all = AppPreferences.StatsMetric.allCases
+        metric.selectItem(at: all.firstIndex(of: AppPreferences.statsMetric.value) ?? 0)
     }
 
     @objc private func groupingChanged() { refresh() }
@@ -319,6 +430,7 @@ extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {
 
         let label = NSTextField(labelWithString: text)
         label.font = Theme.statFont
+        label.alignment = .center
         if identifier == "err", entry.errorRate > 0.05 { label.textColor = Theme.incorrect }
         return label
     }
