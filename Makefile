@@ -641,8 +641,8 @@ verify-pkg:
 		|| { echo "error: the packaged app is not signed with $(STORE_SIGN)"; exit 1; }; \
 	test -s "$$app/Contents/embedded.provisionprofile" \
 		|| { echo "error: the packaged app has no provisioning profile"; exit 1; }; \
-	bad=$$(find "$$app" -type f -print0 \
-		| xargs -0 -I@ sh -c 'xattr "@" 2>/dev/null | grep -q com.apple.quarantine && echo "@"' \
+	bad=$$(find "$$app" -type f -exec sh -c \
+		'xattr "$$1" 2>/dev/null | grep -q com.apple.quarantine && echo "$$1"' _ {} \; \
 		| head -3); \
 	test -z "$$bad" \
 		|| { echo "error: com.apple.quarantine on files inside the package:"; \
