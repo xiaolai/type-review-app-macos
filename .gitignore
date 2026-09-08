@@ -66,3 +66,6 @@ dev-docs/
 
 # Release archives.
 dist/
+
+.env
+.env.*
