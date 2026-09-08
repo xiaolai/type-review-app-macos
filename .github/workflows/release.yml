@@ -21,9 +21,18 @@ concurrency:
 
 jobs:
   release:
-    # arm64. `make` builds for the machine it runs on and there is no universal
-    # binary, so the runner's architecture *is* the release's architecture.
-    runs-on: macos-15
+    # macOS 26 on arm64, and both halves are load-bearing.
+    #
+    # arm64 because `make` builds for the machine it runs on and there is no
+    # universal binary, so the runner's architecture *is* the release's.
+    #
+    # macOS 26 because compiling an Icon Composer document needs more than
+    # Xcode 26 — on the macos-15 image, with Xcode 26 selected, actool's
+    # rendering agent crashed outright ("The tool closed the connection
+    # (AssetCatalogAgent-AssetRuntime)"). The tool is new enough there; the
+    # system underneath it is not. This image also defaults to Xcode 26.6, so
+    # nothing has to select one.
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
@@ -43,29 +52,17 @@ jobs:
           fi
           echo "version=$plist" >> "$GITHUB_ENV"
 
-      # The runner defaults to Xcode 16.4, whose actool does not understand an
-      # Icon Composer document and writes nothing for one -- exiting 0 while
-      # doing so, which is why the build asserts on the catalogue's existence
-      # rather than on actool's status. Newest available rather than a pinned
-      # version, because the image's list changes and a pin would rot into this
-      # same failure with a less obvious cause.
-      - name: Use an Xcode that understands .icon
+      - name: Check the toolchain can read .icon
+        # Kept as a check even though this image defaults to Xcode 26: an
+        # older actool writes nothing for an Icon Composer document and exits
+        # 0, so a runner image that quietly moved its default would produce a
+        # release with no icon rather than a failure.
         run: |
           set -euo pipefail
-          # Resolved, because the image ships symlinks beside the real
-          # bundles -- Xcode_26.3.0.app points at Xcode_26.3.app, sorts higher,
-          # and then never matches the path xcrun reports back.
-          newest=$(for d in /Applications/Xcode_26*.app; do
-                     [ -d "$d" ] && readlink -f "$d"; done | sort -Vu | tail -1)
-          [ -n "$newest" ] || { echo "::error::no Xcode 26 on this runner"; exit 1; }
-          sudo xcode-select -s "$newest"
           xcodebuild -version | head -1
-          # Prove the selection took. Comparing versions rather than paths:
-          # what matters is that actool is new enough to read an Icon Composer
-          # document, and the path it lives at is incidental.
           major=$(xcodebuild -version | head -1 | sed -E 's/^Xcode ([0-9]+).*/\1/')
-          [ "$major" -ge 26 ] || { echo "::error::selected Xcode is $major, need 26+"; exit 1; }
-          echo "actool: $(xcrun --find actool)"
+          [ "$major" -ge 26 ] || { echo "::error::Xcode $major cannot compile .icon, need 26+"; exit 1; }
+          sw_vers -productVersion
 
       - name: Import the signing certificate
         env:
