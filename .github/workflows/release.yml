@@ -92,13 +92,22 @@ jobs:
           gh release create "$GITHUB_REF_NAME" "dist/TYPE-${version}-direct.zip" \
             --title "TYPE ${version}" --generate-notes
 
+      # A deploy key rather than a personal access token, which is what
+      # xiaolai/cubus does for the same tap. The difference is what the
+      # credential can reach if it leaks: this one writes to homebrew-tap and
+      # can do nothing else at all, where a token carries whatever its owner
+      # carries.
+      - name: Check out the tap
+        uses: actions/checkout@v4
+        with:
+          repository: xiaolai/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+
       - name: Update the Homebrew cask
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
-          gh repo clone xiaolai/homebrew-tap /tmp/tap -- --depth 1
-          cask=/tmp/tap/Casks/type-review.rb
+          cask="$GITHUB_WORKSPACE/tap/Casks/type-review.rb"
 
           # Refuse to go backwards. A misfired run with an old tag would
           # otherwise publish a cask older than the one already there, and
@@ -183,7 +192,7 @@ jobs:
           grep -q "version \"${version}\"" "$cask" || { echo "::error::version not written"; exit 1; }
           grep -q "sha256 \"${sha}\"" "$cask" || { echo "::error::sha256 not written"; exit 1; }
 
-          cd /tmp/tap
+          cd "$GITHUB_WORKSPACE/tap"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -qam "type-review ${version}"
