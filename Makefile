@@ -118,6 +118,18 @@ ASC_KEY_ID       ?=
 ASC_ISSUER_ID    ?=
 ASC_APPLE_ID     ?=
 ASC_KEYCHAIN_ITEM ?= TYPE_ASC
+# The name of an environment variable holding the app-specific password.
+#
+# Preferred over the keychain item, and not by taste. Measured against altool
+# from Xcode 26: with the *same* password, `-p @env:VAR` authenticates and
+# uploads, while `-p @keychain --item TYPE_ASC` finds the item and then fails
+# with "Sign in with the app-specific password you generated". Whatever altool
+# reads back out of the keychain is not what it was given.
+#
+# It is also the form CI needs, where there is no keychain to have stored
+# anything in. Keep the variable out of the shell's history -- a .env file that
+# .gitignore covers, sourced with `set -a`, is what this repository does.
+ASC_PASSWORD_ENV ?=
 STORE_PKG       ?= dist/TYPE-$(DIST_VERSION).pkg
 
 # Apple's notary service drops connections, and notarytool has no internal
@@ -595,6 +607,9 @@ validate: verify-pkg
 	@if [ -n "$(ASC_KEY_ID)" ] && [ -n "$(ASC_ISSUER_ID)" ]; then \
 		xcrun altool --validate-app -f "$(STORE_PKG)" -t macos \
 			--apiKey "$(ASC_KEY_ID)" --apiIssuer "$(ASC_ISSUER_ID)"; \
+	elif [ -n "$(ASC_APPLE_ID)" ] && [ -n "$(ASC_PASSWORD_ENV)" ]; then \
+		xcrun altool --validate-app -f "$(STORE_PKG)" -t macos \
+			-u "$(ASC_APPLE_ID)" -p "@env:$(ASC_PASSWORD_ENV)"; \
 	elif [ -n "$(ASC_APPLE_ID)" ]; then \
 		xcrun altool --validate-app -f "$(STORE_PKG)" -t macos \
 			-u "$(ASC_APPLE_ID)" -p @keychain --item "$(ASC_KEYCHAIN_ITEM)"; \
@@ -639,6 +654,10 @@ upload: verify-pkg validate
 		echo "  uploading with the App Store Connect API key $(ASC_KEY_ID)"; \
 		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
 			--apiKey "$(ASC_KEY_ID)" --apiIssuer "$(ASC_ISSUER_ID)"; \
+	elif [ -n "$(ASC_APPLE_ID)" ] && [ -n "$(ASC_PASSWORD_ENV)" ]; then \
+		echo "  uploading as $(ASC_APPLE_ID), password from $$$(ASC_PASSWORD_ENV)"; \
+		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
+			-u "$(ASC_APPLE_ID)" -p "@env:$(ASC_PASSWORD_ENV)"; \
 	elif [ -n "$(ASC_APPLE_ID)" ]; then \
 		echo "  uploading as $(ASC_APPLE_ID), password from the keychain"; \
 		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
@@ -646,6 +665,7 @@ upload: verify-pkg validate
 	else \
 		echo "error: no upload credentials configured. Either:"; \
 		echo "  make upload ASC_KEY_ID=... ASC_ISSUER_ID=...   (App Store Connect API key)"; \
+		echo "  make upload ASC_APPLE_ID=you@example.com ASC_PASSWORD_ENV=VAR   (password in \$$VAR)"; \
 		echo "  make upload ASC_APPLE_ID=you@example.com       (password in keychain item $(ASC_KEYCHAIN_ITEM))"; \
 		exit 1; \
 	fi
