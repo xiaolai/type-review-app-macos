@@ -54,6 +54,10 @@ final class StatsViewController: NSViewController {
     /// totals as they were when it opened and never moved again, so finishing
     /// a run with Statistics on screen left it quietly stale.
     var history: () -> [RunResult] = { [] }
+    /// The system-wide counts, or nil when the user has not switched counting
+    /// on. Nil rather than an empty log, so "off" and "nothing typed" stay
+    /// distinguishable — they draw the same grid otherwise.
+    var keystrokes: () -> KeystrokeLog? = { nil }
     private var runObserver: NSObjectProtocol?
     private var dayObserver: NSObjectProtocol?
 
@@ -126,8 +130,8 @@ final class StatsViewController: NSViewController {
         // the grid six points below uses to mean "this many characters" — two
         // different meanings for one colour, side by side. This reads as a
         // caption that happens to be clickable, which is what it is.
-        metric.addItems(withTitles: ["Sessions", "Characters"])
-        metric.selectItem(at: AppPreferences.statsGridCountsCharacters.value ? 1 : 0)
+        metric.addItems(withTitles: AppPreferences.StatsMetric.allCases.map(\.label))
+        markMetric()
         metric.target = self
         metric.action = #selector(metricChanged)
         metric.isBordered = false
@@ -250,16 +254,25 @@ final class StatsViewController: NSViewController {
         // segment, and it runs lazily on first view access -- so anything
         // asking before the window is on screen read segment 0 and got
         // sessions regardless of what the user had chosen.
-        let countsCharacters = AppPreferences.statsGridCountsCharacters.value
-        let perDay =
-            countsCharacters
-            ? charactersPerDay(results, calendar: statsCalendar)
-            : dailyCounts(results, calendar: statsCalendar)
+        // Keystrokes falls back to characters when the counter is off, rather
+        // than drawing an empty grid: an all-grey chart under a heading that
+        // says "All keystrokes" reads as "you have typed nothing", not as
+        // "this is switched off".
+        var chosen = AppPreferences.statsMetric.value
+        let log = chosen == .keystrokes ? keystrokes() : nil
+        if chosen == .keystrokes, log == nil { chosen = .characters }
+
+        let perDay: OrderedMap<Int>
+        switch chosen {
+        case .sessions: perDay = dailyCounts(results, calendar: statsCalendar)
+        case .characters: perDay = charactersPerDay(results, calendar: statsCalendar)
+        case .keystrokes: perDay = log?.countsByDay() ?? OrderedMap<Int>()
+        }
         calendar.show(
             practiceCalendar(
                 countsByDay: perDay, now: now, days: PracticeCalendarView.windowDays,
                 calendar: statsCalendar),
-            unit: countsCharacters ? .characters : .sessions)
+            unit: PracticeCalendarView.Unit(chosen))
         streakLabel.stringValue =
             "\(days.current)-day streak · longest \(days.longest) · \(practiceDays) days practised"
 
@@ -295,14 +308,16 @@ final class StatsViewController: NSViewController {
     }
 
     @objc private func metricChanged() {
-        AppPreferences.statsGridCountsCharacters.value = metric.indexOfSelectedItem == 1
+        let all = AppPreferences.StatsMetric.allCases
+        AppPreferences.statsMetric.value = all[min(max(0, metric.indexOfSelectedItem), all.count - 1)]
         refresh()
     }
 
     /// Keeps the segment in step with the preference, which is what `present`
     /// actually reads.
     private func markMetric() {
-        metric.selectItem(at: AppPreferences.statsGridCountsCharacters.value ? 1 : 0)
+        let all = AppPreferences.StatsMetric.allCases
+        metric.selectItem(at: all.firstIndex(of: AppPreferences.statsMetric.value) ?? 0)
     }
 
     @objc private func groupingChanged() { refresh() }

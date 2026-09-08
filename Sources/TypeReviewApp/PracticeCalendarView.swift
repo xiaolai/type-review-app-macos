@@ -43,7 +43,15 @@ final class PracticeCalendarView: NSView {
     /// the unit only exists to keep the tooltip honest — a cell reading
     /// "3 sessions" when it means 3 characters is worse than no tooltip.
     enum Unit {
-        case sessions, characters
+        case sessions, characters, keystrokes
+
+        init(_ metric: AppPreferences.StatsMetric) {
+            switch metric {
+            case .sessions: self = .sessions
+            case .characters: self = .characters
+            case .keystrokes: self = .keystrokes
+            }
+        }
 
         func describe(_ count: Int) -> String {
             switch self {
@@ -53,6 +61,8 @@ final class PracticeCalendarView: NSView {
                 // recorded, so backspaces, modifiers and every key pressed
                 // outside a run are missing.
                 return count == 1 ? "1 character typed" : "\(count) characters typed"
+            case .keystrokes:
+                return count == 1 ? "1 key pressed" : "\(count) keys pressed"
             }
         }
 
@@ -60,6 +70,7 @@ final class PracticeCalendarView: NSView {
             switch self {
             case .sessions: return "sessions"
             case .characters: return "characters typed"
+            case .keystrokes: return "keys pressed"
             }
         }
     }

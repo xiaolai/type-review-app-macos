@@ -264,6 +264,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Silent in", self.mutedAppsControl(),
                 hint: "Password managers are never watched. Password fields never sound.")
+            // Here rather than under Statistics because it needs the same
+            // Input Monitoring permission and the same tap as the row above,
+            // and the two exclusions named in that hint apply to it exactly.
+            self.addRow(
+                grid, "Count keystrokes", self.countKeystrokesToggle(),
+                hint: "A daily total of keys pressed in any app, for the Statistics grid. "
+                    + "A number per day and nothing else — no times, no which keys, no app "
+                    + "names. Kept on this Mac, never sent anywhere.")
+            self.addRow(
+                grid, "", self.eraseKeystrokesButton(),
+                hint: "Deletes the daily totals. Practice history is untouched.")
             self.addRow(
                 grid, "Shortcut", self.shortcutRecorder(AppPreferences.soundShortcut),
                 hint: "Works from any app. ⌫ clears it, ⎋ cancels.")
@@ -688,6 +699,51 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
+    /// Whether keys pressed anywhere are counted.
+    ///
+    /// A separate switch from the keyboard sound, though they share a tap and
+    /// a permission. Tying it to the sound would have meant counting only
+    /// while the sound was on, and a grid with gaps wherever somebody had
+    /// muted their keyboard looks exactly like days they did not type.
+    private func countKeystrokesToggle() -> NSControl {
+        let toggle = checkbox()
+        toggle.identifier = .init("countKeystrokes")
+        controls["countKeystrokes"] = toggle
+        bind(toggle) { [weak self] in
+            let on = toggle.state == .on
+            if on { self?.askForKeyPermission() }
+            AppPreferences.countKeystrokes.value = on
+            self?.refreshSoundScope()
+        }
+        return toggle
+    }
+
+    /// Throws away the counts, and says so plainly first.
+    ///
+    /// A confirmation because it cannot be undone and the data cannot be
+    /// reconstructed — there is nowhere else it exists.
+    private func eraseKeystrokesButton() -> NSControl {
+        let button = NSButton(
+            title: "Erase keystroke counts", target: self, action: #selector(eraseKeystrokes))
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        controls["eraseKeystrokes"] = button
+        return button
+    }
+
+    @objc private func eraseKeystrokes() {
+        let alert = NSAlert()
+        alert.messageText = "Erase the keystroke counts?"
+        alert.informativeText =
+            "The daily totals of keys pressed will be deleted from this Mac. Your practice "
+            + "history and statistics are not affected. This cannot be undone."
+        alert.addButton(withTitle: "Erase")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        (NSApp.delegate as? AppDelegate)?.keystrokes?.erase()
+    }
+
     /// Whether the modifier keys click.
     ///
     /// One box rather than six. "Should shift click?" has one answer per
@@ -822,6 +878,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
         let global = AppPreferences.globalSound.value
         (controls["globalSound"] as? NSButton)?.state = global ? .on : .off
+        let counting = AppPreferences.countKeystrokes.value
+        (controls["countKeystrokes"] as? NSButton)?.state = counting ? .on : .off
+        // Nothing to erase is not an error, but a live button that does
+        // nothing is worse than a dim one that explains itself.
+        (controls["eraseKeystrokes"] as? NSButton)?.isEnabled =
+            (NSApp.delegate as? AppDelegate)?.keystrokes?.isEmpty == false
         (controls["modifierSound"] as? NSButton)?.state =
             AppPreferences.modifierSound.value ? .on : .off
         // Modifiers are only heard through the system-wide monitor, so the row

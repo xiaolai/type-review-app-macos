@@ -880,6 +880,50 @@ enum Diagnostics {
             // same shape, so a grid fed characters while labelled sessions is
             // wrong only in its tooltip -- invisible to every pixel check
             // above, and the sort of thing a metric switch breaks silently.
+            // The keystroke counter, end to end: count, reach disk, come back.
+            // Nothing else covers the write path, and a counter that silently
+            // fails to persist looks exactly like a user who did not type.
+            let countDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TypeReviewCount-\(UUID().uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: countDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: countDirectory) }
+
+            // A clock the check owns, so the day boundary is a fact rather
+            // than whatever time the check happens to run at.
+            var clock = Date(timeIntervalSince1970: 1_773_500_000)
+            let counter = KeystrokeCounter(directory: countDirectory, now: { clock })
+            for _ in 0..<7 { counter.record() }
+            guard counter.snapshot().total == 7 else {
+                print("SELFTEST FAIL: counted 7 keys, snapshot says \(counter.snapshot().total)")
+                exit(1)
+            }
+            // Across midnight the count must split between two days rather
+            // than following the clock into one bucket or being lost.
+            clock = clock.addingTimeInterval(36 * 60 * 60)
+            counter.record()
+            let split = counter.snapshot()
+            guard split.days.count == 2, split.total == 8 else {
+                print(
+                    "SELFTEST FAIL: a day boundary should split the count, got "
+                        + "\(split.days.count) day(s) totalling \(split.total)")
+                exit(1)
+            }
+            counter.flush()
+            let reloaded = KeystrokeCounter(directory: countDirectory, now: { clock })
+            guard reloaded.snapshot() == split else {
+                print("SELFTEST FAIL: the keystroke counts did not survive a save and load")
+                exit(1)
+            }
+            reloaded.erase()
+            guard reloaded.isEmpty,
+                !FileManager.default.fileExists(
+                    atPath: countDirectory.appendingPathComponent("keystrokes.json").path)
+            else {
+                print("SELFTEST FAIL: erasing the keystroke counts left something behind")
+                exit(1)
+            }
+
             // Pinned rather than assumed. This reads a real preference, so
             // asserting the *default* made the check pass or fail on whether
             // whoever ran it had touched the control -- a test that inherits
@@ -887,16 +931,23 @@ enum Diagnostics {
             // tests avoid by pinning their timezone.
             let metricBefore = UserDefaults.standard.volatileDomain(
                 forName: UserDefaults.argumentDomain)
-            for (wantsCharacters, expected) in [(true, "characters typed"), (false, "sessions")] {
+            for (wanted, expected) in [
+                (AppPreferences.StatsMetric.characters, "characters typed"),
+                (.sessions, "sessions"),
+                // Keystrokes with the counter off must fall back to characters
+                // rather than drawing an empty grid under a heading claiming
+                // to show every key pressed.
+                (.keystrokes, "characters typed"),
+            ] {
                 var arguments = metricBefore
-                arguments[AppPreferences.statsGridCountsCharacters.key] = wantsCharacters
+                arguments[AppPreferences.statsMetric.key] = wanted.rawValue
                 UserDefaults.standard.setVolatileDomain(
                     arguments, forName: UserDefaults.argumentDomain)
                 statsController.refresh()
                 let summary = statsController.calendarSummary
                 guard summary.hasSuffix(expected) else {
                     print(
-                        "SELFTEST FAIL: with characters=\(wantsCharacters) the grid describes "
+                        "SELFTEST FAIL: with metric=\(wanted.rawValue) the grid describes "
                             + "itself as \"\(summary)\"")
                     exit(1)
                 }
