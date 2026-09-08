@@ -655,7 +655,7 @@ upload: verify-pkg validate
 		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
 			--apiKey "$(ASC_KEY_ID)" --apiIssuer "$(ASC_ISSUER_ID)"; \
 	elif [ -n "$(ASC_APPLE_ID)" ] && [ -n "$(ASC_PASSWORD_ENV)" ]; then \
-		echo "  uploading as $(ASC_APPLE_ID), password from $$$(ASC_PASSWORD_ENV)"; \
+		echo "  uploading as $(ASC_APPLE_ID), password from the environment"; \
 		xcrun altool --upload-app -f "$(STORE_PKG)" -t macos \
 			-u "$(ASC_APPLE_ID)" -p "@env:$(ASC_PASSWORD_ENV)"; \
 	elif [ -n "$(ASC_APPLE_ID)" ]; then \
