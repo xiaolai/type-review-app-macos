@@ -356,8 +356,40 @@ public struct PracticeDay: Sendable, Equatable {
 public func practiceCalendar(
     _ results: [RunResult], now: Double, days: Int, calendar: Calendar
 ) -> [PracticeDay] {
+    practiceCalendar(
+        countsByDay: dailyCounts(results, calendar: calendar), now: now, days: days,
+        calendar: calendar)
+}
+
+/// Characters typed per local day.
+///
+/// `correctChars + incorrectChars` is what a run records, so this is
+/// characters *typed in practice* — not keystrokes. Backspaces, modifiers,
+/// shortcuts and every key pressed outside this app are absent, and the
+/// difference is large enough that calling it a keystroke count would be a
+/// lie the number itself cannot reveal.
+public func charactersPerDay(
+    _ results: [RunResult], calendar: Calendar
+) -> OrderedMap<Int> {
+    var out = OrderedMap<Int>()
+    for result in results {
+        let key = dayKey(result.timestamp, calendar: calendar)
+        out[key] = (out[key] ?? 0) + result.metrics.correctChars + result.metrics.incorrectChars
+    }
+    return out
+}
+
+/// The grid itself, over whatever per-day quantity it is given.
+///
+/// Split from the `[RunResult]` form so sessions and characters share one
+/// implementation. The three decisions below — window-scoped maximum, the
+/// visibility floor, calendar-day walking — are each wrong in a way no
+/// screenshot reveals, and having two copies of them would mean the second
+/// copy is the one that regresses.
+public func practiceCalendar(
+    countsByDay counts: OrderedMap<Int>, now: Double, days: Int, calendar: Calendar
+) -> [PracticeDay] {
     guard days > 0 else { return [] }
-    let counts = dailyCounts(results, calendar: calendar)
     let today = dayKey(now, calendar: calendar)
 
     let keys = (0..<days).map { dayKeyBack(now, days - 1 - $0, calendar: calendar) }
