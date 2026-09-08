@@ -244,7 +244,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "--soundcheck": Diagnostics.runSoundCheck()
         case "--selftest": Diagnostics.runSelfTest(practice: practice)
         case "--speechbench": Diagnostics.runSpeechBench(practice: practice)
-        default: break
+        case .some(let flag):
+            // Recognised by `Diagnostics.flags` and handled by nothing. Adding a
+            // check to that list and forgetting this switch launched the app
+            // into an empty run loop, where it sat until it was killed by hand
+            // — a check that never runs and never says so.
+            print("error: \(flag) is in Diagnostics.flags but has no handler here")
+            exit(2)
+        case nil:
+            break
         }
     }
 
