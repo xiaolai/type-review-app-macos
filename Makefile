@@ -14,10 +14,11 @@
 #   make VARIANT=appstore    sandboxed, for the App Store
 #   make appstore            the same, spelled shorter
 #
-# The App Store build cannot be signed for submission yet: that needs an Apple
-# Distribution certificate and this keychain has only a Developer ID. Signed
-# with Developer ID it is still a valid, runnable, sandboxed app — which is how
-# the sandbox was verified in the first place.
+# `make appstore` produces the sandboxed app; `make pkg` signs it into a
+# submittable package. Both certificates the store needs are in the keychain now
+# — Apple Distribution for the app, 3rd Party Mac Developer Installer for the
+# package — so this no longer stops at a Developer ID signature the store would
+# refuse.
 VARIANT ?= direct
 
 ifeq ($(VARIANT),appstore)
