@@ -224,7 +224,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest speechbench quit-running test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest speechbench screenshots quit-running test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -407,6 +407,21 @@ selftest: $(APP) quit-running
 speechbench: $(APP) quit-running
 	@./$(APP)/Contents/MacOS/$(BIN) --speechbench
 
+# Renders the windows to PNGs at App Store dimensions.
+#
+# Two steps, and the split is the point. The app draws each window into a bitmap
+# at its own size -- a window stretched to fit a canvas is a screenshot of a
+# stretched window -- and `sips` then centres that on the exact canvas the store
+# demands. 2880x1800 is the largest of the four accepted sizes, so it is the one
+# that never needs upscaling.
+screenshots: $(APP) quit-running
+	@./$(APP)/Contents/MacOS/$(BIN) --screenshots
+	@for f in dist/screenshots/*.png; do \
+		sips --padToHeightWidth 1800 2880 --padColor F2F2F7 "$$f" --out "$$f" >/dev/null; \
+		printf '  %-28s %s\n' "$$(basename $$f)" \
+			"$$(sips -g pixelWidth -g pixelHeight "$$f" | awk '/pixel/ {printf "%s ", $$2}')"; \
+	done
+
 test:
 	swift test
 
@@ -555,6 +570,12 @@ pkg:
 	rm -rf "$$work/TYPE.app"; \
 	cp -R .build/appstore/TYPE.app "$$work/TYPE.app"; \
 	cp "$(STORE_PROFILE)" "$$work/TYPE.app/Contents/embedded.provisionprofile"; \
+	: 'Extended attributes stripped, and the provisioning profile is why:'; \
+	: 'it arrives through a browser, so it carries com.apple.quarantine, and'; \
+	: 'App Store Connect refuses a macOS package containing that attribute on'; \
+	: 'any file (91109). Before signing rather than after, so the signature is'; \
+	: 'computed over exactly what ships.'; \
+	xattr -cr "$$work/TYPE.app"; \
 	test -s "$$work/TYPE.app/Contents/embedded.provisionprofile" \
 		|| { echo "error: the profile did not copy"; exit 1; }; \
 	cp sandbox.entitlements "$$work/store.entitlements"; \
@@ -635,6 +656,16 @@ verify-pkg:
 		|| { echo "error: the packaged app is not signed with $(STORE_SIGN)"; exit 1; }; \
 	test -s "$$app/Contents/embedded.provisionprofile" \
 		|| { echo "error: the packaged app has no provisioning profile"; exit 1; }; \
+	bad=$$(find "$$app" -type f -print0 \
+		| xargs -0 -I@ sh -c 'xattr "@" 2>/dev/null | grep -q com.apple.quarantine && echo "@"' \
+		| head -3); \
+	test -z "$$bad" \
+		|| { echo "error: com.apple.quarantine on files inside the package:"; \
+		     echo "$$bad" | sed 's|.*/TYPE.app|  TYPE.app|'; \
+		     echo "       App Store Connect refuses these with error 91109, and it does"; \
+		     echo "       so during processing -- the upload reports success and the"; \
+		     echo "       build simply never appears. Rebuild with 'make pkg'."; \
+		     exit 1; }; \
 	codesign -d --entitlements :- "$$app" 2>/dev/null | grep -q "app-sandbox" \
 		|| { echo "error: the packaged app is not sandboxed"; exit 1; }; \
 	built=$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$$app/Contents/Info.plist"); \
