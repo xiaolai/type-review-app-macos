@@ -68,6 +68,14 @@ SIGN_ID ?= Developer ID Application: HANDO K.K. (Y53RSUA3SM)
 # authenticates the *account*, not the app, and a second copy of the same
 # password is a second thing to rotate.
 NOTARY_PROFILE ?= chase-notary
+# How notarytool is told who we are. A keychain profile locally, where one
+# exists and no secret has to be handed about; explicit credentials on a
+# builder, where there is no keychain to have stored one in.
+#
+# Not the App Store Connect API key, which would be the tidier form: that key
+# is refused for notarisation too while the team's agreement is unsigned, with
+# the same 403 the store API gives. The Apple ID path is unaffected by it.
+NOTARY_AUTH ?= --keychain-profile $(NOTARY_PROFILE)
 
 # App Store distribution. A different trust chain from Developer ID entirely —
 # that certificate signs software Apple has notarised but does not host, and
@@ -626,7 +634,7 @@ notarize: $(APP)
 	# `ditto`, not `zip`: the notary service needs the bundle's symlinks and
 	# extended attributes intact, and `zip` flattens both.
 	ditto -c -k --keepParent $(APP) .build/notary/$(BIN).zip
-	$(call retry,xcrun notarytool submit .build/notary/$(BIN).zip --keychain-profile $(NOTARY_PROFILE) --wait)
+	$(call retry,xcrun notarytool submit .build/notary/$(BIN).zip $(NOTARY_AUTH) --wait)
 	$(call retry,xcrun stapler staple $(APP))
 	xcrun stapler validate $(APP)
 	# The assessment a first launch actually performs.
