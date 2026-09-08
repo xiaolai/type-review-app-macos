@@ -72,7 +72,9 @@ enum AboutPane {
         return stack
     }
 
-    /// `0.1.1 (103)`, read from the bundle rather than written down twice.
+    /// `<version> (<build>)`, read from the bundle rather than written down
+    /// twice. Written as a shape rather than as an example, because an example
+    /// here is wrong again after every release.
     ///
     /// Only the first half is in `Info.plist`. The build number there is a
     /// placeholder that the Makefile overwrites with the commit count, so the
