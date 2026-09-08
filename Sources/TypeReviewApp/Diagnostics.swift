@@ -859,9 +859,11 @@ enum Diagnostics {
                         + "\(PracticeCalendarView.windowDays)-cell practice grid, got \(filled)")
                 exit(1)
             }
-            // And that it draws. Sixty cells of 18pt is a little over 19,000
-            // pixels before the legend, so a floor of 15,000 catches a blank
-            // or half-laid-out grid without pinning the exact geometry.
+            // And that it draws. At the probe's 460pt width the grid is 150
+            // cells of 12pt, a little over 21,000 pixels before the legend and
+            // before any Retina scaling. A floor of 15,000 catches a blank or
+            // half-laid-out grid on a 1x display without pinning geometry that
+            // is meant to change.
             let ink = statsController.calendarInk()
             guard ink.ink > 15_000 else {
                 print("SELFTEST FAIL: the practice grid drew \(ink.ink) pixels — it is blank")

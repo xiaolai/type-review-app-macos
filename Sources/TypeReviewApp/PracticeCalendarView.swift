@@ -21,10 +21,14 @@ import TypeReviewKit
 /// width; the day count is the thing that has to match, not the rectangle.
 @MainActor
 final class PracticeCalendarView: NSView {
-    /// The window the grid covers. Sixty days is two months of habit — long
-    /// enough that a lapse is visible, short enough that every cell still
-    /// belongs to a period the reader remembers.
-    static let windowDays = 60
+    /// The window the grid covers.
+    ///
+    /// Thirty columns to a row, so a row is roughly a month and five rows are
+    /// roughly five months — long enough that a lapse and a recovery are both
+    /// visible, short enough that every cell still belongs to a stretch the
+    /// reader remembers. The row count is what was chosen; the day count
+    /// follows from it and from filling the width.
+    static let windowDays = 150
 
     private static let columns = 30
     private static let rows = (windowDays + columns - 1) / columns
