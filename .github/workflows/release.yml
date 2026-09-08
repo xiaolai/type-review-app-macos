@@ -43,6 +43,27 @@ jobs:
           fi
           echo "version=$plist" >> "$GITHUB_ENV"
 
+      # The runner defaults to Xcode 16.4, whose actool does not understand an
+      # Icon Composer document and writes nothing for one -- exiting 0 while
+      # doing so, which is why the build asserts on the catalogue's existence
+      # rather than on actool's status. Newest available rather than a pinned
+      # version, because the image's list changes and a pin would rot into this
+      # same failure with a less obvious cause.
+      - name: Use an Xcode that understands .icon
+        run: |
+          set -euo pipefail
+          newest=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$newest" ] || { echo "::error::no Xcode 26 on this runner"; exit 1; }
+          sudo xcode-select -s "$newest"
+          xcodebuild -version | head -1
+          # Prove the selection took and that the tool it provides is the one
+          # that matters here.
+          xcrun --find actool
+          case "$(xcrun --find actool)" in
+            "$newest"*) ;;
+            *) echo "::error::actool is not coming from $newest"; exit 1 ;;
+          esac
+
       - name: Import the signing certificate
         env:
           CERT_P12: ${{ secrets.CERT_P12 }}
