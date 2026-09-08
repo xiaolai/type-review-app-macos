@@ -39,13 +39,28 @@ final class KeyboardDrawer {
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 100, height: Self.shutHeight),
             styleMask: [.borderless], backing: .buffered, defer: false)
-        // No background, and therefore no shadow: macOS derives a window's
-        // shadow from its frame, not from what it draws, so a transparent
-        // full-width window would cast a rectangular shadow around nothing.
-        // The keyboard's own case supplies the edge.
+        // No background, and a shadow anyway.
+        //
+        // This carried a `hasShadow = false` and the reason "macOS derives a
+        // window's shadow from its frame, not from what it draws, so a
+        // transparent full-width window would cast a rectangular shadow around
+        // nothing". That is not what it does. Measured against a white backdrop
+        // with a rounded rect inset 120pt inside a transparent frame, the
+        // margin stays at full brightness right up to the frame's edge and
+        // darkens only where the drawn shape begins: **the shadow follows the
+        // alpha channel of the content**, which for this window is the keyboard
+        // case and nothing else.
+        //
+        // So the drawer had no shadow for a reason that was never true, and it
+        // read as a flat extension of the window above rather than as an object
+        // hanging below it — which is the whole point of a drawer.
+        //
+        // The cost is that the shape is cached: `invalidateShadow` is needed
+        // wherever the frame or the case's height changes, or the shadow keeps
+        // the outline it had before.
         window.isOpaque = false
         window.backgroundColor = .clear
-        window.hasShadow = false
+        window.hasShadow = true
         // Display only. Without this the transparent area either swallows
         // clicks meant for whatever is behind it or pulls focus off the
         // passage, and the keyboard is a picture, not a control.
@@ -177,6 +192,9 @@ final class KeyboardDrawer {
         // taller, which can push it below the screen with nothing to notice.
         if let parent { makeRoomBelow(parent, animated: false) }
         window.setFrame(frame(open: true), display: true)
+        // The case is a different size at a different drawer width, and the
+        // shadow is cached from the last shape it was drawn at.
+        window.invalidateShadow()
         // Put back if it was hidden for a full-screen transition that then did
         // not happen. `willEnterFullScreen` orders the drawer out before the
         // system has committed, and a failed entry sends nothing afterwards —
@@ -213,6 +231,7 @@ final class KeyboardDrawer {
         guard animated, duration > 0.01 else {
             if open {
                 window.setFrame(frame(open: true), display: true)
+                window.invalidateShadow()
             } else {
                 dismiss(from: parent)
             }
@@ -237,7 +256,13 @@ final class KeyboardDrawer {
             MainActor.assumeIsolated {
                 guard let self, self.transition == mine else { return }
                 self.transition = 0
-                guard !self.isOpen else { return }
+                guard !self.isOpen else {
+                    // Settled at its open size. The animation redraws every
+                    // frame, but the shadow is recomputed from the shape only
+                    // when asked, so the last one has to be asked for.
+                    self.window.invalidateShadow()
+                    return
+                }
                 self.dismiss(from: parent)
             }
         }
