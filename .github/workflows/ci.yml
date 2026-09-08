@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Tags are handled by release.yml, which builds the same things. Running
+    # both on a tag would notarise once and build twice for no extra answer.
+    tags-ignore: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # The same image the release uses. A green CI on a different macOS than
+    # the one that cuts releases answers a question nobody asked: two of the
+    # six failures that made release.yml work were environment-specific, and
+    # both would have been invisible here on an older image.
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the build number is the commit count
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          # Captured whole rather than piped to head: xcodebuild does not
+          # handle SIGPIPE and aborts, which once failed a step that had
+          # already printed the right answer.
+          ver=$(xcodebuild -version)
+          printf '%s\n' "$ver" | head -1
+          major=$(printf '%s\n' "$ver" | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')
+          [ "$major" -ge 26 ] || { echo "::error::Xcode $major cannot compile .icon, need 26+"; exit 1; }
+          swift --version
+          sw_vers -productVersion
+
+      # No signing identity on a runner, and none needed: the Makefile signs
+      # ad-hoc when SIGN_ID is not in the keychain. What is being checked here
+      # is that the app assembles and its assertions hold, not that it is
+      # distributable — release.yml is where that question belongs.
+      - name: Build both variants
+        run: |
+          make
+          make appstore
+
+      - name: Test
+        run: make test
+
+      - name: Self-test
+        run: make selftest
+
+      - name: Warnings are errors here
+        # The project builds clean and should stay that way. A warning is
+        # cheap to fix on the commit that introduces it and expensive to find
+        # forty commits later.
+        run: |
+          set -euo pipefail
+          make clean >/dev/null
+          out=$(make 2>&1)
+          # Compiler warnings only. The Makefile prints its own "warning:"
+          # line when no signing identity is present and it falls back to ad
+          # hoc, which is true on every runner and is not a defect -- matching
+          # it would have made this step fail forever.
+          compiler='^[^ ]+:[0-9]+:[0-9]+: warning:'
+          n=$(printf '%s\n' "$out" | grep -cE "$compiler" || true)
+          if [ "$n" -ne 0 ]; then
+            printf '%s\n' "$out" | grep -E "$compiler" | head -20
+            echo "::error::$n compiler warning(s)"
+            exit 1
+          fi
+          echo "no warnings"
+
+      - name: A fresh clone builds
+        # The README tells people to clone and run make. This checks that what
+        # is committed is enough to do it -- a file that exists only on a
+        # developer's machine passes every other step in this job, because
+        # every other step runs in a tree that has it.
+        run: |
+          set -euo pipefail
+          git clone --depth 1 "file://$PWD" /tmp/fresh
+          cd /tmp/fresh
+          make
+          make test
+          test -s TYPE.app/Contents/Resources/Assets.car \
+            || { echo "::error::the icon catalogue is missing from a fresh clone"; exit 1; }
