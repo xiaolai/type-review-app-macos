@@ -924,6 +924,33 @@ enum Diagnostics {
                 exit(1)
             }
 
+            // The link from the preference to the tap. Pinned through the
+            // volatile domain and restored after, so a check never writes a
+            // real setting, and the sound is pinned *off* so nothing here can
+            // put a permission prompt on screen.
+            if let delegate = NSApp.delegate as? AppDelegate {
+                let soundBefore = UserDefaults.standard.volatileDomain(
+                    forName: UserDefaults.argumentDomain)
+                for wantsCounting in [true, false] {
+                    var arguments = soundBefore
+                    arguments[AppPreferences.globalSound.key] = false
+                    arguments[AppPreferences.countKeystrokes.key] = wantsCounting
+                    UserDefaults.standard.setVolatileDomain(
+                        arguments, forName: UserDefaults.argumentDomain)
+                    delegate.applySoundPreferences()
+                    let installed = delegate.globalSound.onKeyPressed != nil
+                    guard installed == wantsCounting else {
+                        print(
+                            "SELFTEST FAIL: with counting=\(wantsCounting) the key hook is "
+                                + "\(installed ? "installed" : "absent")")
+                        exit(1)
+                    }
+                }
+                UserDefaults.standard.setVolatileDomain(
+                    soundBefore, forName: UserDefaults.argumentDomain)
+                delegate.applySoundPreferences()
+            }
+
             // Pinned rather than assumed. This reads a real preference, so
             // asserting the *default* made the check pass or fail on whether
             // whoever ran it had touched the control -- a test that inherits

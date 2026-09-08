@@ -620,7 +620,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// surface wired as well would click twice for every key pressed in the
     /// practice window. `onKeyStruck` is therefore set to nil, not merely
     /// ignored, so the ownership is visible rather than conditional.
-    private func applySoundPreferences() {
+    /// Internal rather than private so `--selftest` can drive it. It is the
+    /// one place that connects the counting preference to the tap's hook, and
+    /// a hook that never gets installed counts nothing while looking exactly
+    /// like somebody who did not type.
+    func applySoundPreferences() {
         sounds.setPack(AppPreferences.soundPack.value)
         sounds.setVolume(AppPreferences.soundVolume.value)
 
