@@ -78,13 +78,21 @@ final class StatsViewController: NSViewController {
         // which is the older list shape and made the two tables in one app
         // look like they came from different decades.
         table.style = .inset
-        for (identifier, title, width) in [
-            ("key", "Key", CGFloat(90)), ("hits", "Typed", 80), ("avg", "Avg ms", 90),
-            ("err", "Errors", 90),
+        // Columns share the width instead of keeping fixed sizes. Four fixed
+        // columns came to 350pt in a table around 520 wide, so every row hugged
+        // the left with a third of the window empty beside it — centring the
+        // text alone would have centred it inside that same left-hand block.
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        for (identifier, title) in [
+            ("key", "Key"), ("hits", "Typed"), ("avg", "Avg ms"), ("err", "Errors"),
         ] {
             let column = NSTableColumn(identifier: .init(identifier))
             column.title = title
-            column.width = width
+            column.width = 120
+            // Below this the headings truncate before the numbers do, which
+            // reads as a broken table rather than a narrow one.
+            column.minWidth = 64
+            column.headerCell.alignment = .center
             table.addTableColumn(column)
         }
         table.dataSource = self
@@ -407,6 +415,7 @@ extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {
 
         let label = NSTextField(labelWithString: text)
         label.font = Theme.statFont
+        label.alignment = .center
         if identifier == "err", entry.errorRate > 0.05 { label.textColor = Theme.incorrect }
         return label
     }
