@@ -374,6 +374,20 @@ sampled from `NSWindow.standardWindowButton` on the running system rather than
 taken from the hex triples that circulate for them — those are from an older
 macOS and this one does not match them.
 
+### Building this needs Xcode 26
+
+Not the Swift toolchain's version — the icon step's. `actool` only understands
+an Icon Composer document from Xcode 26 onwards, and given one an older
+`actool` writes nothing and **exits 0**. That is why the bundle rule asserts on
+the catalogue existing rather than on actool's status, and it is how the first
+release run failed: GitHub's macos-15 image carries Xcode 26 but selects 16.4
+by default, so the assertion fired four steps into a build that had otherwise
+gone fine.
+
+Everything else builds with any recent toolchain. Only the icon needs the newer
+one — but `Resources/AppIcon.icon` is compiled on every build, so in practice
+the requirement is unconditional.
+
 ### Two artworks, one set of numbers
 
 `Mark.geometry` is the single definition. `RasterWriter` draws it with
