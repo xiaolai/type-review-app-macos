@@ -30,6 +30,12 @@ final class StatsViewController: NSViewController {
     /// reason, and sixty grey squares saying "you have never practised" is a
     /// worse first launch than not raising the subject.
     private let calendar = PracticeCalendarView()
+    /// What the grid counts. Beside the grid rather than in the toolbar: the
+    /// toolbar's segmented control switches what the *window* is showing, and
+    /// two identical-looking controls up there, governing a table and a grid
+    /// respectively, would leave neither obviously attached to anything.
+    private let metric = NSSegmentedControl(
+        labels: ["Sessions", "Characters"], trackingMode: .selectOne, target: nil, action: nil)
     /// One row shape for both groupings. The columns ask the same four
     /// questions either way, so the table does not need to know which it is
     /// showing — only the first column's heading changes.
@@ -108,15 +114,22 @@ final class StatsViewController: NSViewController {
         // instead of leaving the table pushed down by an invisible grid.
         calendar.heightAnchor.constraint(
             equalToConstant: calendar.intrinsicContentSize.height).isActive = true
-        let header = NSStackView(views: [summary, streakLabel, calendar])
+        metric.selectedSegment = AppPreferences.statsGridCountsCharacters.value ? 1 : 0
+        metric.target = self
+        metric.action = #selector(metricChanged)
+        metric.segmentStyle = .automatic
+        metric.controlSize = .small
+        metric.font = NSFont.systemFont(ofSize: 11)
+        let header = NSStackView(views: [summary, streakLabel, metric, calendar])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
         // The grid is evidence for the streak line above it, not another line
         // of it, so it gets air the two labels do not.
         header.setCustomSpacing(14, after: streakLabel)
-        // Full width, so the grid centres in the window rather than in the
-        // width of the longest label above it.
+        header.setCustomSpacing(8, after: metric)
+        // Full width, so the grid has room for all twenty columns rather than
+        // being squeezed to the width of the longest label above it.
         calendar.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         header.translatesAutoresizingMaskIntoConstraints = false
         return header
@@ -151,6 +164,9 @@ final class StatsViewController: NSViewController {
 
     /// What the grid actually draws. See `PracticeCalendarView.renderProbe`.
     func calendarInk() -> (ink: Int, tinted: Int) { calendar.renderProbe() }
+
+    /// The grid's own description of what it is counting.
+    var calendarSummary: String { calendar.summaryText }
 
     override func viewDidAppear() {
         super.viewDidAppear()
@@ -194,11 +210,14 @@ final class StatsViewController: NSViewController {
             summary.stringValue = "No runs yet."
             streakLabel.stringValue = ""
             calendar.isHidden = true
+            metric.isHidden = true
             rows = []
             table.reloadData()
             return
         }
         calendar.isHidden = false
+        metric.isHidden = false
+        markMetric()
 
         let best = results.map(\.metrics.netWpm).max() ?? 0
         let recent = results.suffix(10).map(\.metrics.netWpm)
@@ -214,10 +233,20 @@ final class StatsViewController: NSViewController {
         let now = Date().timeIntervalSince1970 * 1000
         let days = streak(results, now: now, calendar: statsCalendar)
         let practiceDays = dailyCounts(results, calendar: statsCalendar).count
+        // The preference, not the control. `makeHeader` is what seeds the
+        // segment, and it runs lazily on first view access -- so anything
+        // asking before the window is on screen read segment 0 and got
+        // sessions regardless of what the user had chosen.
+        let countsCharacters = AppPreferences.statsGridCountsCharacters.value
+        let perDay =
+            countsCharacters
+            ? charactersPerDay(results, calendar: statsCalendar)
+            : dailyCounts(results, calendar: statsCalendar)
         calendar.show(
             practiceCalendar(
-                results, now: now, days: PracticeCalendarView.windowDays,
-                calendar: statsCalendar))
+                countsByDay: perDay, now: now, days: PracticeCalendarView.windowDays,
+                calendar: statsCalendar),
+            unit: countsCharacters ? .characters : .sessions)
         streakLabel.stringValue =
             "\(days.current)-day streak · longest \(days.longest) · \(practiceDays) days practised"
 
@@ -250,6 +279,17 @@ final class StatsViewController: NSViewController {
                 }
         }
         table.reloadData()
+    }
+
+    @objc private func metricChanged() {
+        AppPreferences.statsGridCountsCharacters.value = metric.selectedSegment == 1
+        refresh()
+    }
+
+    /// Keeps the segment in step with the preference, which is what `present`
+    /// actually reads.
+    private func markMetric() {
+        metric.selectedSegment = AppPreferences.statsGridCountsCharacters.value ? 1 : 0
     }
 
     @objc private func groupingChanged() { refresh() }

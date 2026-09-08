@@ -874,6 +874,17 @@ enum Diagnostics {
                 print("SELFTEST FAIL: the practice grid renders identically with no intensity")
                 exit(1)
             }
+            // And that it knows what it is counting. Both metrics draw the
+            // same shape, so a grid fed characters while labelled sessions is
+            // wrong only in its tooltip -- invisible to every pixel check
+            // above, and the sort of thing a metric switch breaks silently.
+            let summary = statsController.calendarSummary
+            guard summary.contains("characters typed") else {
+                print(
+                    "SELFTEST FAIL: the grid defaults to characters but describes itself as "
+                        + "\"\(summary)\"")
+                exit(1)
+            }
 
             // And the data that menu is built from. An empty group would draw a
             // language header with nothing under it; an identifier that does

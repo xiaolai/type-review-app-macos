@@ -34,7 +34,33 @@ final class PracticeCalendarView: NSView {
     private static let gap: CGFloat = 3
     private static let legendHeight: CGFloat = 16
 
+    /// What a cell's number counts. The grid draws identically either way, so
+    /// the unit only exists to keep the tooltip honest — a cell reading
+    /// "3 sessions" when it means 3 characters is worse than no tooltip.
+    enum Unit {
+        case sessions, characters
+
+        func describe(_ count: Int) -> String {
+            switch self {
+            case .sessions: return count == 1 ? "1 session" : "\(count) sessions"
+            case .characters:
+                // "characters typed", not "keystrokes": this counts what a run
+                // recorded, so backspaces, modifiers and every key pressed
+                // outside a run are missing.
+                return count == 1 ? "1 character typed" : "\(count) characters typed"
+            }
+        }
+
+        var summary: String {
+            switch self {
+            case .sessions: return "sessions"
+            case .characters: return "characters typed"
+            }
+        }
+    }
+
     private var days: [PracticeDay] = []
+    private var unit: Unit = .sessions
 
     /// How many cells the grid is currently showing.
     ///
@@ -43,6 +69,11 @@ final class PracticeCalendarView: NSView {
     /// view that draws nothing and raises no error, which is the failure this
     /// whole window is one refresh away from at any time.
     var cellCount: Int { days.count }
+
+    /// How the grid describes itself — the one place the unit is observable
+    /// without reading pixels. A grid fed characters while still labelled
+    /// sessions draws identically and lies only in words.
+    var summaryText: String { accessibilitySummary() }
 
     /// Top-left origin, so the first cell drawn is the oldest day.
     override var isFlipped: Bool { true }
@@ -54,8 +85,9 @@ final class PracticeCalendarView: NSView {
         return NSSize(width: NSView.noIntrinsicMetric, height: height)
     }
 
-    func show(_ days: [PracticeDay]) {
+    func show(_ days: [PracticeDay], unit: Unit = .sessions) {
         self.days = days
+        self.unit = unit
         // One region for the whole grid, resolved to a day on demand. Sixty
         // registered rects would have to be torn down and rebuilt on every
         // refresh, and a stale one points at the wrong date rather than at
@@ -70,12 +102,18 @@ final class PracticeCalendarView: NSView {
 
     // MARK: - Geometry
 
-    /// The grid's own rect, centred in whatever width it is given.
+    /// The grid's own rect, at the leading edge of whatever width it is given.
+    ///
+    /// Not centred. Everything else in this window starts at the same left
+    /// margin, and a centred grid put its first day and its legend well to the
+    /// right of the streak line directly above it — the one misalignment on
+    /// the window, and the more obvious for being between two things that
+    /// describe the same thing.
     private func gridRect() -> NSRect {
         let cell = Self.maxCellSize
         let width = CGFloat(Self.columns) * cell + CGFloat(Self.columns - 1) * Self.gap
         let height = CGFloat(Self.rows) * cell + CGFloat(Self.rows - 1) * Self.gap
-        return NSRect(x: (bounds.width - width) / 2, y: 0, width: width, height: height)
+        return NSRect(x: 0, y: 0, width: min(width, bounds.width), height: height)
     }
 
     private func cellRect(at index: Int) -> NSRect {
@@ -202,8 +240,8 @@ final class PracticeCalendarView: NSView {
 
     private func accessibilitySummary() -> String {
         let practised = days.filter { $0.count > 0 }.count
-        let sessions = days.reduce(0) { $0 + $1.count }
-        return "Practice calendar: \(practised) of \(days.count) days, \(sessions) sessions"
+        let total = days.reduce(0) { $0 + $1.count }
+        return "Practice calendar: \(practised) of \(days.count) days, \(total) \(unit.summary)"
     }
 }
 
@@ -213,7 +251,6 @@ extension PracticeCalendarView: NSViewToolTipOwner {
         userData: UnsafeMutableRawPointer?
     ) -> String {
         guard let day = day(at: point) else { return "" }
-        let sessions = day.count == 1 ? "1 session" : "\(day.count) sessions"
-        return "\(day.key) — \(day.count == 0 ? "no practice" : sessions)"
+        return "\(day.key) — \(day.count == 0 ? "no practice" : unit.describe(day.count))"
     }
 }

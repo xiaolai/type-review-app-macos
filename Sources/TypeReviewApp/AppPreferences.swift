@@ -164,6 +164,15 @@ enum AppPreferences {
     /// the second person.
     static let showKeyboard = Flag(key: "ShowKeyboard", default: true)
 
+    /// Whether the practice grid counts characters rather than sessions.
+    ///
+    /// Characters by default. Sessions answers "did I show up", which the
+    /// streak line beside the grid already answers in words; characters
+    /// answers "how much did I do", which nothing else on the window says. A
+    /// day of one long passage and a day of three warm-ups are the same cell
+    /// under sessions and visibly different under characters.
+    static let statsGridCountsCharacters = Flag(key: "StatsGridCountsCharacters", default: true)
+
     /// Whether launching TYPE puts a window on screen.
     ///
     /// Off, so a double-click does what a double-click does. On, the app goes
