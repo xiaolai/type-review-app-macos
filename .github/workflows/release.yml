@@ -9,6 +9,16 @@ on:
 permissions:
   contents: write
 
+# The tap is a shared repository and this job rewrites it. Two releases running
+# at once could finish out of order and leave the older one's cask in place,
+# pushing every `brew upgrade` user backwards. Not cancel-in-progress: a run
+# that has already pushed must be allowed to finish rather than be killed
+# mid-mutation. Both lessons come from xiaolai/vmark, which learned them the
+# expensive way.
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   release:
     # arm64. `make` builds for the machine it runs on and there is no universal
@@ -84,29 +94,96 @@ jobs:
 
       - name: Update the Homebrew cask
         env:
-          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
           set -euo pipefail
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/TYPE-${version}-direct.zip"
-          # Downloaded back rather than hashed locally. What Homebrew checks is
-          # the bytes GitHub serves, and those are the only bytes worth
-          # hashing; a locally computed sum is a claim about a different file
-          # that is merely expected to be identical.
-          for i in 1 2 3 4 5; do
-            curl -fsSL -o /tmp/published.zip "$url" && break
-            echo "asset not available yet, retrying"; sleep 10
-          done
-          sha=$(shasum -a 256 /tmp/published.zip | cut -d' ' -f1)
           gh repo clone xiaolai/homebrew-tap /tmp/tap -- --depth 1
+          cask=/tmp/tap/Casks/type-review.rb
+
+          # Refuse to go backwards. A misfired run with an old tag would
+          # otherwise publish a cask older than the one already there, and
+          # every `brew upgrade` would walk users back a version.
+          current=$(grep '^  version "' "$cask" | head -1 | awk -F'"' '{print $2}')
+          if [ -n "$current" ]; then
+            if [ "$version" = "$current" ]; then
+              echo "::error::the tap is already at $current"; exit 1
+            fi
+            newest=$(printf '%s\n%s\n' "$version" "$current" | sort -V | tail -1)
+            if [ "$newest" != "$version" ]; then
+              echo "::error::the tap is at $current, newer than $version — refusing to downgrade"
+              exit 1
+            fi
+            echo "tap at $current, publishing $version"
+          fi
+
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/TYPE-${version}-direct.zip"
+
+          # Wait for the asset to be reachable. `gh release create` returns
+          # before the download URL is necessarily serving, and hashing a 404
+          # would publish a checksum no user could ever match.
+          for i in $(seq 1 30); do
+            code=$(curl -sI -o /dev/null -w "%{http_code}" -L "$url")
+            [ "$code" = "200" ] && break
+            echo "attempt $i/30: HTTP $code, waiting"
+            sleep 10
+          done
+          [ "$code" = "200" ] || { echo "::error::asset never became available"; exit 1; }
+
+          # --fail-with-body, not -f: curl refuses both together, and plain
+          # `curl -L` writes an error page to the output file and exits 0 --
+          # which is how an error page once got hashed and shipped as a cask's
+          # checksum. Then two sanity checks, because a 200 carrying the wrong
+          # bytes exits 0 as well.
+          curl -L --fail-with-body --retry 3 --retry-delay 5 --retry-all-errors \
+            -o /tmp/published.zip "$url"
+          size=$(stat -f%z /tmp/published.zip)
+          [ "$size" -gt 1000000 ] || { echo "::error::asset is only $size bytes"; exit 1; }
+          file /tmp/published.zip | grep -qi zip || { echo "::error::asset is not a zip"; exit 1; }
+          sha=$(shasum -a 256 /tmp/published.zip | cut -d' ' -f1)
+
+          # Written whole rather than patched in place. `sed` reports success
+          # when its pattern matched nothing, which is exactly how a cask keeps
+          # pointing at the previous release while the run goes green.
+          cat > "$cask" <<RUBY
+          cask "type-review" do
+            version "${version}"
+            sha256 "${sha}"
+
+            url "https://github.com/${GITHUB_REPOSITORY}/releases/download/v#{version}/TYPE-#{version}-direct.zip"
+            name "TYPE"
+            desc "Typing practice that adapts to the keys you miss"
+            homepage "https://type.review"
+
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
+
+            # arm64 only. There is no universal binary: \`make\` builds for the
+            # machine it runs on, and releases are cut on Apple silicon.
+            depends_on arch: :arm64
+            depends_on macos: :sonoma
+
+            app "TYPE.app"
+
+            # The direct build's identifier. The Mac App Store build carries
+            # \`review.type.app\` and its own container, so uninstalling this one
+            # must not reach into the other's data.
+            zap trash: [
+              "~/Library/Application Support/review.type.app.direct",
+              "~/Library/Caches/review.type.app.direct",
+              "~/Library/HTTPStorages/review.type.app.direct",
+              "~/Library/Preferences/review.type.app.direct.plist",
+              "~/Library/Saved Application State/review.type.app.direct.savedState",
+            ]
+          end
+          RUBY
+
+          ruby -c "$cask"
+          grep -q "version \"${version}\"" "$cask" || { echo "::error::version not written"; exit 1; }
+          grep -q "sha256 \"${sha}\"" "$cask" || { echo "::error::sha256 not written"; exit 1; }
+
           cd /tmp/tap
-          /usr/bin/sed -i '' -E "s/^  version \".*\"$/  version \"${version}\"/" Casks/type-review.rb
-          /usr/bin/sed -i '' -E "s/^  sha256 \".*\"$/  sha256 \"${sha}\"/" Casks/type-review.rb
-          # Both substitutions must have taken. sed reports success when its
-          # pattern matched nothing, which is how a cask silently keeps
-          # pointing at the previous release.
-          grep -q "version \"${version}\"" Casks/type-review.rb || { echo "::error::version not written"; exit 1; }
-          grep -q "sha256 \"${sha}\"" Casks/type-review.rb || { echo "::error::sha256 not written"; exit 1; }
-          ruby -c Casks/type-review.rb
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -qam "type-review ${version}"
