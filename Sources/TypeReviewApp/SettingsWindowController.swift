@@ -393,6 +393,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // One width for every pane, so switching tabs changes the height and
         // nothing else. A window that also changes width on each click reads
         // as three windows.
+        //
+        // Laid out first, for the reason `resizePanes` gives: an unlaid-out
+        // wrapping label reports a single line's height, so a pane containing
+        // prose is built too short and corrects itself later, visibly.
+        grid.layoutSubtreeIfNeeded()
         let size = grid.fittingSize
         root.frame = NSRect(
             x: 0, y: 0, width: Self.paneWidth, height: size.height + 2 * Self.paneMargin)
@@ -971,6 +976,13 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// height it was built with and the difference shows as empty space.
     private func resizePanes() {
         for pane in panes {
+            // Lay out before measuring. `fittingSize` asks each subview how
+            // tall it wants to be, and a wrapping label answers "one line"
+            // until layout has told it how wide it is — the About pane
+            // measured 348 points before layout and 461 after, and the window
+            // was sized to the first number and then to the second. That
+            // 113-point correction is the jump.
+            pane.grid.layoutSubtreeIfNeeded()
             let size = NSSize(
                 width: Self.paneWidth,
                 height: pane.grid.fittingSize.height + 2 * Self.paneMargin)
