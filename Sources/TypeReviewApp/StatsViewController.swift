@@ -1,8 +1,8 @@
 import AppKit
 import TypeReviewKit
 
-/// The statistics window: totals, streaks, and one table that answers the same
-/// four questions about either a key or a finger.
+/// The statistics window: totals, streaks, a sixty-day practice grid, and one
+/// table that answers the same four questions about either a key or a finger.
 ///
 /// Two views of one set of numbers, because `aggregatePerFinger` is built on
 /// `aggregatePerKey` — the same data regrouped. A finger view is what turns a
@@ -16,10 +16,20 @@ import TypeReviewKit
 /// Everything here comes from the ported aggregations, so the numbers are the
 /// website's numbers — including the day-level ones, which are computed in
 /// local calendar days rather than fixed 24-hour blocks.
+///
+/// The grid is the last of those to arrive. `dailyCounts` was already being
+/// computed here and immediately reduced to `.count` for "N days practised",
+/// which threw the distribution away on the line that built it; the website
+/// had been drawing that distribution all along.
 final class StatsViewController: NSViewController {
     private let summary = NSTextField(labelWithString: "")
     private let streakLabel = NSTextField(labelWithString: "")
     private let table = NSTableView()
+    /// The sixty-day grid. Hidden rather than emptied when there is no
+    /// history: the empty branch below blanks the streak label for the same
+    /// reason, and sixty grey squares saying "you have never practised" is a
+    /// worse first launch than not raising the subject.
+    private let calendar = PracticeCalendarView()
     /// One row shape for both groupings. The columns ask the same four
     /// questions either way, so the table does not need to know which it is
     /// showing — only the first column's heading changes.
@@ -93,10 +103,21 @@ final class StatsViewController: NSViewController {
         grouping.segmentStyle = .automatic
         // The grouping control is not in here: it belongs in the toolbar, which
         // is where macOS puts a control that switches what a window is showing.
-        let header = NSStackView(views: [summary, streakLabel])
+        // An arranged subview rather than a plain one: NSStackView collapses
+        // a hidden arranged subview, so the no-history case closes the gap
+        // instead of leaving the table pushed down by an invisible grid.
+        calendar.heightAnchor.constraint(
+            equalToConstant: calendar.intrinsicContentSize.height).isActive = true
+        let header = NSStackView(views: [summary, streakLabel, calendar])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
+        // The grid is evidence for the streak line above it, not another line
+        // of it, so it gets air the two labels do not.
+        header.setCustomSpacing(14, after: streakLabel)
+        // Full width, so the grid centres in the window rather than in the
+        // width of the longest label above it.
+        calendar.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         header.translatesAutoresizingMaskIntoConstraints = false
         return header
     }
@@ -118,6 +139,18 @@ final class StatsViewController: NSViewController {
     /// Re-reads and redisplays. Called when the window opens and whenever a
     /// run finishes while it is open.
     func refresh() { present(results: history()) }
+
+    // MARK: - Probes
+    //
+    // Read by `--selftest` and by nothing else. The Statistics window is built
+    // lazily when somebody clicks, so everything in it is one refactor away
+    // from being broken in a build that otherwise passes.
+
+    /// Whether the practice grid is showing, and how many cells it holds.
+    var calendarState: (hidden: Bool, cells: Int) { (calendar.isHidden, calendar.cellCount) }
+
+    /// What the grid actually draws. See `PracticeCalendarView.renderProbe`.
+    func calendarInk() -> (ink: Int, tinted: Int) { calendar.renderProbe() }
 
     override func viewDidAppear() {
         super.viewDidAppear()
@@ -160,10 +193,12 @@ final class StatsViewController: NSViewController {
         guard !results.isEmpty else {
             summary.stringValue = "No runs yet."
             streakLabel.stringValue = ""
+            calendar.isHidden = true
             rows = []
             table.reloadData()
             return
         }
+        calendar.isHidden = false
 
         let best = results.map(\.metrics.netWpm).max() ?? 0
         let recent = results.suffix(10).map(\.metrics.netWpm)
@@ -172,9 +207,17 @@ final class StatsViewController: NSViewController {
             format: "%d runs · best %.0f wpm · last 10 average %.0f wpm", results.count, best,
             average)
 
-        let calendar = localStatisticsCalendar()
-        let days = streak(results, now: Date().timeIntervalSince1970 * 1000, calendar: calendar)
-        let practiceDays = dailyCounts(results, calendar: calendar).count
+        // Named to avoid shadowing the calendar *view* this controller now
+        // holds. The two are one letter apart and mean entirely different
+        // things.
+        let statsCalendar = localStatisticsCalendar()
+        let now = Date().timeIntervalSince1970 * 1000
+        let days = streak(results, now: now, calendar: statsCalendar)
+        let practiceDays = dailyCounts(results, calendar: statsCalendar).count
+        calendar.show(
+            practiceCalendar(
+                results, now: now, days: PracticeCalendarView.windowDays,
+                calendar: statsCalendar))
         streakLabel.stringValue =
             "\(days.current)-day streak · longest \(days.longest) · \(practiceDays) days practised"
 

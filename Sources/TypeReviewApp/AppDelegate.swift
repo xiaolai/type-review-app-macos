@@ -780,7 +780,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // app without — see the note on `StatsViewController`'s toolbar.
             window.toolbar = controller.makeToolbar()
             window.toolbarStyle = .unified
-            window.setContentSize(NSSize(width: 560, height: 480))
+            window.setContentSize(NSSize(width: 560, height: 560))
+            // A floor, not a preference. The practice grid is a fixed 417pt
+            // wide and the header above it is fixed too, so below this the
+            // grid clips and the table is left showing a row or two. The
+            // saved frame is restored after this is set, so it applies to
+            // windows sized before the grid existed as well as new ones.
+            window.contentMinSize = NSSize(width: 480, height: 400)
             window.setFrameAutosaveName("TypeReviewStats")
             // Or closing Statistics deallocates the window while `statsWindow`
             // still points at it, and reopening from the menu reaches freed

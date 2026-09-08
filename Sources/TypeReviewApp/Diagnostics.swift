@@ -839,6 +839,42 @@ enum Diagnostics {
                 exit(1)
             }
 
+            // The practice grid, both ways round. `refresh` above ran on an
+            // empty history, which is the state that hides it.
+            guard statsController.calendarState == (hidden: true, cells: 0) else {
+                print(
+                    "SELFTEST FAIL: an empty history should hide the practice grid, got "
+                        + "\(statsController.calendarState)")
+                exit(1)
+            }
+            // With runs it has to be shown *and* filled. Checking only that it
+            // is visible would pass against a controller that stopped calling
+            // `show(_:)` — a grid drawing nothing, raising nothing.
+            statsController.history = { selftestHistory() }
+            statsController.refresh()
+            let filled = statsController.calendarState
+            guard filled.hidden == false, filled.cells == PracticeCalendarView.windowDays else {
+                print(
+                    "SELFTEST FAIL: a history with runs should show a "
+                        + "\(PracticeCalendarView.windowDays)-cell practice grid, got \(filled)")
+                exit(1)
+            }
+            // And that it draws. Sixty cells of 18pt is a little over 19,000
+            // pixels before the legend, so a floor of 15,000 catches a blank
+            // or half-laid-out grid without pinning the exact geometry.
+            let ink = statsController.calendarInk()
+            guard ink.ink > 15_000 else {
+                print("SELFTEST FAIL: the practice grid drew \(ink.ink) pixels — it is blank")
+                exit(1)
+            }
+            // The run typed above lands on today, so exactly one cell is
+            // tinted. If flattening every intensity changes nothing, the tint
+            // never reached the screen and the grid is sixty identical squares.
+            guard ink.tinted > 0 else {
+                print("SELFTEST FAIL: the practice grid renders identically with no intensity")
+                exit(1)
+            }
+
             // And the data that menu is built from. An empty group would draw a
             // language header with nothing under it; an identifier that does
             // not resolve is a row that silently selects nothing.
@@ -1025,4 +1061,25 @@ enum Diagnostics {
             exit(2)
         }
     }
+}
+
+/// One finished run, for the checks that need a non-empty history.
+///
+/// Driven through the engine rather than fabricated. `RunResult` has no public
+/// initialiser, and adding one so a check could build a fake would widen the
+/// engine's surface for the benefit of the check alone. Typing a passage is
+/// also the more honest fixture — it is the shape a real history has, produced
+/// the way a real history is produced.
+@MainActor
+private func selftestHistory() -> [RunResult] {
+    let text = "the quick brown fox"
+    guard let session = try? Session(profile: Profile()),
+        (try? session.startWithText(text)) != nil
+    else { return [] }
+    var clock: Double = 0
+    for character in text {
+        clock += 150
+        _ = try? session.input(String(character), timeStamp: clock)
+    }
+    return session.profile.results
 }
