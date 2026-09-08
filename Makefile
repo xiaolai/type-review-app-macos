@@ -597,6 +597,15 @@ upload: verify-pkg validate
 		exit 1; \
 	fi
 
+# Whether App Store Connect will take an upload right now, and if not, which
+# of the three gates is shut. `altool` reports all three as "No applications
+# found", which is how an unsigned agreement first read as a missing app
+# record.
+asc-status:
+	@test -n "$(ASC_KEY_ID)" && test -n "$(ASC_ISSUER_ID)" \
+		|| { echo "usage: make asc-status ASC_KEY_ID=... ASC_ISSUER_ID=..."; exit 1; }
+	@python3 Tools/asc-status.py "$(ASC_KEY_ID)" "$(ASC_ISSUER_ID)" "$(BUNDLE_ID_STORE)"
+
 version:
 	@printf 'marketing : %s   (Info.plist, edited by hand)\n' \
 		"$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Info.plist)"
