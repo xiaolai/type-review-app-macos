@@ -35,6 +35,9 @@ on; there is no universal binary yet.
 
 ## Installing
 
+From the [Mac App Store](https://apps.apple.com/app/id6809615378), or with
+Homebrew:
+
 ```sh
 brew install --cask xiaolai/tap/type-review
 ```
@@ -53,10 +56,11 @@ make          # builds TYPE.app in the project directory
 open TYPE.app
 ```
 
-A Mac App Store release is planned as well. It is the same source built a
-second way — sandboxed, and under its own bundle identifier, so the two can sit
-on one machine without fighting over preferences. [ARCHITECTURE.md](ARCHITECTURE.md)
-has the reasoning.
+The App Store copy is the same source built a second way — sandboxed, and
+under its own bundle identifier, so the two can sit on one machine without
+fighting over preferences. [ARCHITECTURE.md](ARCHITECTURE.md) has the
+reasoning. The two channels are released separately, so the Homebrew cask is
+usually the one that moves first.
 
 ## Sound in every app, and what it costs
 
