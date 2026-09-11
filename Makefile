@@ -224,7 +224,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest speechbench quit-running test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest speechbench quit-running test remote icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -332,7 +332,18 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
 	# notarisation. `--timestamp=none` because a secure timestamp needs
 	# Apple's server: it is required to notarise and pointless for a local
 	# build, and requiring it would make `make` fail on a train.
-	@if security find-identity -v -p codesigning | grep -q "$(SIGN_ID)"; then \
+	# `SIGN_ID=-` asks for ad hoc deliberately, which is not the same thing as
+	# the identity being missing. The remote check runner is the case that needs
+	# it: signing with a keychain identity requires the keychain unlocked, and an
+	# ssh session cannot unlock it. `find-identity` still lists the certificate
+	# there, so the test below passes and codesign then fails with
+	# errSecInternalComponent, which names nothing. Asking for ad hoc outright is
+	# honest about it, and costs nothing a check can feel: the identity buys TCC
+	# stability for Input Monitoring, and no check ever requests that permission.
+	@if [ "$(SIGN_ID)" = "-" ]; then \
+		codesign --force --sign - --timestamp=none \
+			$(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS),) "$(STAGE)" >/dev/null; \
+	elif security find-identity -v -p codesigning | grep -q "$(SIGN_ID)"; then \
 		codesign --force --options runtime --timestamp=none \
 			$(if $(ENTITLEMENTS),--entitlements $(ENTITLEMENTS),) \
 			--sign "$(SIGN_ID)" "$(STAGE)" >/dev/null; \
@@ -409,6 +420,21 @@ speechbench: $(APP) quit-running
 
 test:
 	swift test
+
+# The same checks, on a Mac nobody is typing on.
+#
+# They are already polite about the screen — `Diagnostics.isRunningCheck` is
+# what keeps a check from activating a window — so this is not the sibling
+# project's problem, where XCUITest cannot be made polite at all. What is left
+# still lands on this desk: `selftest` and `speechbench` both quit a running
+# TYPE, which here is the menu-bar app somebody is using, and `speechbench`
+# speaks aloud and reports microseconds that a busy machine changes.
+#
+# `make remote REMOTE_HOST=<host>` names one explicitly; otherwise the script
+# reads TYPE_E2E_HOST from .env. No machine name is committed. The reasoning,
+# the preconditions and the signing override live in the script.
+remote:
+	@Tools/run-remote.sh $(REMOTE_HOST)
 
 # Regenerates the icon set. The .icns is committed, so this runs only when
 # the artwork changes — Tools/make-icon.swift is the artwork.
