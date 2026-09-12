@@ -252,6 +252,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Voice", self.speechVoicePopup(),
                 hint: "Automatic follows the language of the text. Picking one says its name.")
             self.addRow(
+                grid, "Wrong key", self.mistypeSoundToggle(),
+                hint: "A low note when the letter typed is not the one expected. "
+                    + "Here only — nothing outside this window has a text to be wrong against.")
+            self.addRow(
                 grid, "Sound in every app", self.globalSoundToggle(),
                 hint: "Clicks wherever you type, not only in this window.")
             self.addPermissionRow(grid)
@@ -812,6 +816,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
+    /// Whether a wrong key says so.
+    ///
+    /// Never disabled, unlike the rows above it. Those are system-wide and
+    /// mean nothing while the monitor is off; this one belongs to the practice
+    /// window and works whatever the monitor is doing, including with the pack
+    /// set to Off.
+    private func mistypeSoundToggle() -> NSControl {
+        let toggle = checkbox()
+        toggle.identifier = .init("mistypeSound")
+        controls["mistypeSound"] = toggle
+        bind(toggle) { AppPreferences.mistypeSound.value = toggle.state == .on }
+        return toggle
+    }
+
     private func loginItemToggle() -> NSControl {
         let toggle = checkbox()
         toggle.identifier = .init("loginItem")
@@ -892,6 +910,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         (controls["modifierSound"] as? NSButton)?.isEnabled = global
         (controls["releaseSound"] as? NSButton)?.state =
             AppPreferences.releaseSound.value ? .on : .off
+        // Never disabled alongside the rows above it. Those are system-wide
+        // and mean nothing while the monitor is off; this one is the practice
+        // window's own and works whatever the monitor is doing, including with
+        // the pack set to Off.
+        (controls["mistypeSound"] as? NSButton)?.state =
+            AppPreferences.mistypeSound.value ? .on : .off
         mutedApps?.reload()
         // Two reasons the setting can be on while nothing is heard, and one
         // row to say either. The permission comes first when both apply: it is

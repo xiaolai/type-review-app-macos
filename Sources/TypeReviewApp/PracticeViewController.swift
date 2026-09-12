@@ -44,6 +44,15 @@ final class PracticeViewController: NSViewController {
     /// mean two audio engines and, when both paths were live, two clicks per
     /// key. The app owns the one player and decides which path feeds it.
     var onKeyStruck: ((UInt16) -> Void)?
+    /// A wrong character just landed.
+    ///
+    /// Separate from `onKeyStruck`, and it has to be. That one is switched off
+    /// whenever the system-wide monitor is running, because the monitor
+    /// already hears this window's keys — but the monitor can never produce
+    /// this, since it sees key codes from other applications where there is no
+    /// expected text to be wrong against. Riding the same switch would silence
+    /// the error tone exactly when somebody turns on sound in every app.
+    var onMistype: (() -> Void)?
     var onKeyReleased: ((UInt16) -> Void)?
 
     /// Reads a finished word aloud.
@@ -80,6 +89,26 @@ final class PracticeViewController: NSViewController {
     /// opens Settings — and `applyTypingPreferences` already runs on every
     /// preference change, so there is a place to keep the answer.
     private var speaksWords = false
+
+    /// Whether a wrong key says so. Cached for the same reason and in the same
+    /// place as `speaksWords` above: this is asked on every keystroke and
+    /// answered only when somebody opens Settings.
+    private var soundsMistypes = true
+
+    /// When the last error tone played, so a held-down wrong key does not
+    /// machine-gun.
+    ///
+    /// This is an auto-repeat guard and nothing else. It used to be described
+    /// as the defence against an input-method commit, which it never was: no
+    /// interval in milliseconds can tell three characters committed at once
+    /// from three keys typed quickly, and picking one wrongly suppresses a
+    /// real mistake. `soundedThisCommit` is what handles commits. What is left
+    /// for a clock is a key held down, which `keyDown` filters for the click
+    /// but cannot filter here, because a repeat still produces characters.
+    private var lastMistypeSoundMs: Double?
+
+    /// Whether this commit has already sounded. Reset when one begins.
+    private var soundedThisCommit = false
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
@@ -217,6 +246,7 @@ final class PracticeViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         typingView.onCharacter = { [weak self] character in self?.type(character) }
+        typingView.onCommitBegan = { [weak self] in self?.soundedThisCommit = false }
         typingView.onBackspace = { [weak self] in try? self?.session?.backspace(); self?.refresh() }
         typingView.onRestart = { [weak self] in self?.startFreshRun() }
         typingView.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
@@ -299,6 +329,7 @@ final class PracticeViewController: NSViewController {
             let feedback = try session.input(character, timeStamp: clock())
             refresh()
             speakFinishedWord(after: cursorBefore)
+            soundMistype(at: cursorBefore)
             // Latched. `Session.input` goes on answering `.completed` for
             // every further keystroke, and a single multi-character commit
             // from an input method delivers several — so the results screen
@@ -353,6 +384,33 @@ final class PracticeViewController: NSViewController {
             guard let self, self.passageGeneration == generation, self.speaksWords else { return }
             self.speech.speak(word: text)
         }
+    }
+
+    /// Says so when the character just typed was wrong.
+    ///
+    /// Synchronous, unlike `speakFinishedWord`. The reason that one had to
+    /// leave the keystroke stack was `AVSpeechSynthesizer` behaving
+    /// re-entrantly; this schedules a rendered buffer on a player node, which
+    /// is the identical machinery the ordinary click already runs on this same
+    /// stack and which `speechbench` measures in tens of microseconds.
+    ///
+    /// Being on the stack is also what makes it work. The click for this key
+    /// already played at key-down, and both land in the same turn of the run
+    /// loop, well inside the window where the ear fuses them. What a typist
+    /// hears is one keystroke that sounds wrong, not a click and then a
+    /// verdict arriving to comment on it.
+    private func soundMistype(at cursorBefore: Int) {
+        guard soundsMistypes, let typing = lastTyping else { return }
+        guard mistypeJustHappened(statuses: typing.statuses, at: cursorBefore) else { return }
+        // One sound per commit, then a clock for the held-key case. Two
+        // separate rules because they answer two separate questions, and the
+        // stopwatch alone answered neither correctly.
+        guard !soundedThisCommit else { return }
+        let now = clock()
+        guard mistypeMaySound(lastSoundedMs: lastMistypeSoundMs, nowMs: now) else { return }
+        soundedThisCommit = true
+        lastMistypeSoundMs = now
+        onMistype?()
     }
 
     /// Words the player actually asked the synthesizer to say.
@@ -620,6 +678,13 @@ final class PracticeViewController: NSViewController {
         // statuses this refresh was given rather than the previous ones.
         lastTyping = snapshot.typing
         if resetPassage {
+            // A new passage is a new run, and the tone's history belongs to the
+            // old one. Left standing, the first mistake of a restart lands
+            // inside the previous run's guard window and is swallowed — rare,
+            // and indistinguishable from the feature being broken when it is
+            // the first thing somebody tries.
+            lastMistypeSoundMs = nil
+            soundedThisCommit = false
             beginSpeech(for: snapshot)
             typingView.setPassage(
                 snapshot.typing.expected, statuses: snapshot.typing.statuses,
@@ -667,6 +732,7 @@ extension PracticeViewController {
         // cut off whatever was being said. Words queued but not yet spoken are
         // dropped by the guard in `speakFinishedWord`.
         speaksWords = AppPreferences.speakWords.value
+        soundsMistypes = AppPreferences.mistypeSound.value
         readySpeechIfWanted()
     }
 }

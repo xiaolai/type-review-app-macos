@@ -77,6 +77,33 @@ public struct SynthVoice: Sendable, Equatable {
     public var isSilent: Bool { noise == nil && oscillator == nil }
 }
 
+extension SynthVoice {
+    /// The sound a wrong key makes.
+    ///
+    /// Not a `SoundCategory`, and that is the whole design rather than an
+    /// omission. `voice(for:)` falls back to `standard`, so a category every
+    /// pack had to override would click normally in every pack that forgot —
+    /// a feature that looks implemented and does nothing. The recorded pack is
+    /// worse than that: it cuts slices from a recording of ordinary typing,
+    /// and there is no mistake in there to cut.
+    ///
+    /// Underneath both is that the packs are a physical simulation — the
+    /// release is described as the press running backwards because that is
+    /// what the switch is doing — and a keyboard has no error sound. A typist
+    /// hearing this is being told something about the text, not about the key.
+    /// So there is one voice, the same in every pack.
+    ///
+    /// Low and short. Low because a pitch under the click reads as wrong
+    /// without being a buzzer, and this app is aimed partly at children.
+    /// Short because it has to start inside the window where the ear fuses it
+    /// with the click that already played at key-down: what should be heard is
+    /// one keystroke that sounds wrong, not a click and then a verdict.
+    public static let mistype = SynthVoice(
+        noise: NoiseVoice(
+            durationMs: 18, filter: .lowpass, frequency: 700, q: 0.9, peak: 0.16),
+        oscillator: OscillatorVoice(frequency: 165, durationMs: 60, peak: 0.20))
+}
+
 /// Which half of a keystroke is sounding.
 ///
 /// A real key makes two sounds, and every pack here used to describe only the

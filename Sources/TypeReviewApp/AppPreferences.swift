@@ -265,6 +265,23 @@ enum AppPreferences {
     /// has none, since a typebar returns almost silently.
     static let releaseSound = Flag(key: "ReleaseSound", default: true)
 
+    /// Whether a wrong key says so.
+    ///
+    /// On, because it is the feedback a practice app is for: knowing you
+    /// mistyped without looking up is the whole point of typing by touch, and
+    /// somebody who does not want it has the switch. Off would be a feature
+    /// nobody finds.
+    ///
+    /// Independent of the pack, including a pack set to Off. Choosing silence
+    /// from the keyboard is not the same as choosing not to be told you typed
+    /// the wrong letter, and tying the two together would make the quiet
+    /// option also the one that teaches least.
+    ///
+    /// It has no system-wide half and cannot have one: the monitor sees key
+    /// codes from other applications, where there is no expected text to be
+    /// wrong against. This belongs to the practice window alone.
+    static let mistypeSound = Flag(key: "MistypeSound", default: true)
+
     /// Whether shift, control, option, command, fn and caps lock click too.
     ///
     /// Off, and the default is the interesting part. A real keyboard does

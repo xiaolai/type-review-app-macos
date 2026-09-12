@@ -77,6 +77,14 @@ final class KeySoundPlayer {
 
     private var state = PackState()
 
+    /// The rendered error tone.
+    ///
+    /// Outside `PackState` on purpose: everything in there is cleared when the
+    /// pack changes, and this voice does not belong to a pack. Rendering it
+    /// again on every pack change would be harmless and would also be a lie
+    /// about what it is.
+    private var mistypeBuffer: AVAudioPCMBuffer?
+
     /// Why the current pack's recording could not be loaded. Read by
     /// `--soundcheck`, which is the only thing that can tell whether the
     /// recording actually shipped inside the built app.
@@ -167,6 +175,55 @@ final class KeySoundPlayer {
         // tail.
         node.scheduleBuffer(buffer, at: nil, options: .interrupts)
         node.play()
+    }
+
+    /// Plays the error tone, whatever pack is selected.
+    ///
+    /// Deliberately not gated on `pack.kind == .silent`, unlike `play`. A pack
+    /// set to Off is someone saying they do not want a keyboard noise, which
+    /// is not the same as saying they do not want to be told they typed the
+    /// wrong letter. The switch for that is its own, in Settings.
+    ///
+    /// It does follow the volume, because that control means "how loud is this
+    /// app" and nothing here is exempt from it.
+    func playMistype() {
+        guard volume > 0 else { return }
+        guard let buffer = mistypeBuffer ?? prepareMistype(), let node = nextPlayerNode()
+        else { return }
+        // Centred. Panning it where the wrong key sits would put the verdict
+        // in a different place each time, and the verdict is about the text.
+        node.pan = 0
+        node.scheduleBuffer(buffer, at: nil, options: .interrupts)
+        node.play()
+    }
+
+    /// Renders the error tone and brings the audio engine up, so the first
+    /// mistake does not pay for either.
+    ///
+    /// Called when the feature is switched on rather than when it first fires.
+    /// The cost is small but it lands in the worst possible place: with the
+    /// pack set to Off nothing else ever starts the engine, so the first wrong
+    /// key would build eight player nodes and an `AVAudioEngine` on the
+    /// keystroke path — a hitch exactly once, on the keystroke a beginner is
+    /// most likely to be paying attention to.
+    @discardableResult
+    func prepareMistype() -> AVAudioPCMBuffer? {
+        if mistypeBuffer == nil { mistypeBuffer = render(SynthVoice.mistype) }
+        // Only if there is something to play. Starting the engine for a voice
+        // that failed to render would be a cost with nothing to show for it.
+        if mistypeBuffer != nil { _ = start() }
+        return mistypeBuffer
+    }
+
+    /// The loudest sample in the error tone, or nil if it could not be built.
+    /// `--soundcheck`'s question, asked of the one voice no pack describes.
+    func renderedMistypePeak() -> Float? {
+        guard let buffer = mistypeBuffer ?? prepareMistype(),
+            let data = buffer.floatChannelData
+        else { return nil }
+        var peak: Float = 0
+        for frame in 0..<Int(buffer.frameLength) { peak = max(peak, abs(data[0][frame])) }
+        return peak
     }
 
     private func nextPlayerNode() -> AVAudioPlayerNode? {

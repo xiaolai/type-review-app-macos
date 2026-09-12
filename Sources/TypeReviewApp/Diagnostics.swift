@@ -89,8 +89,21 @@ enum Diagnostics {
                     print("SOUNDCHECK \(pack.name)/\(category.rawValue) peak \(peak)")
                 }
             }
+            // The one voice no pack describes, and therefore the one the loop
+            // above cannot reach. A tone that renders silence looks exactly
+            // like a feature that works: every wiring check passes, the hook
+            // fires, and nothing is heard.
+            if let peak = player.renderedMistypePeak() {
+                if peak > 0.001 {
+                    print("SOUNDCHECK mistype peak \(peak)")
+                } else {
+                    failures.append("mistype: silent (peak \(peak))")
+                }
+            } else {
+                failures.append("mistype: no buffer")
+            }
             if failures.isEmpty {
-                print("SOUNDCHECK OK: every pack produces audio")
+                print("SOUNDCHECK OK: every pack produces audio, and the mistype tone does too")
                 exit(0)
             }
             for failure in failures { print("SOUNDCHECK FAIL: \(failure)") }
@@ -945,6 +958,47 @@ enum Diagnostics {
                                 + "\(installed ? "installed" : "absent")")
                         exit(1)
                     }
+                }
+                // That the error hook is installed at all, with the global
+                // sound pinned off like everything else here.
+                //
+                // This does **not** prove the thing worth proving, and saying
+                // so is the point. What matters is that the hook survives
+                // `coveredElsewhere`, and reaching that state needs the
+                // monitor actually listening, which needs Input Monitoring.
+                // An earlier version of this check set the preference to true
+                // to get there. It bought nothing and cost two things: on a
+                // machine without the permission the monitor never listens, so
+                // `coveredElsewhere` stays false and the assertion passes
+                // without visiting the branch it named — and on a machine
+                // without it *yet*, asking put a permission prompt on screen
+                // from a check whose whole contract is that it does not.
+                //
+                // So this asserts what is reachable, and the scope question is
+                // held by the comment beside the wiring in
+                // `applySoundPreferences` instead. A test that cannot run is
+                // better absent than faked.
+                var mistypeArguments = soundBefore
+                mistypeArguments[AppPreferences.globalSound.key] = false
+                mistypeArguments[AppPreferences.mistypeSound.key] = true
+                UserDefaults.standard.setVolatileDomain(
+                    mistypeArguments, forName: UserDefaults.argumentDomain)
+                delegate.applySoundPreferences()
+                guard practice.onMistype != nil else {
+                    print("SELFTEST FAIL: the mistype hook was not installed")
+                    exit(1)
+                }
+                mistypeArguments[AppPreferences.mistypeSound.key] = false
+                UserDefaults.standard.setVolatileDomain(
+                    mistypeArguments, forName: UserDefaults.argumentDomain)
+                delegate.applySoundPreferences()
+                // The hook stays; the controller reads the preference. Checked
+                // because the alternative design — unwiring it here — is the
+                // one somebody will reach for later, and it would reintroduce
+                // exactly the coupling this feature exists to avoid.
+                guard practice.onMistype != nil else {
+                    print("SELFTEST FAIL: the mistype hook was torn down by a preference")
+                    exit(1)
                 }
                 UserDefaults.standard.setVolatileDomain(
                     soundBefore, forName: UserDefaults.argumentDomain)

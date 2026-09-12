@@ -671,6 +671,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         practice?.onKeyReleased =
             coveredElsewhere || !AppPreferences.releaseSound.value
             ? nil : { [weak self] code in self?.playKey(code, .release) }
+        // Outside the switch above, and that is the point of it. Everything
+        // `coveredElsewhere` governs is a question of which path sounds a key
+        // that both paths can see. The error tone is not: the monitor sees key
+        // codes from other applications, where there is no expected text for a
+        // key to be wrong against, so it can never produce this and can never
+        // double it. Put it behind that flag and it would go silent the moment
+        // somebody switched on sound in every app — for a reason no user could
+        // possibly infer.
+        //
+        // Nor is it behind `soundIsOn`: a pack set to Off is somebody asking
+        // for a quiet keyboard, not asking to stop being told they typed the
+        // wrong letter. `AppPreferences.mistypeSound` is the switch for that,
+        // and the controller reads it.
+        practice?.onMistype = { [weak self] in self?.sounds.playMistype() }
+        // Warmed here, where switching the feature on happens, rather than on
+        // the first wrong key. See `prepareMistype`.
+        if AppPreferences.mistypeSound.value { sounds.prepareMistype() }
         markSoundMenus()
     }
 

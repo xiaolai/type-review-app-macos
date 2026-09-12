@@ -40,6 +40,12 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// those are seconds apart, and a keyboard whose sound lags the key is
     /// worse than one with no sound at all.
     var onKeyStruck: ((UInt16) -> Void)?
+    /// A commit is about to deliver one or more characters.
+    ///
+    /// Separate from `onCharacter`, which cannot express it: by the time the
+    /// characters arrive they are indistinguishable from characters typed one
+    /// at a time.
+    var onCommitBegan: (() -> Void)?
     /// The other half of a keystroke. Separate from `onKeyStruck` rather than
     /// one callback with a flag, because the two have different owners: a
     /// press always sounds, a release only when the pack has one.
@@ -777,11 +783,28 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         // emoji is a surrogate pair, and feeding the halves separately turned
         // one character into two `\u{FFFD}` replacements — two fabricated
         // mistakes, and the cursor advanced by two.
+        deliver(text)
+        needsDisplay = true
+    }
+
+    /// Hands one committed string to the engine, one code unit at a time.
+    ///
+    /// Both commit paths go through here, and that is the point rather than
+    /// tidiness. `unmarkText` had its own copy of this loop, and when the
+    /// commit boundary was added to the other one it was not added here — so a
+    /// composition committed through unmarking inherited the previous commit's
+    /// latch and went silent. One loop cannot drift from itself.
+    private func deliver(_ text: String) {
+        // One commit, however many code units it carries. The error tone needs
+        // this boundary rather than a stopwatch: an input method committing
+        // three wrong characters is one act by the typist and deserves one
+        // sound, and no interval in milliseconds can tell that apart from
+        // three deliberate keys typed quickly.
+        onCommitBegan?()
         for unit in Array(text.utf16) {
             guard !(0xD800...0xDFFF).contains(unit) else { continue }
             onCharacter?(String(utf16CodeUnits: [unit], count: 1))
         }
-        needsDisplay = true
     }
 
     /// Whether a requested replacement range is one this surface can honour.
@@ -827,10 +850,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         let pending = markedText
         markedText = ""
         markedSelection = NSRange(location: 0, length: 0)
-        for unit in Array(pending.utf16) {
-            guard !(0xD800...0xDFFF).contains(unit) else { continue }
-            onCharacter?(String(utf16CodeUnits: [unit], count: 1))
-        }
+        deliver(pending)
         needsDisplay = true
     }
 
