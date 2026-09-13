@@ -411,6 +411,7 @@ enum AppPreferences {
         "com.app77.pwsafemac",
         "com.keepsolid.passwarden",
         "com.2stable.passwords",
+        "com.bearminds.passkeep",
         // A one-time-code app is not a password manager, but a secret is still
         // typed into it when one is added by hand.
         "com.NeilSardesai.Step-Two-Mac",

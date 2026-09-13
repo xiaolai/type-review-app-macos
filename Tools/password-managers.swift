@@ -16,7 +16,8 @@ import Foundation
 /// Two machine-readable sources, both of which state a bundle identifier
 /// outright rather than describing it:
 ///
-/// - the Mac App Store's lookup API, which returns `bundleId` per app;
+/// - the Mac App Store's search API, which returns `bundleId` per app, and its
+///   lookup API, asked about a listed identifier no search surfaced;
 /// - the Homebrew cask API, whose `quit:` and `zap trash:` stanzas name the
 ///   identifier so the uninstaller can find it.
 ///
@@ -68,6 +69,7 @@ let managers: [Manager] = [
     Manager(name: "pwSafe", cask: nil, appStore: "pwSafe"),
     Manager(name: "Passwarden", cask: nil, appStore: "Passwarden"),
     Manager(name: "2Stable Passwords", cask: nil, appStore: "2Stable password"),
+    Manager(name: "PassKeep", cask: nil, appStore: "Passkeep"),
     Manager(name: "Step Two", cask: nil, appStore: "Step Two authenticator"),
 ]
 
@@ -217,6 +219,37 @@ func appStoreIdentifiers(_ term: String, matching name: String) -> Set<String>? 
         })
 }
 
+/// What the App Store says about one identifier, asked directly.
+///
+/// A name search returns a handful of hits, and a listed identifier can sit
+/// just outside them: "Strongbox password" surfaces Strongbox and never
+/// Strongbox Pro, so a real entry was reported as confirmed by nothing, every
+/// run. The lookup takes the identifier itself, so it reaches entries no search
+/// does — and it still cannot vouch for a wrong one, because a mistyped
+/// identifier comes back with no results.
+enum StoreLookup {
+    case found(String)
+    case absent
+    case unreachable
+}
+
+func appStoreLookup(_ bundleID: String) -> StoreLookup {
+    var components = URLComponents(string: "https://itunes.apple.com/lookup")!
+    components.queryItems = [.init(name: "bundleId", value: bundleID), .init(name: "country", value: "us")]
+    guard let url = components.url, let data = fetch(url),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let results = json["results"] as? [[String: Any]]
+    else { return .unreachable }
+    // The answer has to name the identifier that was asked about. An API that
+    // stopped honouring the parameter and returned something else would
+    // otherwise confirm every entry in the list.
+    let match = results.first {
+        ($0["bundleId"] as? String)?.caseInsensitiveCompare(bundleID) == .orderedSame
+    }
+    guard let match else { return .absent }
+    return .found([match["trackName"], match["sellerName"]].compactMap { $0 as? String }.joined(separator: ", "))
+}
+
 /// Identifiers that no live source will ever confirm, and the reason each one
 /// is in the list anyway.
 ///
@@ -291,7 +324,7 @@ for manager in managers {
     print("  \(manager.name.padding(toLength: 22, withPad: " ", startingAt: 0)) \(status)")
 }
 
-print("\n--- In the list but confirmed by nothing ---")
+print("\n--- In the list but found by no search ---")
 var unconfirmed = 0
 var shown = 0
 for id in listed.sorted() {
@@ -305,6 +338,15 @@ for id in listed.sorted() {
     if let reason = verifiedByHand[id] {
         print("  \(id.padding(toLength: 44, withPad: " ", startingAt: 0)) checked by hand — \(reason)")
         continue
+    }
+    switch appStoreLookup(id) {
+    case .found(let title):
+        print("  \(id.padding(toLength: 44, withPad: " ", startingAt: 0)) App Store lookup — \(title)")
+        continue
+    case .unreachable:
+        unreachable.append("\(id) (App Store lookup)")
+    case .absent:
+        break
     }
     // Apple's applications and the system's agents appear in neither source.
     // Ask this Mac instead; when the app is not installed there is nothing to

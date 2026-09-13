@@ -738,14 +738,21 @@ occupying the line that claims to. This list carried exactly that for a while:
 
 `make password-managers` re-checks every entry against two sources that state
 bundle identifiers outright — the Homebrew cask API, whose `quit:` and `zap`
-stanzas name them so the uninstaller can find them, and the App Store lookup
-API. It reports three things:
+stanzas name them so the uninstaller can find them, and the App Store's search
+and lookup APIs. It reports three things:
 
 | Section | Question it answers |
 |---|---|
 | Per-manager coverage | Is each known manager protected by *some* entry? |
-| In the list, confirmed by nothing | Is any entry unsupported by any source? |
+| In the list but found by no search | Is any entry unsupported by any source? |
 | Found by a source, not in the list | Has a manager shipped an identifier we lack? |
+
+An entry no search surfaced is then asked about by identifier: the App Store
+lookup, `verifiedByHand`, and finally this Mac. The lookup is there because a
+name search returns a handful of hits, and "Strongbox password" never includes
+Strongbox Pro, so a correct entry was reported UNCONFIRMED on every run. The
+lookup cannot vouch for a wrong identifier; a mistyped one returns nothing and
+is still reported, which was checked by adding one.
 
 The middle one is the reason the routine exists. The other two catch what is
 missing, which is the failure that eventually announces itself; only that one
