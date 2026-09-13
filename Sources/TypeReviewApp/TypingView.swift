@@ -340,15 +340,48 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         // `bounds` meant a passage longer than the window silently lost its
         // tail: typing carried on past the last visible line, into text
         // nobody could see and nobody could check.
+        //
+        // Narrower than the view by the spaces a line can end in. CoreText does
+        // not carry a line's closing space onto the next line; it leaves it
+        // hanging past the frame's edge. With the frame as wide as the view, a
+        // line that filled it exactly put that space wholly outside the clip in
+        // `draw`, so a space mistyped at a wrap was scored and drawn nowhere —
+        // 0 of its 13.6 points visible — and the caret on it vanished with it.
+        // `PracticeWindowMetrics.contentSize` adds the column back, so a
+        // 60-column window still wraps at 60.
+        let layoutWidth = max(1, bounds.width - hangingWhitespaceWidth)
         var fitRange = CFRange()
         let needed = CTFramesetterSuggestFrameSizeWithConstraints(
             setter, CFRange(location: 0, length: 0), nil,
-            CGSize(width: bounds.width, height: .greatestFiniteMagnitude), &fitRange)
+            CGSize(width: layoutWidth, height: .greatestFiniteMagnitude), &fitRange)
         contentHeight = max(bounds.height, ceil(needed.height) + 8)
         let path = CGPath(
-            rect: CGRect(x: 0, y: 0, width: bounds.width, height: contentHeight),
+            rect: CGRect(x: 0, y: 0, width: layoutWidth, height: contentHeight),
             transform: nil)
         textFrame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), path, nil)
+    }
+
+    /// The widest run of spaces a line of this passage can end in.
+    ///
+    /// One space for prose, where cleaning collapses every run. More only for a
+    /// run in the middle of a line, which no bundled passage has and code with
+    /// aligned columns would. Indentation does not count: CoreText breaks after
+    /// a leading run rather than inside it, so a run at the start of a line can
+    /// end one only by being wider than the whole frame.
+    private var hangingWhitespaceWidth: CGFloat {
+        var longest = 1
+        var run = 0
+        var atLineStart = true
+        for unit in passageUTF16 {
+            if unit == 0x20 {
+                run += 1
+                if !atLineStart { longest = max(longest, run) }
+            } else {
+                run = 0
+                atLineStart = unit == 0x0A
+            }
+        }
+        return PracticeWindowMetrics.characterWidth * CGFloat(longest)
     }
 
 

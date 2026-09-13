@@ -629,7 +629,12 @@ from the background — it is covered`.
 The window is sized from the text it has to hold: 60 characters per line and
 10 lines, both settable, both measured from the typing font rather than
 guessed — so the numbers stay true if the font changes or a display renders it
-differently. No hairline under the title bar; the practice screen is a sheet
+differently. The typing view is one column wider than the lines it holds, and
+lays text out that column narrower than itself: CoreText leaves a wrapped line's
+closing space hanging past the frame, and with no room for it a space mistyped
+at the end of a line was drawn outside the clip, invisible. The selftest sweeps
+the width a quarter column at a time and requires that cell to show at every
+one. No hairline under the title bar; the practice screen is a sheet
 of text on a plain ground, and a rule across the top divides it from nothing.
 
 `⌘K` slides the keyboard out from under the window and back. The main window

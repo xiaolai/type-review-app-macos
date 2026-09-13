@@ -676,7 +676,11 @@ enum PracticeWindowMetrics {
     }
 
     static func contentSize(columns: Int, rows: Int) -> NSSize {
-        let width = characterWidth * CGFloat(columns) + 2 * horizontalInset
+        // One column more than the passage gets. `TypingView` lays text out
+        // narrower than itself by the space a wrapped line ends in, so that
+        // space has somewhere to be drawn; without this column the window
+        // would wrap one short of the width it was asked for.
+        let width = characterWidth * CGFloat(columns + 1) + 2 * horizontalInset
         // 20 top, then the text, then a 24 gap, the status bar, and 20 bottom.
         // The header this used to allow 48 points for is gone — the live
         // numbers moved into the status bar — so the passage now starts at the

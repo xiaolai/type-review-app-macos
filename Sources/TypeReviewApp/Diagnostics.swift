@@ -879,6 +879,74 @@ enum Diagnostics {
                 }
             }
 
+            // And it has to show where a line wraps.
+            //
+            // CoreText hangs a line's closing space past the frame's edge, and
+            // the view clips at its own. Laid out as wide as the view, a line
+            // that filled it exactly drew that space's cell wholly outside the
+            // clip: measured, 0 of 13.6 points at an exact fit, half of it half
+            // a column wider. So a passage with one space is drawn at every
+            // quarter column from too narrow for its first word to wide enough
+            // not to wrap, and at each width the mistyped cell must change about
+            // as many pixels as it does at a width where it cannot be near an
+            // edge. A sweep, because which width exposes it moves with the font.
+            //
+            // Four fifths, not all: anti-aliasing can cost each vertical edge of
+            // the cell one column of pixels at a fractional offset, which is
+            // under a sixth of a 13.6-point cell. A clip in quarter-column steps
+            // costs at least a quarter, so it cannot hide inside that margin.
+            do {
+                let column = PracticeWindowMetrics.characterWidth
+                let passage = "abcdefgh ijklmnop"
+                let correct = [CharStatus](repeating: .untyped, count: passage.utf16.count)
+                var mistyped = correct
+                mistyped[8] = .incorrect
+                let edgeView = TypingView(frame: NSRect(x: 0, y: 0, width: column * 40, height: 200))
+                edgeView.showsWhitespace = false
+                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], step: Int)? {
+                    edgeView.setPassage(passage, statuses: statuses, cursor: 0)
+                    guard let rep = edgeView.bitmapImageRepForCachingDisplay(in: edgeView.bounds),
+                        rep.samplesPerPixel >= 3
+                    else { return nil }
+                    edgeView.cacheDisplay(in: edgeView.bounds, to: rep)
+                    guard let data = rep.bitmapData else { return nil }
+                    return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep.bytesPerRow / rep.pixelsWide)
+                }
+                @MainActor func cellPixels(atColumns columns: CGFloat) -> Int? {
+                    edgeView.setFrameSize(NSSize(width: column * columns, height: 200))
+                    guard let a = render(correct), let b = render(mistyped), a.bytes.count == b.bytes.count
+                    else { return nil }
+                    var changed = 0
+                    for pixel in stride(from: 0, to: a.bytes.count - a.step + 1, by: a.step) {
+                        var largest = 0
+                        for channel in 0..<min(a.step, 4) {
+                            largest = max(largest, abs(Int(a.bytes[pixel + channel]) - Int(b.bytes[pixel + channel])))
+                        }
+                        if largest > 12 { changed += 1 }
+                    }
+                    return changed
+                }
+                guard let unwrapped = cellPixels(atColumns: 40), unwrapped > 50 else {
+                    print("SELFTEST FAIL: a mistyped space in the middle of a line drew no cell, so the wrap-edge check cannot see")
+                    exit(1)
+                }
+                var clipped: [String] = []
+                for quarter in 24...80 {
+                    let columns = CGFloat(quarter) / 4
+                    guard let pixels = cellPixels(atColumns: columns) else {
+                        print("SELFTEST FAIL: could not render the typing view \(columns) columns wide")
+                        exit(1)
+                    }
+                    if pixels * 5 < unwrapped * 4 { clipped.append("\(columns) columns: \(pixels) of \(unwrapped)") }
+                }
+                guard clipped.isEmpty else {
+                    print(
+                        "SELFTEST FAIL: a space mistyped where a line wraps is cut off at the view's edge — "
+                            + clipped.joined(separator: "; "))
+                    exit(1)
+                }
+            }
+
             // Invisibles mark what the passage contains, and nothing else.
             //
             // A line this window wrapped used to end in an arrow every typist
