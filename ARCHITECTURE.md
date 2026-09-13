@@ -217,9 +217,13 @@ may legally hold a 600-second duration, which the picker has no preset for, so
 it shows as `Custom (600)` — clamping on display would rewrite data the user
 never touched, and the next unrelated edit would persist the rewrite.
 
-The Appearance and Sound panes the website has are deliberately absent: this
-app follows the system appearance rather than shipping four hand-built themes,
-and no audio is ported yet.
+Appearance and Sound are panes here too, though neither is the website's.
+Appearance has no themes, because this app follows the system appearance rather
+than shipping hand-built ones; it holds the window's shape, how the typing
+surface is drawn, and which keyboards may type into it. Sound holds the keyboard
+packs, spoken words, the wrong-key tone and the system-wide keystroke monitor.
+Neither pane is part of the profile, which is why both sit apart from Practice
+and its Restore Defaults.
 
 ## Living in the menu bar
 
@@ -321,6 +325,19 @@ defaults domain entirely and running `--selftest` wrote back one key, the
 window frame, and no settings at all. Nothing in the app stamps a value at
 launch, so the declared defaults are what a first run actually gets.
 
+Later preferences had no use to adopt a value from, so their defaults are
+decisions. Two of them ship on.
+
+**`MistypeSound` ships on.** Knowing a key was wrong without looking up is the
+feedback a typing tutor exists for, and a setting nobody knows about is one
+nobody turns on. It is independent of the sound pack, so choosing a quiet
+keyboard does not also mean choosing not to be told.
+
+**`LatinInputOnly` ships on.** The passages are English and ASCII, so a
+composing input method — Pinyin, Kotoeri, Hangul — has nothing to type into
+them, and left active it holds letters back and turns a space into choosing a
+candidate. It admits every Latin layout, so Dvorak, Colemak and AZERTY are
+untouched by it.
 ## The icon set
 
 Neither icon is an SF Symbol any more, and the menu bar draws literally the
@@ -485,6 +502,11 @@ stop, `【】` on the brackets. Every one is a true answer to the wrong question
 An input method is a layer on top of a keyboard, and the keyboard underneath
 still has `^` above 6 — which is what the keycap says. Dvorak and Colemak are
 unaffected, both being ASCII-capable layouts.
+
+Latin keyboards only, which ships on, keeps a composing input method from typing
+into the practice window, but it does not make this call unnecessary. The
+setting can be switched off, and the keyboard is drawn whether or not the
+practice window's input context is active.
 
 The selftest checks that the layout being read from is ASCII-capable. On a
 machine that only ever runs a US layout both answers agree and the check
