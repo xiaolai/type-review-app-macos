@@ -879,6 +879,49 @@ enum Diagnostics {
                 }
             }
 
+            // Invisibles mark what the passage contains, and nothing else.
+            //
+            // A line this window wrapped used to end in an arrow every typist
+            // reads as Return, at the end of nearly every line of a quote, none
+            // of which contains a line break. A passage with no spaces, tabs or
+            // line breaks has nothing to mark, so with invisibles on it must
+            // draw exactly what it draws with them off, however many lines it
+            // wraps onto. Letters only, so the wrap falls inside a word and
+            // there is still no whitespace for a mark to belong to. The second
+            // passage is the control: a real line break must still get its
+            // mark, or this would pass for a build that draws no marks at all.
+            do {
+                let marksView = TypingView(frame: NSRect(x: 0, y: 0, width: 200, height: 160))
+                @MainActor func pixels(_ text: String, invisibles: Bool) -> [UInt8]? {
+                    marksView.showsWhitespace = invisibles
+                    marksView.setPassage(
+                        text, statuses: Array(repeating: .untyped, count: text.utf16.count), cursor: 0)
+                    guard let rep = marksView.bitmapImageRepForCachingDisplay(in: marksView.bounds)
+                    else { return nil }
+                    marksView.cacheDisplay(in: marksView.bounds, to: rep)
+                    guard let data = rep.bitmapData else { return nil }
+                    return Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh))
+                }
+                let unbroken = String(repeating: "abcdefghij", count: 30)
+                let broken = "abc\ndef"
+                guard let unbrokenOff = pixels(unbroken, invisibles: false),
+                    let unbrokenOn = pixels(unbroken, invisibles: true),
+                    let brokenOff = pixels(broken, invisibles: false),
+                    let brokenOn = pixels(broken, invisibles: true)
+                else {
+                    print("SELFTEST FAIL: could not render the typing view to check its line-end marks")
+                    exit(1)
+                }
+                guard brokenOff != brokenOn else {
+                    print("SELFTEST FAIL: a real line break drew no mark with invisibles on, so the wrap check cannot see")
+                    exit(1)
+                }
+                guard unbrokenOff == unbrokenOn else {
+                    print("SELFTEST FAIL: a passage with no whitespace or line breaks drew marks with invisibles on — a wrap is being marked as a line break")
+                    exit(1)
+                }
+            }
+
             // The Settings window builds, every pane of it.
             //
             // Nothing else here touches it: the practice screen is what

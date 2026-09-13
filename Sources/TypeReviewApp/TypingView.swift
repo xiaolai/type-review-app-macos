@@ -364,9 +364,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
                 drawCaretIfNeeded(line: line, at: origin, in: context)
             }
             if showsWhitespace {
-                drawWhitespaceMarks(
-                    line: line, at: origin, in: context,
-                    isLast: index == lines.count - 1)
+                drawWhitespaceMarks(line: line, at: origin, in: context)
             }
         }
         context.restoreGState()
@@ -647,13 +645,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// nothing.
     ///
     /// Not the website's glyphs, though this used to say they were. The website
-    /// marks a space with an open box and every line end with the same arrow;
-    /// this app uses a middle dot, and tells a paragraph break from a soft wrap.
-    /// What the two do share is the colour rule: a mark turns red when the
-    /// character it stands for was mistyped.
-    private func drawWhitespaceMarks(
-        line: CTLine, at origin: CGPoint, in context: CGContext, isLast: Bool
-    ) {
+    /// marks a space with an open box and a line break with an arrow; this app
+    /// uses a middle dot and a pilcrow. What the two share is what gets a mark
+    /// at all, which is a character the passage contains, and the colour rule:
+    /// a mark turns red when the character it stands for was mistyped.
+    private func drawWhitespaceMarks(line: CTLine, at origin: CGPoint, in context: CGContext) {
         let range = CTLineGetStringRange(line)
         guard range.length > 0 else { return }
         // Cached. This rebuilt the whole passage's code units once per visible
@@ -686,16 +682,19 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
                 font: font, colour: mistyped ? Theme.incorrect : colour, in: context)
         }
 
-        // The line's own ending. `¶` for a paragraph break the passage
-        // contains, `↵` for a wrap this window's width happens to cause —
-        // the word-processor distinction, and the one the request asked for.
-        // The final line of a passage ends because the text ran out, which is
-        // neither, so it gets nothing.
-        if !isLast || endsWithHardBreak {
+        // A line break the passage contains, and only that. A line this
+        // window's width wrapped used to end in `↵` as well, on the theory that
+        // this was the word-processor distinction. It is the reverse: a word
+        // processor draws that arrow for a line break someone typed and nothing
+        // for a wrap, and the website draws it for a real break too. So the one
+        // mark meaning "there is no character here" was the one every typist
+        // reads as the Return key, and it sat at the end of nearly every line of
+        // a quote, none of which contains a line break at all. A wrap is layout,
+        // not text, and the marks are for text.
+        if endsWithHardBreak {
             let trailing = CTLineGetOffsetForStringIndex(line, range.location + range.length, nil)
             draw(
-                endsWithHardBreak ? "¶" : "↵",
-                at: CGPoint(x: origin.x + trailing, y: origin.y),
+                "¶", at: CGPoint(x: origin.x + trailing, y: origin.y),
                 width: advance(on: line, at: range.location + range.length - 1),
                 font: font, colour: colour, in: context)
         }
