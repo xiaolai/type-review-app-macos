@@ -922,6 +922,57 @@ enum Diagnostics {
                 }
             }
 
+            // The practice window takes Latin keyboards only, unless told not to.
+            //
+            // This checks that both settings reach the typing view's input
+            // context. It cannot check what macOS then does with them: a check
+            // runs as an accessory and never activates that context, so whether
+            // the input source really switches, and switches back, is for a
+            // person to confirm once.
+            do {
+                @MainActor func typingViews(in view: NSView) -> [TypingView] {
+                    view.subviews.flatMap { child -> [TypingView] in
+                        (child as? TypingView).map { [$0] } ?? typingViews(in: child)
+                    }
+                }
+                guard let surface = typingViews(in: practice.view).first else {
+                    print("SELFTEST FAIL: no typing view in the practice window")
+                    exit(1)
+                }
+                // What launch left, before anything here applies the preference
+                // itself. The loop below re-applies it, so on its own it would pass
+                // for a build that restricts nothing until a setting changes.
+                let atLaunch = surface.inputContext?.allowedInputSourceLocales ?? []
+                let launchExpected = AppPreferences.latinInputOnly.value
+                    ? [NSAllRomanInputSourcesLocaleIdentifier] : []
+                guard atLaunch == launchExpected else {
+                    print(
+                        "SELFTEST FAIL: at launch the typing view allows \(atLaunch), but "
+                            + "Latin keyboards only is \(AppPreferences.latinInputOnly.value ? "on" : "off")")
+                    exit(1)
+                }
+                let latinBefore = UserDefaults.standard.volatileDomain(
+                    forName: UserDefaults.argumentDomain)
+                for restricted in [true, false] {
+                    var arguments = latinBefore
+                    arguments[AppPreferences.latinInputOnly.key] = restricted
+                    UserDefaults.standard.setVolatileDomain(
+                        arguments, forName: UserDefaults.argumentDomain)
+                    practice.applyTypingPreferences()
+                    let allowed = surface.inputContext?.allowedInputSourceLocales ?? []
+                    let expected = restricted ? [NSAllRomanInputSourcesLocaleIdentifier] : []
+                    guard allowed == expected else {
+                        print(
+                            "SELFTEST FAIL: with Latin keyboards only \(restricted ? "on" : "off"), "
+                                + "the typing view allows \(allowed)")
+                        exit(1)
+                    }
+                }
+                UserDefaults.standard.setVolatileDomain(
+                    latinBefore, forName: UserDefaults.argumentDomain)
+                practice.applyTypingPreferences()
+            }
+
             // The Settings window builds, every pane of it.
             //
             // Nothing else here touches it: the practice screen is what

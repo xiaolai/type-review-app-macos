@@ -55,9 +55,18 @@ enum AppPreferences {
 
     /// Whether spaces, tabs and line ends are marked on the typing surface.
     ///
-    /// The same setting the website calls `showWhitespace`, and the same three
-    /// marks, so someone moving between them sees the same page.
+    /// The same setting the website calls `showWhitespace`. The marks are not
+    /// the website's, though; `TypingView.drawWhitespaceMarks` says how.
     static let showWhitespace = Flag(key: "ShowWhitespace")
+
+    /// Whether the practice window takes Latin keyboard layouts only.
+    ///
+    /// On, because the passages are English and a composing input method has
+    /// nothing to type into them. A switch rather than a rule because it is
+    /// somebody's keyboard, and a person who wants their input method left
+    /// alone while practising gets that. Dvorak, Colemak and AZERTY are Latin
+    /// layouts, so they type either way.
+    static let latinInputOnly = Flag(key: "LatinInputOnly", default: true)
 
     /// How loud the keystroke sounds are. Zero is off in practice, and the
     /// pack named `off` is off by construction; both are honoured.

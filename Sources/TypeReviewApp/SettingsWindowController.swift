@@ -211,7 +211,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 hint: "The shape of the cursor on the typing surface.")
             self.addRow(
                 grid, "Show invisibles", self.whitespaceToggle(),
-                hint: "space · tab → wrap ↵ paragraph ¶")
+                hint: "space · tab → paragraph ¶")
+            self.addRow(
+                grid, "Latin keyboards only", self.latinInputToggle(),
+                hint: "Input methods such as Pinyin step aside while you type here. "
+                    + "Dvorak, Colemak and AZERTY still work.")
             self.addRow(
                 grid, "Characters per line", self.preferenceStepper(AppPreferences.columns),
                 hint: "The window is sized to fit exactly this many.")
@@ -558,7 +562,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return popup
     }
 
-    /// Whether spaces, tabs and line ends are marked.
+    /// Whether only Latin keyboard layouts may type in the practice window.
+    private func latinInputToggle() -> NSControl {
+        let toggle = checkbox()
+        toggle.state = AppPreferences.latinInputOnly.value ? .on : .off
+        bind(toggle) { AppPreferences.latinInputOnly.value = toggle.state == .on }
+        return toggle
+    }
+
+    /// Whether spaces and tabs, and the line breaks a passage contains, are marked.
     private func whitespaceToggle() -> NSControl {
         let toggle = checkbox()
         toggle.state = AppPreferences.showWhitespace.value ? .on : .off

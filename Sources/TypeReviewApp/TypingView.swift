@@ -62,6 +62,39 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     var caretStyle: AppPreferences.CaretStyle = .vertical {
         didSet { if caretStyle != oldValue { needsDisplay = true } }
     }
+    /// Whether only Latin keyboard layouts may type into this view.
+    ///
+    /// The passages are English and ASCII, so an input method that composes —
+    /// Pinyin, Kotoeri, Hangul — can only hold letters back until it commits,
+    /// turn a space into choosing a candidate, and commit characters no passage
+    /// contains. `NSAllRomanInputSourcesLocaleIdentifier` is every Latin layout
+    /// rather than ABC alone, so Dvorak, Colemak and AZERTY are untouched, and
+    /// the composition support below stays: dead keys on a Latin layout compose
+    /// too.
+    ///
+    /// AppKit applies it while this view's input context is active, so the
+    /// practice window alone is affected. It is changed from the Settings
+    /// window, which is key at that moment, so the context is inactive when it
+    /// changes and picks the new value up when the practice window returns.
+    var latinInputOnly = true {
+        didSet { applyInputSourceRestriction() }
+    }
+
+    /// Hands the setting to the input context, which is where AppKit reads it.
+    ///
+    /// Called when the view joins a window as well as on every change, and the
+    /// second call is insurance rather than a repair. Measured: the context
+    /// already exists when the preference is first applied, while the practice
+    /// screen is being built, so that first assignment takes. It takes only
+    /// because of that ordering, though. If the context did not exist yet, the
+    /// assignment would do nothing and the view would read `true` while
+    /// restricting nothing — and the launch check in `--selftest` is what would
+    /// say so.
+    private func applyInputSourceRestriction() {
+        inputContext?.allowedInputSourceLocales =
+            latinInputOnly ? [NSAllRomanInputSourcesLocaleIdentifier] : nil
+    }
+
     var showsWhitespace = false {
         didSet { if showsWhitespace != oldValue { needsDisplay = true } }
     }
@@ -226,6 +259,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        applyInputSourceRestriction()
         // Key-window changes are not sent to a view, and `caretShouldBlink`
         // depends on one. Without these the caret stopped blinking the first
         // time the window lost focus and stayed frozen after it came back,

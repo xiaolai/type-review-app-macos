@@ -717,12 +717,12 @@ final class PracticeViewController: NSViewController {
 }
 
 extension PracticeViewController {
-    /// Caret shape and whitespace marks. Both are pure presentation — the
-    /// view redraws and nothing about the run changes — so they apply live
-    /// rather than at the next passage.
+    /// Caret shape, whitespace marks, and which keyboards may type. None of
+    /// them changes the run, so they apply live rather than at the next passage.
     func applyTypingPreferences() {
         typingView.caretStyle = AppPreferences.caretStyle.value
         typingView.showsWhitespace = AppPreferences.showWhitespace.value
+        typingView.latinInputOnly = AppPreferences.latinInputOnly.value
         // Speech rides the same notification. Switching it on mid-passage has
         // to build the synthesizer and resolve the voice here, or the first
         // word after the switch would pay for both on the typing path.
