@@ -352,6 +352,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
         for (index, line) in lines.enumerated() {
             let origin = origins[index]
+            drawIncorrectSpaces(line: line, at: origin, in: context)
             // A block caret is a highlight, so it belongs under the glyph it
             // marks. A bar or an underline sits beside or below one and can be
             // drawn over the top.
@@ -536,6 +537,38 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         }
     }
 
+    /// A mistyped space, made visible.
+    ///
+    /// Glyphs are coloured by status, and a space has no ink to colour. So a
+    /// wrong key where a space belonged was scored as a mistake and drawn as
+    /// nothing: the cursor moved on over a blank cell, and the mistake looked
+    /// accepted. The website has always shown it with a faint red cell, and this
+    /// is that cell. Drawn whatever "Show invisibles" says, because a mistake is
+    /// not an invisible, and under the glyphs, like the block caret.
+    ///
+    /// Spaces only. A tab would have the same problem, but no passage can hold
+    /// one: prose cleaning turns tabs into spaces and no bundled code contains a
+    /// tab, which is also why the website backgrounds spaces alone.
+    private func drawIncorrectSpaces(line: CTLine, at origin: CGPoint, in context: CGContext) {
+        let range = CTLineGetStringRange(line)
+        guard range.length > 0 else { return }
+        let units = passageUTF16
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+        context.setFillColor(Theme.incorrectSpace.cgColor)
+        for index in range.location..<(range.location + range.length) {
+            guard index < units.count, index < statuses.count else { break }
+            guard units[index] == 0x20, statuses[index] == .incorrect else { continue }
+            let cell = CGRect(
+                x: origin.x + CTLineGetOffsetForStringIndex(line, index, nil),
+                y: origin.y - descent, width: advance(on: line, at: index),
+                height: ascent + descent)
+            context.addPath(CGPath(roundedRect: cell, cornerWidth: 2, cornerHeight: 2, transform: nil))
+            context.fillPath()
+        }
+    }
+
     /// A caret one line tall, placed by asking the line for the cursor's
     /// offset. Choosing the line explicitly — rather than deriving a rect from
     /// the whole frame — is what keeps it one line tall at a wrap boundary,
@@ -613,9 +646,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// are ink on top of a layout that has not changed, so toggling them moves
     /// nothing.
     ///
-    /// The three glyphs are the website's, so the same passage reads the same
-    /// way in both. The fourth is this app's own: the website never marks a
-    /// soft wrap.
+    /// Not the website's glyphs, though this used to say they were. The website
+    /// marks a space with an open box and every line end with the same arrow;
+    /// this app uses a middle dot, and tells a paragraph break from a soft wrap.
+    /// What the two do share is the colour rule: a mark turns red when the
+    /// character it stands for was mistyped.
     private func drawWhitespaceMarks(
         line: CTLine, at origin: CGPoint, in context: CGContext, isLast: Bool
     ) {
@@ -645,9 +680,10 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
             default: continue
             }
             let x = origin.x + CTLineGetOffsetForStringIndex(line, index, nil)
+            let mistyped = index < statuses.count && statuses[index] == .incorrect
             draw(
                 mark, at: CGPoint(x: x, y: origin.y), width: advance(on: line, at: index),
-                font: font, colour: colour, in: context)
+                font: font, colour: mistyped ? Theme.incorrect : colour, in: context)
         }
 
         // The line's own ending. `¶` for a paragraph break the passage

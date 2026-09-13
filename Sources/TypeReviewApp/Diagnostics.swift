@@ -817,6 +817,68 @@ enum Diagnostics {
                 exit(1)
             }
 
+            // A mistyped space has to show.
+            //
+            // Glyphs are coloured by status, and a space has no ink to colour.
+            // For as long as this app existed, a wrong key where a space
+            // belonged was scored as a mistake and drawn as nothing: the cursor
+            // moved on over a blank cell, and the mistake looked accepted. The
+            // same passage is drawn twice, identical but for that one space,
+            // correct in one and mistyped in the other, with the caret in the
+            // same place, and the mistyped drawing must differ. A difference
+            // rather than a colour, because the byte order of a cached bitmap
+            // is not worth guessing and nothing else in the two differs: the
+            // glyphs match, and so does the caret. Invisibles are off, because
+            // that is the default and the case that was blank.
+            do {
+                let spaceView = TypingView(frame: NSRect(x: 0, y: 0, width: 420, height: 140))
+                spaceView.showsWhitespace = false
+                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], rep: NSBitmapImageRep)? {
+                    spaceView.setPassage("ab cd", statuses: statuses, cursor: 3)
+                    guard let rep = spaceView.bitmapImageRepForCachingDisplay(in: spaceView.bounds)
+                    else { return nil }
+                    spaceView.cacheDisplay(in: spaceView.bounds, to: rep)
+                    guard let data = rep.bitmapData else { return nil }
+                    return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep)
+                }
+                guard let clean = render([.correct, .correct, .correct, .untyped, .untyped]),
+                    let wrong = render([.correct, .correct, .incorrect, .untyped, .untyped]),
+                    clean.bytes.count == wrong.bytes.count
+                else {
+                    print("SELFTEST FAIL: could not render the typing view to check a mistyped space")
+                    exit(1)
+                }
+                let step = clean.rep.samplesPerPixel
+                let row = clean.rep.bytesPerRow
+                var inked = 0
+                var differing = 0
+                for y in 0..<clean.rep.pixelsHigh {
+                    for x in 0..<clean.rep.pixelsWide {
+                        let offset = y * row + x * step
+                        var fromCorner = 0
+                        var fromClean = 0
+                        for channel in 0..<step {
+                            fromCorner = max(fromCorner, abs(Int(clean.bytes[offset + channel]) - Int(clean.bytes[channel])))
+                            fromClean = max(fromClean, abs(Int(clean.bytes[offset + channel]) - Int(wrong.bytes[offset + channel])))
+                        }
+                        if fromCorner > 40 { inked += 1 }
+                        if fromClean > 12 { differing += 1 }
+                    }
+                }
+                // Without ink the comparison below proves nothing, so that is a
+                // failure of its own rather than a pass nobody could see.
+                guard inked > 50 else {
+                    print("SELFTEST FAIL: the typing view drew no text offscreen, so a mistyped space cannot be checked")
+                    exit(1)
+                }
+                guard differing > 50 else {
+                    print(
+                        "SELFTEST FAIL: a mistyped space changed \(differing) pixels — it is drawn "
+                            + "as a blank cell, so the mistake looks accepted")
+                    exit(1)
+                }
+            }
+
             // The Settings window builds, every pane of it.
             //
             // Nothing else here touches it: the practice screen is what

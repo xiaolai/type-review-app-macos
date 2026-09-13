@@ -12,6 +12,10 @@ enum Theme {
     static var pending: NSColor { .tertiaryLabelColor }
     static var correct: NSColor { .labelColor }
     static var incorrect: NSColor { .systemRed }
+    /// Behind a mistyped space, which has no ink for `incorrect` to colour.
+    /// Faint, like the website's `--color-error-faint`, so it reads as a mark on
+    /// the cell rather than a second caret.
+    static var incorrectSpace: NSColor { .systemRed.withAlphaComponent(0.15) }
     static var caret: NSColor { .controlAccentColor }
     static var secondaryText: NSColor { .secondaryLabelColor }
     /// Whitespace marks. Fainter than untyped text, because they are a guide
