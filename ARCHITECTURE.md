@@ -71,7 +71,12 @@ and recording what it returned, and that is still the method:
 2. Read the existing vector's *input* section (`histograms`, `runTimestamps`,
    whatever that file carries), feed it to the real function, and print the
    result as JSON.
-3. Paste that into the vector file and add the Swift assertion.
+3. Paste that into the vector file and add the Swift assertion. Write every
+   invisible or combining character as a `\u` escape. `JSON.stringify` writes
+   them raw, and a raw combining accent is one editor's Unicode normalisation
+   away from being a different string: `cafe\u0301` becomes `caf\u00e9`, the case
+   meant to prove a decomposed accent folds would test the composed one, and
+   it would still pass. `VectorCoverageTests` fails on a raw one.
 4. **Then break the Swift port on purpose** and watch the vector fail. A vector
    nobody has seen fail is a vector nobody knows is connected.
 

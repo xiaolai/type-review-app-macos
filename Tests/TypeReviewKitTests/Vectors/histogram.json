@@ -75,16 +75,16 @@
     ]
   },
   {
-    "text": "éfg",
+    "text": "e\u0301fg",
     "entries": [
       {
-        "bigram": "é",
+        "bigram": "e\u0301",
         "hitCount": 1,
         "missCount": 0,
         "timeToType": 150
       },
       {
-        "bigram": "́f",
+        "bigram": "\u0301f",
         "hitCount": 1,
         "missCount": 0,
         "timeToType": 150

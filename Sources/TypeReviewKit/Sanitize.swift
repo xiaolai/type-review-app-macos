@@ -5,9 +5,11 @@ public let maxPassageChars = 5_000
 
 public struct SanitizeResult: Sendable, Equatable {
     public let text: String
-    /// Code units dropped because they have no ASCII form, or are control
-    /// characters. An accent taken off its letter is a conversion rather than a
-    /// drop, and is not counted.
+    /// Characters dropped because they have no ASCII form, or are control
+    /// characters. Counted in the input's own characters (Unicode scalars), so
+    /// an emoji is one and so is a Hangul syllable, not the two and three code
+    /// units they occupy once decomposed. An accent taken off its letter is a
+    /// conversion rather than a drop, and is not counted.
     public let droppedChars: Int
     public let truncated: Bool
 }
@@ -31,40 +33,50 @@ public struct SanitizeResult: Sendable, Equatable {
 /// has to match.
 public func sanitize(_ input: String, preserveLayout: Bool = false) -> SanitizeResult {
     var dropped = 0
-    // Compatibility decomposition before anything is judged, so the loop sees a
-    // letter and its accent separately, three dots rather than an ellipsis, and
-    // a plain space rather than a non-breaking one.
-    let decomposed = input.decomposedStringWithCompatibilityMapping
     var kept: [UInt16] = []
-    kept.reserveCapacity(decomposed.utf16.count)
+    kept.reserveCapacity(input.utf16.count)
 
-    for unit in decomposed.utf16 {
-        // Whitespace survives this pass; normalisation below decides its fate.
-        if unit == 0x09 || unit == 0x0A || unit == 0x0B || unit == 0x0C || unit == 0x0D
-            || unit == 0x20
-        {
-            kept.append(unit)
-            continue
+    // One character of the input at a time, each given its compatibility
+    // decomposition before anything is judged, so the loop sees a letter and
+    // its accent separately, three dots rather than an ellipsis, and a plain
+    // space rather than a non-breaking one.
+    //
+    // Per character rather than the whole string at once, so that what is
+    // counted is what was pasted. Counting decomposed code units reported one
+    // emoji as two characters removed and one Hangul syllable as three. The
+    // text kept is the same either way: decomposing a whole string differs from
+    // decomposing its characters only in how adjacent combining marks are
+    // ordered, and every combining mark is removed.
+    for scalar in input.unicodeScalars {
+        var lost = false
+        for unit in String(scalar).decomposedStringWithCompatibilityMapping.utf16 {
+            // Whitespace survives this pass; normalisation below decides its fate.
+            if unit == 0x09 || unit == 0x0A || unit == 0x0B || unit == 0x0C || unit == 0x0D
+                || unit == 0x20
+            {
+                kept.append(unit)
+                continue
+            }
+            if unit < 0x20 || unit == 0x7F {
+                lost = true
+                continue
+            }
+            if unit < 0x7F {
+                kept.append(unit)
+                continue
+            }
+            // The accent decomposition split off its letter. Removing it is the
+            // conversion to a plain letter, not the loss of a character, so it
+            // is not counted: "cafe" typed from "café" has nothing missing to report.
+            if (0x0300...0x036F).contains(unit) { continue }
+            if let replacement = asciiFold[unit] {
+                kept.append(contentsOf: replacement)
+                continue
+            }
+            // No ASCII form.
+            lost = true
         }
-        if unit < 0x20 || unit == 0x7F {
-            dropped += 1
-            continue
-        }
-        if unit < 0x7F {
-            kept.append(unit)
-            continue
-        }
-        // The accent decomposition split off its letter. Removing it is the
-        // conversion to a plain letter, not the loss of a character, so it is not
-        // counted: "cafe" typed from "café" has nothing missing to report.
-        if (0x0300...0x036F).contains(unit) { continue }
-        if let replacement = asciiFold[unit] {
-            kept.append(contentsOf: replacement)
-            continue
-        }
-        // No ASCII form. Surrogate halves land here too, which is why they no
-        // longer need a branch of their own.
-        dropped += 1
+        if lost { dropped += 1 }
     }
 
     var text = String(utf16CodeUnits: kept, count: kept.count)
@@ -93,6 +105,12 @@ public func sanitize(_ input: String, preserveLayout: Bool = false) -> SanitizeR
             units = Array(units.prefix(boundary))
         }
         text = String(utf16CodeUnits: units, count: units.count)
+        // The cut can leave whitespace behind it: at the second newline of a
+        // paragraph break it keeps the first, and in a layout-preserving passage
+        // it can stop inside a line's indentation. Trimmed, because the text is
+        // trimmed on the way in; otherwise cleaning the result again took more
+        // off, and a stored passage was not what cleaning it would produce.
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     return SanitizeResult(text: text, droppedChars: dropped, truncated: truncated)

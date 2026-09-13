@@ -20,18 +20,7 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
 
     /// What sanitising did to a passage, when it did anything worth saying.
     private static func note(for result: SanitizeResult) -> String {
-        note(truncated: result.truncated, dropped: result.droppedChars)
-    }
-
-    /// The same note for a batch of files, summed over the ones that were added.
-    private static func note(truncated: Bool, dropped: Int) -> String {
-        var parts: [String] = []
-        // `maxPassageChars`, which is what `sanitize` actually enforces.
-        // `maxUserPassageLength` is the *file* read cap and is ten times
-        // larger, so the note used to name a limit nothing had applied.
-        if truncated { parts.append("truncated to the \(maxPassageChars)-character cap") }
-        if dropped > 0 { parts.append("\(dropped) unusable characters removed") }
-        return parts.isEmpty ? "" : " (" + parts.joined(separator: ", ") + ")"
+        LibraryImportReport.cleaningNote(truncated: result.truncated, dropped: result.droppedChars)
     }
     /// Held so its enabled state can follow the selection, the way the Remove
     /// button used to.
@@ -309,12 +298,11 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             }
         }
         reload()
-        if !failures.isEmpty {
-            // Named rather than counted: "2 files failed" is not actionable.
-            statusLabel.stringValue = failures.joined(separator: " · ")
-        } else if added > 0 {
-            statusLabel.stringValue =
-                "added \(added)\(Self.note(truncated: truncated, dropped: dropped)) · \(store.passages.count) in library"
+        if let status = LibraryImportReport.batchStatus(
+            added: added, truncated: truncated, dropped: dropped, failures: failures,
+            libraryCount: store.passages.count)
+        {
+            statusLabel.stringValue = status
         }
     }
 

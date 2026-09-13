@@ -51,4 +51,32 @@ final class VectorCoverageTests: XCTestCase {
             Self.consumed.subtracting(onDisk), [],
             "listed as read but not in the bundle")
     }
+
+    /// That no vector holds an invisible or combining character raw.
+    ///
+    /// Written raw, a combining accent is one editor's Unicode normalisation away
+    /// from being a different string: the corpus case proving that a decomposed
+    /// `cafe\u0301` folds like the composed `caf\u00e9` would quietly become the
+    /// composed one, and keep passing, having stopped testing anything. `JSON.stringify` writes
+    /// these characters raw. That is how three reached `histogram.json`, and how
+    /// regenerating `corpus.json` once wrote eight more. As `\u0301` the file is
+    /// plain ASCII at that point, and nothing rewrites it.
+    func testNoVectorHoldsAnInvisibleOrCombiningCharacterRaw() throws {
+        let urls =
+            Bundle.module.urls(forResourcesWithExtension: "json", subdirectory: "Vectors") ?? []
+        XCTAssertFalse(urls.isEmpty, "no vectors found in the test bundle")
+        let invisible: Set<Unicode.GeneralCategory> = [
+            .nonspacingMark, .spacingMark, .enclosingMark, .spaceSeparator, .lineSeparator,
+            .paragraphSeparator, .format, .control,
+        ]
+        for url in urls {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let raw = text.unicodeScalars.filter {
+                $0.value > 0x7E && invisible.contains($0.properties.generalCategory)
+            }
+            XCTAssertEqual(
+                raw.map { String(format: "U+%04X", $0.value) }, [],
+                "\(url.lastPathComponent) holds these raw; write each as a \\u escape")
+        }
+    }
 }
