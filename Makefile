@@ -224,7 +224,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest speechbench quit-running test remote icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest speechbench quit-running test remote runner-test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -431,10 +431,21 @@ test:
 # speaks aloud and reports microseconds that a busy machine changes.
 #
 # `make remote REMOTE_HOST=<host>` names one explicitly; otherwise the script
-# reads TYPE_E2E_HOST from .env. No machine name is committed. The reasoning,
-# the preconditions and the signing override live in the script.
+# takes TYPE_E2E_HOST from the environment, or that one line of .env. No machine
+# name is committed. The reasoning, the preconditions and the signing override
+# live in the script.
 remote:
 	@Tools/run-remote.sh $(REMOTE_HOST)
+
+# The remote runner's staging and value checks, run here, without a host.
+#
+# The copy is the part that can leak: `.env` holds the App Store Connect
+# credentials. Every way it has failed -- a filename rsync read as a pattern, a
+# name git quoted, a tracked file an ignore rule covers, a remote directory of
+# `.` -- passed every other check in this repository, because nothing else
+# creates those files or passes those values. The fixture does both.
+runner-test:
+	@Tools/test-run-remote.sh
 
 # Regenerates the icon set. The .icns is committed, so this runs only when
 # the artwork changes — Tools/make-icon.swift is the artwork.

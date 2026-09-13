@@ -2,9 +2,10 @@
 # Run the end-to-end checks on another Mac, so they take that machine's
 # resources instead of the one you are working on.
 #
-#   Tools/run-remote.sh                 # the default host below
-#   Tools/run-remote.sh some-other-mac   # or name one
-#   TYPE_E2E_CHECKS='selftest' Tools/run-remote.sh
+#   Tools/run-remote.sh <host>
+#   TYPE_E2E_HOST=<host> Tools/run-remote.sh
+#   TYPE_E2E_CHECKS='selftest' Tools/run-remote.sh <host>
+#   TYPE_E2E_DRY_RUN=1 Tools/run-remote.sh <host>    checks and stages, contacts nothing
 #
 # Why move them at all, when this project's checks were built not to steal the
 # screen. `Diagnostics.isRunningCheck` is the reason they are polite: a check
@@ -37,10 +38,11 @@
 # that permission: the self-test pins the global sound off precisely so it
 # cannot prompt.
 #
-# The tracked tree is copied as it stands, uncommitted edits and new files
-# included, so what runs there is what you have here, and nothing .gitignore
-# covers goes with it. `.git` is not copied, so `BUILD_NUMBER`
+# What crosses is exactly what Tools/stage-tree.sh stages: the files git lists
+# for this checkout, uncommitted edits and new files included, and no file an
+# ignore rule covers, tracked or not. `.git` is not copied, so `BUILD_NUMBER`
 # falls back to 1 at the far end; nothing these checks assert reads it.
+# `make runner-test` proves the staging and the checks below without a host.
 set -euo pipefail
 cd "${0:A:h:h}"
 
@@ -62,8 +64,41 @@ if [[ -z "$HOST" ]]; then
   print -u2 "   or: set TYPE_E2E_HOST, in .env or the environment"
   exit 2
 fi
+
+# Every value below reaches a remote shell or a mirror that deletes, so each is
+# checked for shape before it goes anywhere. The remote directory most of all:
+# `TYPE_E2E_DIR=.` made the mirror target the far end's home folder, and the copy
+# would have deleted everything in it that is not this repository. It has to be
+# a relative path of plain names, none starting with a dot, which also rules out
+# `.` and `..`. A trailing slash comes off first, because the cache path is made
+# by appending to it and would otherwise land inside the mirror and be deleted.
+refuse() { print -u2 "run-remote: $1"; exit 9; }
 REMOTE_DIR="${TYPE_E2E_DIR:-ci/type-review-app-macos}"
+while [[ $REMOTE_DIR == */ ]]; do REMOTE_DIR=${REMOTE_DIR%/}; done
 CHECKS="${TYPE_E2E_CHECKS:-test selftest speechbench}"
+[[ $HOST =~ '^[A-Za-z0-9_][A-Za-z0-9._@-]*$' ]] || refuse "host '$HOST' is not a plain ssh host name"
+[[ $REMOTE_DIR =~ '^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$' ]] \
+  || refuse "remote directory '$REMOTE_DIR' must be a relative path of plain names"
+[[ $CHECKS =~ '^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)*$' ]] || refuse "checks '$CHECKS' must be make target names"
+CACHE="$REMOTE_DIR.build-cache"
+LOCK="$REMOTE_DIR.lock"
+
+stage=$(mktemp -d)
+locked=0
+cleanup() {
+  rm -rf "$stage"
+  if (( locked )); then
+    ssh -o ConnectTimeout=10 "$HOST" "rmdir '$LOCK'" || print -u2 "run-remote: could not remove $HOST:$LOCK"
+  fi
+}
+trap cleanup EXIT
+count=$(Tools/stage-tree.sh "$stage")
+
+if [[ -n ${TYPE_E2E_DRY_RUN:-} ]]; then
+  print "dry run: $count files staged for $HOST:$REMOTE_DIR, build kept at $CACHE while copying"
+  print "dry run: would run make SIGN_ID=- $CHECKS"
+  exit 0
+fi
 
 print "Checking $HOST can run them..."
 ssh -o ConnectTimeout=10 -o BatchMode=yes "$HOST" "
@@ -82,66 +117,47 @@ ssh -o ConnectTimeout=10 -o BatchMode=yes "$HOST" "
   mkdir -p '$REMOTE_DIR'
 " || exit $?
 
-print "Copying the tracked tree to $HOST:$REMOTE_DIR ..."
-# What goes across is what git tracks, plus new files git would track: the
-# working tree as it stands, uncommitted edits and all, and never a file
-# .gitignore covers. That rule is the point. Ignored files are where a checkout
-# keeps what must not travel. .env holds the App Store Connect credentials, and
-# an earlier version of this script, which copied everything except a short
-# list, put that file on the far end every run. A list of exclusions has to
-# anticipate every secret anyone will ever add; asking git what the source is
-# does not.
-#
-# The far end is an exact mirror, stale and ignored files deleted, which takes
-# --delete-excluded. macOS's rsync is openrsync, and it ignores protect rules
-# without a word. Measured: `P /.build/***`, `protect`, and every other variant
-# deleted what it was meant to keep, and exited 0 each time. So the incremental
-# build is not protected in place. It is moved aside before the copy and put
-# back after, which asks nothing of rsync but the mirror it demonstrably does.
-filters=$(mktemp)
-trap 'rm -f "$filters"' EXIT
-{
-  git ls-files -co --exclude-standard | while IFS= read -r f; do
-    [[ -e $f ]] || continue
-    parts=(${(s:/:)f})
-    acc=""
-    for p in ${parts[1,-2]}; do
-      acc+="$p/"
-      print -r -- "+ /$acc"
-    done
-    print -r -- "+ /$f"
-  done | sort -u
-  print -r -- '- *'
-} > "$filters"
-# A list missing the package would mirror almost nothing and delete the rest of
-# the far end with it. A git failure should stop here, not there.
-grep -qx '+ /Package.swift' "$filters" || {
-  print -u2 "git listed no Package.swift here; refusing to mirror what it did list"
-  exit 8
-}
+# One run at a time. Two runs share the mirror and the build cache: one would
+# move the build aside while the other's copy deleted it, and both would test a
+# tree the other was still writing. `mkdir` is the lock because it is atomic.
+lock_rc=0
+ssh -o ConnectTimeout=10 "$HOST" "
+  if mkdir '$LOCK' 2>/dev/null; then exit 0; elif [ -d '$LOCK' ]; then exit 11; else exit 12; fi
+" || lock_rc=$?
+if (( lock_rc == 11 )); then
+  print -u2 "run-remote: another run holds $HOST:$LOCK. If none is running: ssh $HOST rmdir '$LOCK'"
+  exit 11
+elif (( lock_rc != 0 )); then
+  print -u2 "run-remote: could not create the lock $HOST:$LOCK ($lock_rc)"
+  exit 12
+fi
+locked=1
 
-CACHE="$REMOTE_DIR.build-cache"
+print "Copying $count files to $HOST:$REMOTE_DIR ..."
+# The far end is an exact mirror of the staging directory. The incremental build
+# is moved aside for the copy and put back after, not protected in place: macOS's
+# rsync is openrsync, and it ignores protect rules without a word. Measured,
+# `P /.build/***`, `protect` and every other variant deleted what they named, and
+# exited 0 each time. A run that dies after the move leaves the build in the
+# cache, and the next run restores it.
 ssh -o ConnectTimeout=10 "$HOST" "
   set -e
   if [ -d '$REMOTE_DIR/.build' ]; then
     rm -rf '$CACHE'; mkdir -p '$CACHE'; mv '$REMOTE_DIR/.build' '$CACHE/.build'
   fi
 "
-rsync -az --delete --delete-excluded --filter="merge $filters" ./ "$HOST:$REMOTE_DIR/"
-# Put the build back, then check the mirror is what it claims. A run that died
-# after the move left the build in the cache, and this restores it next time.
+rsync -az --delete "$stage/" "$HOST:$REMOTE_DIR/"
 ssh -o ConnectTimeout=10 "$HOST" "
   set -e
   if [ -d '$CACHE/.build' ]; then mv '$CACHE/.build' '$REMOTE_DIR/.build'; rmdir '$CACHE'; fi
-  test ! -e '$REMOTE_DIR/.env'
+  test ! -e '$REMOTE_DIR/.env' && test ! -L '$REMOTE_DIR/.env'
 " || {
-  print -u2 "the far end is not a clean mirror: a .env is present, or the build could not be restored"
+  print -u2 "run-remote: the far end is not a clean mirror: a .env is present, or the build could not be restored"
   exit 7
 }
 
 print "Running: make SIGN_ID=- $CHECKS on $HOST ..."
-# `status` is read-only in zsh, so the exit code needs a name of our own.
-ssh -o ConnectTimeout=10 "$HOST" "cd '$REMOTE_DIR' && make SIGN_ID=- $CHECKS"
-remote_status=$?
+remote_status=0
+ssh -o ConnectTimeout=10 "$HOST" "cd '$REMOTE_DIR' && make SIGN_ID=- $CHECKS" || remote_status=$?
 print "$HOST finished with status $remote_status."
 exit $remote_status

@@ -52,6 +52,12 @@ jobs:
       - name: Test
         run: make test
 
+      - name: The remote runner copies only what git lists
+        # Runs without a host. It is here because the runner's failures were all
+        # invisible to every other step: none of them creates a file named `*`,
+        # a name git quotes, or a tracked file an ignore rule covers.
+        run: make runner-test
+
       - name: Self-test
         run: make selftest
 
