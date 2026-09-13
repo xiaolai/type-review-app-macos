@@ -37,22 +37,26 @@
 # that permission: the self-test pins the global sound off precisely so it
 # cannot prompt.
 #
-# The working tree is copied as it stands, uncommitted changes included, so
-# what runs there is what you have here. `.git` is not copied, so `BUILD_NUMBER`
+# The tracked tree is copied as it stands, uncommitted edits and new files
+# included, so what runs there is what you have here, and nothing .gitignore
+# covers goes with it. `.git` is not copied, so `BUILD_NUMBER`
 # falls back to 1 at the far end; nothing these checks assert reads it.
 set -euo pipefail
 cd "${0:A:h:h}"
 
 # No host is baked in, and that is deliberate: this repository is public, and a
 # machine name is a piece of somebody's network. It comes from the argument, or
-# from TYPE_E2E_HOST, which .env is the right place for — .gitignore covers it
-# and the upload credentials already live there.
-if [[ -f .env ]]; then
-  set -a
-  source .env
-  set +a
-fi
+# TYPE_E2E_HOST in the environment, or that one line of .env.
+#
+# One line, not the file. This used to `source .env` whole, which put the App
+# Store Connect credentials that live there into this script's environment for
+# no reason at all, and did it even when a host had been passed explicitly. Now
+# .env is opened only when it is the last place left to look, and only the host
+# is taken out of it.
 HOST="${1:-${TYPE_E2E_HOST:-}}"
+if [[ -z "$HOST" && -f .env ]]; then
+  HOST=$(sed -n 's/^TYPE_E2E_HOST=//p' .env | tail -1 | tr -d "\"'")
+fi
 if [[ -z "$HOST" ]]; then
   print -u2 "usage: $0 <host>   (an ssh host that is not this Mac)"
   print -u2 "   or: set TYPE_E2E_HOST, in .env or the environment"
@@ -78,15 +82,62 @@ ssh -o ConnectTimeout=10 -o BatchMode=yes "$HOST" "
   mkdir -p '$REMOTE_DIR'
 " || exit $?
 
-print "Copying the working tree to $HOST:$REMOTE_DIR ..."
-# --delete keeps the far end honest. .build and TYPE.app are excluded from both
-# the copy and the delete, so the remote keeps its own incremental build rather
-# than recompiling the world every run.
-rsync -az --delete \
-  --exclude '.git/' --exclude '.build/' --exclude 'TYPE.app/' \
-  --exclude 'TypeReview.app/' --exclude 'dist/' --exclude 'dev-docs/' \
-  --exclude '.cc-suite/' --exclude '.DS_Store' \
-  ./ "$HOST:$REMOTE_DIR/"
+print "Copying the tracked tree to $HOST:$REMOTE_DIR ..."
+# What goes across is what git tracks, plus new files git would track: the
+# working tree as it stands, uncommitted edits and all, and never a file
+# .gitignore covers. That rule is the point. Ignored files are where a checkout
+# keeps what must not travel. .env holds the App Store Connect credentials, and
+# an earlier version of this script, which copied everything except a short
+# list, put that file on the far end every run. A list of exclusions has to
+# anticipate every secret anyone will ever add; asking git what the source is
+# does not.
+#
+# The far end is an exact mirror, stale and ignored files deleted, which takes
+# --delete-excluded. macOS's rsync is openrsync, and it ignores protect rules
+# without a word. Measured: `P /.build/***`, `protect`, and every other variant
+# deleted what it was meant to keep, and exited 0 each time. So the incremental
+# build is not protected in place. It is moved aside before the copy and put
+# back after, which asks nothing of rsync but the mirror it demonstrably does.
+filters=$(mktemp)
+trap 'rm -f "$filters"' EXIT
+{
+  git ls-files -co --exclude-standard | while IFS= read -r f; do
+    [[ -e $f ]] || continue
+    parts=(${(s:/:)f})
+    acc=""
+    for p in ${parts[1,-2]}; do
+      acc+="$p/"
+      print -r -- "+ /$acc"
+    done
+    print -r -- "+ /$f"
+  done | sort -u
+  print -r -- '- *'
+} > "$filters"
+# A list missing the package would mirror almost nothing and delete the rest of
+# the far end with it. A git failure should stop here, not there.
+grep -qx '+ /Package.swift' "$filters" || {
+  print -u2 "git listed no Package.swift here; refusing to mirror what it did list"
+  exit 8
+}
+
+CACHE="$REMOTE_DIR.build-cache"
+ssh -o ConnectTimeout=10 "$HOST" "
+  set -e
+  if [ -d '$REMOTE_DIR/.build' ]; then
+    rm -rf '$CACHE'; mkdir -p '$CACHE'; mv '$REMOTE_DIR/.build' '$CACHE/.build'
+  fi
+"
+rsync -az --delete --delete-excluded --filter="merge $filters" ./ "$HOST:$REMOTE_DIR/"
+# Put the build back, then check the mirror is what it claims. A run that died
+# after the move left the build in the cache, and this restores it next time.
+ssh -o ConnectTimeout=10 "$HOST" "
+  set -e
+  if [ -d '$CACHE/.build' ]; then mv '$CACHE/.build' '$REMOTE_DIR/.build'; rmdir '$CACHE'; fi
+  test ! -e '$REMOTE_DIR/.env'
+" || {
+  print -u2 "the far end is not a clean mirror: a .env is present, or the build could not be restored"
+  exit 7
+}
 
 print "Running: make SIGN_ID=- $CHECKS on $HOST ..."
 # `status` is read-only in zsh, so the exit code needs a name of our own.
