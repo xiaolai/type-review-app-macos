@@ -156,9 +156,10 @@ private func collapseWhitespaceRuns(_ text: String) -> String {
 /// characters it leaves whole, because Unicode gives them no compatibility
 /// decomposition.
 ///
-/// Mirrored line for line in the website's `ASCII_FOLD_TABLE`, and a vector case
-/// runs every entry through both implementations, so a line added to one side
-/// and not the other fails the suite.
+/// Mirrored line for line in the website's `ASCII_FOLD_TABLE`. The corpus vector
+/// carries that table, and `CorpusVectorTests` requires this one to equal it
+/// entry for entry: a line added here alone fails the suite at once, and a line
+/// added there alone fails it when the vector is next regenerated.
 let asciiFoldTable: [(UInt16, String)] = [
     // Quotation marks and apostrophes, including guillemets and primes.
     (0x2018, "'"),  // LEFT SINGLE QUOTATION MARK

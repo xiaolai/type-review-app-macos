@@ -833,17 +833,20 @@ enum Diagnostics {
             do {
                 let spaceView = TypingView(frame: NSRect(x: 0, y: 0, width: 420, height: 140))
                 spaceView.showsWhitespace = false
-                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], rep: NSBitmapImageRep)? {
-                    spaceView.setPassage("ab cd", statuses: statuses, cursor: 3)
+                @MainActor func render(_ statuses: [CharStatus], passage: String = "ab cd") -> (bytes: [UInt8], rep: NSBitmapImageRep)? {
+                    spaceView.setPassage(passage, statuses: statuses, cursor: 3)
                     guard let rep = spaceView.bitmapImageRepForCachingDisplay(in: spaceView.bounds)
                     else { return nil }
                     spaceView.cacheDisplay(in: spaceView.bounds, to: rep)
                     guard let data = rep.bitmapData else { return nil }
                     return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep)
                 }
+                // The control: the same statuses and the same caret over a passage
+                // of spaces, so the only ink it has is the caret's.
                 guard let clean = render([.correct, .correct, .correct, .untyped, .untyped]),
                     let wrong = render([.correct, .correct, .incorrect, .untyped, .untyped]),
-                    clean.bytes.count == wrong.bytes.count
+                    let caretOnly = render([.correct, .correct, .correct, .untyped, .untyped], passage: "     "),
+                    clean.bytes.count == wrong.bytes.count, clean.bytes.count == caretOnly.bytes.count
                 else {
                     print("SELFTEST FAIL: could not render the typing view to check a mistyped space")
                     exit(1)
@@ -855,18 +858,21 @@ enum Diagnostics {
                 for y in 0..<clean.rep.pixelsHigh {
                     for x in 0..<clean.rep.pixelsWide {
                         let offset = y * row + x * step
-                        var fromCorner = 0
+                        var fromCaretOnly = 0
                         var fromClean = 0
                         for channel in 0..<step {
-                            fromCorner = max(fromCorner, abs(Int(clean.bytes[offset + channel]) - Int(clean.bytes[channel])))
+                            fromCaretOnly = max(fromCaretOnly, abs(Int(clean.bytes[offset + channel]) - Int(caretOnly.bytes[offset + channel])))
                             fromClean = max(fromClean, abs(Int(clean.bytes[offset + channel]) - Int(wrong.bytes[offset + channel])))
                         }
-                        if fromCorner > 40 { inked += 1 }
+                        if fromCaretOnly > 40 { inked += 1 }
                         if fromClean > 12 { differing += 1 }
                     }
                 }
-                // Without ink the comparison below proves nothing, so that is a
-                // failure of its own rather than a pass nobody could see.
+                // Without letters the comparison below proves nothing, so that is
+                // a failure of its own rather than a pass nobody could see. Ink is
+                // counted against the caret-only control rather than the
+                // background, because measured from the background the caret's
+                // own pixels are ink, and they are there with no letters at all.
                 guard inked > 50 else {
                     print("SELFTEST FAIL: the typing view drew no text offscreen, so a mistyped space cannot be checked")
                     exit(1)
@@ -960,6 +966,8 @@ enum Diagnostics {
             // mark, or this would pass for a build that draws no marks at all.
             do {
                 let marksView = TypingView(frame: NSRect(x: 0, y: 0, width: 200, height: 160))
+                var rowBytes = 0
+                var rowsHigh = 0
                 @MainActor func pixels(_ text: String, invisibles: Bool) -> [UInt8]? {
                     marksView.showsWhitespace = invisibles
                     marksView.setPassage(
@@ -968,6 +976,8 @@ enum Diagnostics {
                     else { return nil }
                     marksView.cacheDisplay(in: marksView.bounds, to: rep)
                     guard let data = rep.bitmapData else { return nil }
+                    rowBytes = rep.bytesPerRow
+                    rowsHigh = rep.pixelsHigh
                     return Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh))
                 }
                 let unbroken = String(repeating: "abcdefghij", count: 30)
@@ -982,6 +992,39 @@ enum Diagnostics {
                 }
                 guard brokenOff != brokenOn else {
                     print("SELFTEST FAIL: a real line break drew no mark with invisibles on, so the wrap check cannot see")
+                    exit(1)
+                }
+                // And the unbroken passage has to have wrapped. If it did not,
+                // there was no wrap for a mark to be drawn at, and the comparison
+                // below is two identical pictures proving nothing: it passed just
+                // as well for a view that drew nothing at all. Ink in two separate
+                // bands of rows is at least two lines.
+                //
+                // Letters are found by difference from a control of as many spaces,
+                // with the caret in the same place, so the caret cancels out.
+                // Measured from the background instead, the untyped colour is too
+                // faint to count, only the caret's band registered, and this failed
+                // against a view that wraps perfectly well.
+                guard let lettersGone = pixels(String(repeating: " ", count: unbroken.utf16.count), invisibles: false),
+                    lettersGone.count == unbrokenOff.count
+                else {
+                    print("SELFTEST FAIL: could not render the typing view's control for the wrap check")
+                    exit(1)
+                }
+                var bands = 0
+                var inBand = false
+                for y in 0..<rowsHigh {
+                    let start = y * rowBytes
+                    let inked = (start..<(start + rowBytes)).contains {
+                        abs(Int(unbrokenOff[$0]) - Int(lettersGone[$0])) > 12
+                    }
+                    if inked && !inBand { bands += 1 }
+                    inBand = inked
+                }
+                guard bands >= 2 else {
+                    print(
+                        "SELFTEST FAIL: the passage meant to wrap drew \(bands) line(s), so the check that a wrap "
+                            + "gets no mark had nothing to look at")
                     exit(1)
                 }
                 guard unbrokenOff == unbrokenOn else {

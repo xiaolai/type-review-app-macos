@@ -36,6 +36,18 @@ final class MarkdownVectorTests: XCTestCase {
         XCTAssertEqual(parseLibraryText(raw, kind: .md).text, "a literal asterisk and spaces")
     }
 
+    /// What cleaning removed is counted once, from what was in the file. Syntax
+    /// that stripping takes out is not a removed character; a character with no
+    /// ASCII form is, whichever kind of file it came in. Cleaning twice, which
+    /// is what stripping into `parseMarkdown` would do, reports zero.
+    func testAnImportCountsWhatCleaningRemovedOnce() {
+        let raw = "# Title \u{1F600}\n\n**bold** text \u{4E2D}\u{6587}"
+        let markdown = parseLibraryText(raw, kind: .md)
+        XCTAssertEqual(markdown.droppedChars, 3, "one emoji and two Chinese characters")
+        XCTAssertFalse(markdown.text.contains("*"), "the Markdown was not stripped")
+        XCTAssertEqual(parseLibraryText(raw, kind: .txt).droppedChars, 3)
+    }
+
     func testFileKindComesFromTheExtension() {
         XCTAssertEqual(LibraryFileKind(filename: "notes.MD"), .md)
         XCTAssertEqual(LibraryFileKind(filename: "notes.markdown"), .md)

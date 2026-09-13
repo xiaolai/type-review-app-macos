@@ -263,5 +263,227 @@
       "id": "q-twain-vote",
       "text": "If voting made any difference they wouldn't let us do it."
     }
+  ],
+  "asciiFoldTable": [
+    {
+      "codePoint": 8216,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8217,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8218,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8219,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8242,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8245,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8249,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8250,
+      "replacement": "'"
+    },
+    {
+      "codePoint": 8220,
+      "replacement": "\""
+    },
+    {
+      "codePoint": 8221,
+      "replacement": "\""
+    },
+    {
+      "codePoint": 8222,
+      "replacement": "\""
+    },
+    {
+      "codePoint": 8223,
+      "replacement": "\""
+    },
+    {
+      "codePoint": 171,
+      "replacement": "\""
+    },
+    {
+      "codePoint": 187,
+      "replacement": "\""
+    },
+    {
+      "codePoint": 8208,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8210,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8211,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8212,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8213,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8722,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8259,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8226,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8227,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 9702,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 183,
+      "replacement": "-"
+    },
+    {
+      "codePoint": 8260,
+      "replacement": "/"
+    },
+    {
+      "codePoint": 8725,
+      "replacement": "/"
+    },
+    {
+      "codePoint": 8232,
+      "replacement": "\n"
+    },
+    {
+      "codePoint": 8233,
+      "replacement": "\n\n"
+    },
+    {
+      "codePoint": 223,
+      "replacement": "ss"
+    },
+    {
+      "codePoint": 230,
+      "replacement": "ae"
+    },
+    {
+      "codePoint": 198,
+      "replacement": "AE"
+    },
+    {
+      "codePoint": 339,
+      "replacement": "oe"
+    },
+    {
+      "codePoint": 338,
+      "replacement": "OE"
+    },
+    {
+      "codePoint": 248,
+      "replacement": "o"
+    },
+    {
+      "codePoint": 216,
+      "replacement": "O"
+    },
+    {
+      "codePoint": 322,
+      "replacement": "l"
+    },
+    {
+      "codePoint": 321,
+      "replacement": "L"
+    },
+    {
+      "codePoint": 273,
+      "replacement": "d"
+    },
+    {
+      "codePoint": 272,
+      "replacement": "D"
+    },
+    {
+      "codePoint": 240,
+      "replacement": "d"
+    },
+    {
+      "codePoint": 208,
+      "replacement": "D"
+    },
+    {
+      "codePoint": 254,
+      "replacement": "th"
+    },
+    {
+      "codePoint": 222,
+      "replacement": "Th"
+    },
+    {
+      "codePoint": 305,
+      "replacement": "i"
+    },
+    {
+      "codePoint": 169,
+      "replacement": "(c)"
+    },
+    {
+      "codePoint": 174,
+      "replacement": "(R)"
+    },
+    {
+      "codePoint": 8364,
+      "replacement": "EUR"
+    },
+    {
+      "codePoint": 163,
+      "replacement": "GBP"
+    },
+    {
+      "codePoint": 165,
+      "replacement": "JPY"
+    },
+    {
+      "codePoint": 162,
+      "replacement": "c"
+    },
+    {
+      "codePoint": 176,
+      "replacement": "deg"
+    },
+    {
+      "codePoint": 215,
+      "replacement": "x"
+    },
+    {
+      "codePoint": 247,
+      "replacement": "/"
+    },
+    {
+      "codePoint": 177,
+      "replacement": "+/-"
+    }
   ]
 }

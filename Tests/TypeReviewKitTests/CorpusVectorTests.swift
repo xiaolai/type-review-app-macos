@@ -34,11 +34,16 @@ final class CorpusVectorTests: XCTestCase {
             let id: String
             let text: String
         }
+        struct FoldEntry: Decodable {
+            let codePoint: Int
+            let replacement: String
+        }
         let sanitize: [Sanitize]
         let lengthScore: [Score]
         let picks: [Pick]
         let quoteCount: Int
         let firstQuotes: [Quote]
+        let asciiFoldTable: [FoldEntry]
     }
 
     private func vector() throws -> Vector {
@@ -53,6 +58,28 @@ final class CorpusVectorTests: XCTestCase {
             XCTAssertEqual(result.text, testCase.text, testCase.name)
             XCTAssertEqual(result.droppedChars, testCase.droppedChars, "dropped — \(testCase.name)")
             XCTAssertEqual(result.truncated, testCase.truncated, "truncated — \(testCase.name)")
+        }
+    }
+
+    /// The fold table itself, entry for entry and in order.
+    ///
+    /// The sanitize case "every fold table entry" cannot do this, though both
+    /// tables' comments said it did. Its input is the table as it stood when the
+    /// vector was generated, so an entry added to either side afterwards is in
+    /// no input and fails nothing. The website's table is in the vector, and
+    /// this one has to equal it.
+    func testTheFoldTableIsTheWebsites() throws {
+        let website = try vector().asciiFoldTable
+        let here = Set(asciiFoldTable.map { Int($0.0) })
+        let there = Set(website.map(\.codePoint))
+        XCTAssertEqual(here.subtracting(there).sorted(), [], "code points only in Sanitize.swift")
+        XCTAssertEqual(there.subtracting(here).sorted(), [], "code points only in the website's sanitize.ts")
+        XCTAssertEqual(asciiFoldTable.count, website.count, "the tables differ in length")
+        for (index, entry) in asciiFoldTable.enumerated() where index < website.count {
+            XCTAssertEqual(Int(entry.0), website[index].codePoint, "entry \(index) is a different code point")
+            XCTAssertEqual(
+                Array(entry.1.utf16), Array(website[index].replacement.utf16),
+                "entry \(index), U+\(String(entry.0, radix: 16, uppercase: true)), folds differently")
         }
     }
 

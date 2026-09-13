@@ -49,8 +49,12 @@ final class EnglishTextTests: XCTestCase {
                 continue
             }
             let character = String(scalar)
+            // As UTF-16, not as `String`. Swift's `==` is canonical equivalence,
+            // under which a decomposed é equals a composed one, so an entry for a
+            // character that decomposes passed this check while being exactly
+            // the dead entry it exists to catch.
             XCTAssertEqual(
-                character.decomposedStringWithCompatibilityMapping, character,
+                Array(character.decomposedStringWithCompatibilityMapping.utf16), Array(character.utf16),
                 "\(hex(UInt32(point))) decomposes, so its fold entry can never be reached")
             XCTAssertTrue(isASCII(replacement), "\(hex(UInt32(point))) folds to non-ASCII")
         }
@@ -64,17 +68,50 @@ final class EnglishTextTests: XCTestCase {
         }
     }
 
+    /// The quotes as the file holds them, before cleaning has touched them.
+    private func rawQuotes() throws -> [RawStaticEntry] {
+        struct QuotesFile: Decodable { let entries: [RawStaticEntry] }
+        let url = try XCTUnwrap(
+            resourceBundle.url(forResource: "Resources/quotes", withExtension: "json"),
+            "Resources/quotes.json is not in the bundle")
+        let entries = try JSONDecoder().decode(QuotesFile.self, from: Data(contentsOf: url)).entries
+        XCTAssertGreaterThan(entries.count, 100, "quotes.json looks truncated")
+        return entries
+    }
+
     /// The check the ASCII rule cannot make. Uses the same recogniser the app
     /// picks a speech voice with, so a quote that fails here is also one that
     /// would have been read aloud in the wrong language.
-    func testEveryBundledQuoteIsEnglish() {
+    ///
+    /// On the text as written, not as cleaned. Cleaning is what hides a wrong
+    /// language: it removes Cyrillic, Greek and Chinese outright, so a Russian
+    /// quote became an empty passage that loading then dropped unseen, and a
+    /// quote half in Chinese was judged on its English half.
+    func testEveryBundledQuoteIsEnglishAsWritten() throws {
         let recognizer = NLLanguageRecognizer()
-        for entry in BundledCorpus.quotes.entries {
+        for entry in try rawQuotes() {
             recognizer.reset()
             recognizer.processString(entry.text)
             XCTAssertEqual(
                 recognizer.dominantLanguage, .english,
                 "\(entry.id) reads as \(recognizer.dominantLanguage?.rawValue ?? "unknown"): \(entry.text)")
+        }
+    }
+
+    /// Every quote in the file is served, and cleaning took nothing from any of
+    /// them. Cleaning is a net for pasted text, not what makes this corpus
+    /// English: a quote it has to cut, or cuts away entirely, should not be in
+    /// the file, and one cut to nothing used to vanish at load along with every
+    /// check that looked at loaded quotes.
+    func testNoBundledQuoteLosesACharacterToCleaning() throws {
+        let raw = try rawQuotes()
+        XCTAssertEqual(
+            BundledCorpus.quotes.entries.count, raw.count,
+            "quotes.json holds \(raw.count) quotes and \(BundledCorpus.quotes.entries.count) were loaded")
+        for entry in raw {
+            let cleaned = sanitize(entry.text)
+            XCTAssertEqual(
+                cleaned.droppedChars, 0, "\(entry.id) loses \(cleaned.droppedChars) characters to cleaning")
         }
     }
 }

@@ -602,8 +602,11 @@ turns an ellipsis into dots and a non-breaking space into a space, then
 `asciiFoldTable` for what decomposition leaves whole — typographic quotes and
 dashes, letters such as ß and œ, and a few common symbols. Whatever still has no
 ASCII form is dropped and counted, and the Library says how many. The website's
-`sanitize.ts` does the same from the same table, and a corpus vector runs every
-table entry through both, so a line added on one side only fails the suite.
+`sanitize.ts` does the same from the same table. The corpus vector carries the
+website's table, and `CorpusVectorTests` requires the Swift one to equal it entry
+for entry. This used to say that a vector case running every entry through both
+caught a line added on one side, and it could not: that case's input is the
+table as it stood when the vector was generated, so a later line is in no input.
 
 The corpus is English only. Twenty-one French and Spanish quotes were removed
 from both repositories in September 2026, and seven of them were pure ASCII —
