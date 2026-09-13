@@ -32,8 +32,8 @@ final class MarkdownVectorTests: XCTestCase {
         // A `.txt` file is prose already. Running the markdown rules over it
         // would eat asterisks and underscores the author meant literally.
         let raw = "a *literal* asterisk\u{0000} and  spaces"
-        XCTAssertEqual(parseLibraryText(raw, kind: .txt), "a *literal* asterisk and spaces")
-        XCTAssertEqual(parseLibraryText(raw, kind: .md), "a literal asterisk and spaces")
+        XCTAssertEqual(parseLibraryText(raw, kind: .txt).text, "a *literal* asterisk and spaces")
+        XCTAssertEqual(parseLibraryText(raw, kind: .md).text, "a literal asterisk and spaces")
     }
 
     func testFileKindComesFromTheExtension() {

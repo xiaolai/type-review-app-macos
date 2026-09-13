@@ -555,7 +555,7 @@ ramp cannot say both.
 
 ## The corpus
 
-The 189 curated quotes and the code snippets ship inside the Kit as resources —
+The 168 curated quotes and the code snippets ship inside the Kit as resources —
 domain data, not app chrome, and the same bytes the website serves. `⌘4`–`⌘8`
 switch source: Auto, Quotes, Code, Library, Generated.
 
@@ -568,6 +568,21 @@ The generators remain the fallback and always will be. A six-letter lesson has
 no real sentence available, and a timed run needs more text than any quote
 holds — so "no passage" is never an outcome the app can reach.
 
+The practice text is English and typeable on an English keyboard, and both
+halves are enforced rather than curated. `sanitize` folds everything into ASCII:
+compatibility decomposition first, which takes accents off their letters and
+turns an ellipsis into dots and a non-breaking space into a space, then
+`asciiFoldTable` for what decomposition leaves whole — typographic quotes and
+dashes, letters such as ß and œ, and a few common symbols. Whatever still has no
+ASCII form is dropped and counted, and the Library says how many. The website's
+`sanitize.ts` does the same from the same table, and a corpus vector runs every
+table entry through both, so a line added on one side only fails the suite.
+
+The corpus is English only. Twenty-one French and Spanish quotes were removed
+from both repositories in September 2026, and seven of them were pure ASCII —
+"Il faut cultiver notre jardin." — which is why `EnglishTextTests` checks each
+quote with `NLLanguageRecognizer` rather than trusting the ASCII rule to catch a
+language it was never about.
 ## What a view test cannot see
 
 The header of live numbers — wpm, accuracy, mode — was invisible from the day

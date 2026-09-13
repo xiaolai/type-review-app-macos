@@ -49,6 +49,84 @@
       "text": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
       "droppedChars": 0,
       "truncated": true
+    },
+    {
+      "name": "folds accents off their letters",
+      "input": "café naïve résumé Zoë",
+      "text": "cafe naive resume Zoe",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "folds a decomposed accent the same way",
+      "input": "cafe\u0301",
+      "text": "cafe",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "typographic quotes become the keys they stand for",
+      "input": "“Don’t,” she said ‘softly’.",
+      "text": "\"Don't,\" she said 'softly'.",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "dashes keep their length and an ellipsis becomes dots",
+      "input": "Wait—really… yes – no",
+      "text": "Wait-really... yes - no",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "non-breaking and typographic spaces become spaces",
+      "input": "a\u00a0b\u2009c\u202fd",
+      "text": "a b c d",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "letters with no decomposition are spelled out",
+      "input": "Straße œuvre æsthetic Łódź",
+      "text": "Strasse oeuvre aesthetic Lodz",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "common symbols are spelled out",
+      "input": "© 2026 ™ €5 ½ ±20°",
+      "text": "(c) 2026 TM EUR5 1/2 +/-20deg",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "other scripts are dropped and counted",
+      "input": "hello 中文 привет world",
+      "text": "hello world",
+      "droppedChars": 8,
+      "truncated": false
+    },
+    {
+      "name": "line and paragraph separators",
+      "input": "one\u2028two\u2029three",
+      "text": "one two\n\nthree",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "folding applies with layout preserved",
+      "input": "print(“hi”)\n    x = 1",
+      "preserveLayout": true,
+      "text": "print(\"hi\")\n    x = 1",
+      "droppedChars": 0,
+      "truncated": false
+    },
+    {
+      "name": "every fold table entry",
+      "input": "‘ ’ ‚ ‛ ′ ‵ ‹ › “ ” „ ‟ « » ‐ ‒ – — ― − ⁃ • ‣ ◦ · ⁄ ∕ \u2028 \u2029 ß æ Æ œ Œ ø Ø ł Ł đ Đ ð Ð þ Þ ı © ® € £ ¥ ¢ ° × ÷ ±",
+      "text": "' ' ' ' ' ' ' ' \" \" \" \" \" \" - - - - - - - - - - - / /\n\nss ae AE oe OE o O l L d D d D th Th i (c) (R) EUR GBP JPY c deg x / +/-",
+      "droppedChars": 0,
+      "truncated": false
     }
   ],
   "lengthScore": [
@@ -115,32 +193,32 @@
     {
       "seed": 42,
       "wantedChars": 80,
-      "id": "q-epictetus-misfortune",
-      "length": 106
+      "id": "q-wilde-society",
+      "length": 67
     },
     {
       "seed": 42,
       "wantedChars": 200,
-      "id": "q-art-marcus-meditations",
-      "length": 215
+      "id": "q-art-melville-moby-dick",
+      "length": 226
     },
     {
       "seed": 42,
       "wantedChars": 400,
-      "id": "q-art-darwin-origin",
-      "length": 286
+      "id": "q-art-marcus-meditations",
+      "length": 215
     },
     {
       "seed": 99,
       "wantedChars": 80,
-      "id": "q-feynman-know",
-      "length": 91
+      "id": "q-einstein-insanity",
+      "length": 97
     },
     {
       "seed": 99,
       "wantedChars": 200,
-      "id": "q-pike-rule3",
-      "length": 66
+      "id": "q-leguin-truth",
+      "length": 107
     },
     {
       "seed": 99,
@@ -149,7 +227,7 @@
       "length": 250
     }
   ],
-  "quoteCount": 189,
+  "quoteCount": 168,
   "firstQuotes": [
     {
       "id": "q-twain-travel",

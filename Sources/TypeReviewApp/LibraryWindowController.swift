@@ -20,12 +20,17 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
 
     /// What sanitising did to a passage, when it did anything worth saying.
     private static func note(for result: SanitizeResult) -> String {
+        note(truncated: result.truncated, dropped: result.droppedChars)
+    }
+
+    /// The same note for a batch of files, summed over the ones that were added.
+    private static func note(truncated: Bool, dropped: Int) -> String {
         var parts: [String] = []
         // `maxPassageChars`, which is what `sanitize` actually enforces.
         // `maxUserPassageLength` is the *file* read cap and is ten times
         // larger, so the note used to name a limit nothing had applied.
-        if result.truncated { parts.append("truncated to the \(maxPassageChars)-character cap") }
-        if result.droppedChars > 0 { parts.append("\(result.droppedChars) unusable characters removed") }
+        if truncated { parts.append("truncated to the \(maxPassageChars)-character cap") }
+        if dropped > 0 { parts.append("\(dropped) unusable characters removed") }
         return parts.isEmpty ? "" : " (" + parts.joined(separator: ", ") + ")"
     }
     /// Held so its enabled state can follow the selection, the way the Remove
@@ -218,6 +223,10 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         let title: String
         let text: String?
         let failure: String?
+        /// What cleaning removed and whether it hit the cap. Carried out of the
+        /// read so the status line can say so, the way pasting always has.
+        var dropped = 0
+        var truncated = false
     }
 
     private nonisolated static func read(_ urls: [URL]) async -> [Ingested] {
@@ -257,8 +266,10 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
                             name: name, title: title, text: nil,
                             failure: "\(name): not readable as UTF-8")
                     }
-                    let text = parseLibraryText(raw, kind: LibraryFileKind(filename: name))
-                    return Ingested(name: name, title: title, text: text, failure: nil)
+                    let cleaned = parseLibraryText(raw, kind: LibraryFileKind(filename: name))
+                    return Ingested(
+                        name: name, title: title, text: cleaned.text, failure: nil,
+                        dropped: cleaned.droppedChars, truncated: cleaned.truncated)
                 } catch {
                     // The actual reason. `try?` reported "not readable as
                     // UTF-8" for a permission failure and for a file that had
@@ -274,6 +285,8 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
     /// Adds what was read. On the main actor, because the store is.
     private func install(_ parsed: [Ingested]) {
         var added = 0
+        var dropped = 0
+        var truncated = false
         var failures: [String] = []
         for item in parsed {
             if let failure = item.failure {
@@ -284,6 +297,8 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             do {
                 try store.add(title: item.title, text: text)
                 added += 1
+                dropped += item.dropped
+                truncated = truncated || item.truncated
             } catch UserPassageError.empty {
                 failures.append("\(item.name): no typeable text left after cleaning")
             } catch UserPassageError.full {
@@ -298,7 +313,8 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
             // Named rather than counted: "2 files failed" is not actionable.
             statusLabel.stringValue = failures.joined(separator: " · ")
         } else if added > 0 {
-            statusLabel.stringValue = "added \(added) · \(store.passages.count) in library"
+            statusLabel.stringValue =
+                "added \(added)\(Self.note(truncated: truncated, dropped: dropped)) · \(store.passages.count) in library"
         }
     }
 

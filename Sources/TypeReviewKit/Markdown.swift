@@ -12,7 +12,7 @@ import Foundation
 /// for an italic. Getting the order wrong produces output that looks fine and
 /// is quietly missing or inventing words, which is why the vectors cover each
 /// rule and the interactions between them.
-public func parseMarkdown(_ input: String) -> String {
+func stripMarkdown(_ input: String) -> String {
     var text = input
 
     // Fenced code: dropped whole. Typing a code fence means typing its
@@ -40,7 +40,13 @@ public func parseMarkdown(_ input: String) -> String {
     text = replace(text, pattern: "`+([^`]+)`+", with: "$1")
     text = replace(text, pattern: "<[^>]+>", with: "")
 
-    return sanitize(text).text
+    return text
+}
+
+/// `stripMarkdown`, then cleaned for typing. The function the Markdown vectors
+/// compare with the website's `parseMarkdown`.
+public func parseMarkdown(_ input: String) -> String {
+    sanitize(stripMarkdown(input)).text
 }
 
 private func replace(_ input: String, pattern: String, with template: String) -> String {
@@ -64,10 +70,16 @@ public enum LibraryFileKind: String, Sendable {
     }
 }
 
-/// Turns an uploaded file's contents into practice text.
-public func parseLibraryText(_ raw: String, kind: LibraryFileKind) -> String {
+/// Turns an uploaded file's contents into practice text, and says what cleaning
+/// did to it.
+///
+/// A result rather than a string. Returning only the text threw away the count
+/// of characters cleaning removed, so a file of Chinese imported as a shorter
+/// passage with nothing to say why. The Markdown is stripped first and cleaned
+/// exactly once here, which is what makes the count the real one.
+public func parseLibraryText(_ raw: String, kind: LibraryFileKind) -> SanitizeResult {
     switch kind {
-    case .md: return parseMarkdown(raw)
-    case .txt: return sanitize(raw).text
+    case .md: return sanitize(stripMarkdown(raw))
+    case .txt: return sanitize(raw)
     }
 }
