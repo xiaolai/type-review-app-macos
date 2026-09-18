@@ -99,14 +99,6 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         didSet { if showsWhitespace != oldValue { needsDisplay = true } }
     }
 
-    /// Bar and underline carets. Two points reads as a caret at this size; one
-    /// disappears against the text, three reads as a rule.
-    private static let caretThickness: CGFloat = 2
-    /// Air between the descender line and the underline caret. Without it the
-    /// tail of a `y` or a `g` lands exactly on the bar, which is the same
-    /// collision that moving it off the baseline was meant to fix.
-    private static let caretGap: CGFloat = 1
-
     private var framesetter: CTFramesetter?
     private var textFrame: CTFrame?
     /// The bounds the current frame was laid out against.
@@ -423,11 +415,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
             // A block caret is a highlight, so it belongs under the glyph it
             // marks. A bar or an underline sits beside or below one and can be
             // drawn over the top.
-            if caretStyle == .block {
+            if PassageInk.caretGoesUnderGlyphs(caretStyle) {
                 drawCaretIfNeeded(line: line, at: origin, in: context)
             }
             drawColoured(line: line, at: origin, in: context)
-            if caretStyle != .block {
+            if !PassageInk.caretGoesUnderGlyphs(caretStyle) {
                 drawCaretIfNeeded(line: line, at: origin, in: context)
             }
             if showsWhitespace {
@@ -621,7 +613,6 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         CTLineGetTypographicBounds(line, &ascent, &descent, nil)
-        context.setFillColor(Theme.incorrectSpace.cgColor)
         for index in range.location..<(range.location + range.length) {
             guard index < units.count, index < statuses.count else { break }
             guard units[index] == 0x20, statuses[index] == .incorrect else { continue }
@@ -629,8 +620,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
                 x: origin.x + CTLineGetOffsetForStringIndex(line, index, nil),
                 y: origin.y - descent, width: advance(on: line, at: index),
                 height: ascent + descent)
-            context.addPath(CGPath(roundedRect: cell, cornerWidth: 2, cornerHeight: 2, transform: nil))
-            context.fillPath()
+            PassageInk.drawIncorrectSpace(cell: cell, in: context)
         }
     }
 
@@ -651,37 +641,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         CTLineGetTypographicBounds(line, &ascent, &descent, nil)
-        let x = origin.x + offset
-        let bottom = origin.y - descent
-        let height = ascent + descent
-
-        switch caretStyle {
-        case .vertical:
-            context.setFillColor(Theme.caret.cgColor)
-            context.fill(
-                CGRect(
-                    x: x - 1, y: bottom, width: Self.caretThickness, height: height))
-        case .block:
-            // Translucent, and drawn under the glyph rather than over it. A
-            // solid block would have to invert the character to keep it
-            // readable, and an inverted glyph in a passage where colour
-            // already means correct-or-wrong would be one signal too many.
-            context.setFillColor(Theme.caret.withAlphaComponent(0.3).cgColor)
-            context.fill(CGRect(x: x, y: bottom, width: advance(on: line, at: cursor), height: height))
-        case .horizontal:
-            // Below the descender, not on the baseline. Sitting on the
-            // baseline put the bar straight through the tail of `g`, `y` and
-            // `p` — the font descends 4.6 points at this size and the bar was
-            // 2 — so the caret and the letter it marks were drawn on top of
-            // each other. Clearing the descender costs a little of the
-            // "attached to this character" reading and buys a caret that can
-            // always be seen.
-            context.setFillColor(Theme.caret.cgColor)
-            context.fill(
-                CGRect(
-                    x: x, y: origin.y - descent - Self.caretGap - Self.caretThickness,
-                    width: advance(on: line, at: cursor), height: Self.caretThickness))
-        }
+        // The shapes themselves are `PassageInk`'s, shared with Play.
+        let cell = CGRect(
+            x: origin.x + offset, y: origin.y - descent, width: advance(on: line, at: cursor),
+            height: ascent + descent)
+        PassageInk.drawCaret(caretStyle, cell: cell, in: context)
     }
 
     /// The width of the character at `index`, from the line's own offsets.
@@ -744,7 +708,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
             }
             let x = origin.x + CTLineGetOffsetForStringIndex(line, index, nil)
             let mistyped = index < statuses.count && statuses[index] == .incorrect
-            draw(
+            PassageInk.drawMark(
                 mark, at: CGPoint(x: x, y: origin.y), width: advance(on: line, at: index),
                 font: font, colour: mistyped ? Theme.incorrect : colour, in: context)
         }
@@ -760,42 +724,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         // not text, and the marks are for text.
         if endsWithHardBreak {
             let trailing = CTLineGetOffsetForStringIndex(line, range.location + range.length, nil)
-            draw(
+            PassageInk.drawMark(
                 "¶", at: CGPoint(x: origin.x + trailing, y: origin.y),
                 width: advance(on: line, at: range.location + range.length - 1),
                 font: font, colour: colour, in: context)
         }
-    }
-
-    /// One mark, centred in the cell it stands for.
-    ///
-    /// Drawn with CoreText, in the flipped space the glyphs are already being
-    /// drawn in. The obvious alternative — `NSAttributedString.draw(at:)` —
-    /// renders through `NSGraphicsContext`, and mixing that with the raw
-    /// `CGContext` transform this method sits inside does not survive a
-    /// save/restore: every line of the passage *after* the first mark came out
-    /// upside down and mirrored. Staying in CoreText means no second
-    /// coordinate system to reconcile.
-    private func draw(
-        _ mark: String, at point: CGPoint, width: CGFloat, font: NSFont, colour: NSColor,
-        in context: CGContext
-    ) {
-        let line = CTLineCreateWithAttributedString(
-            NSAttributedString(
-                string: mark, attributes: [.font: font, .foregroundColor: colour]))
-        let markWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
-        context.saveGState()
-        context.textPosition = CGPoint(x: point.x + (width - markWidth) / 2, y: point.y)
-        CTLineDraw(line, context)
-        context.restoreGState()
-        // `CTLineDraw` leaves the text matrix as it found it useful, not as it
-        // found it. `draw(_:)` sets the identity matrix once for the whole
-        // frame and `CTFontDrawGlyphs` relies on it — so without this the
-        // glyphs on every line after the first mark were transformed off
-        // screen and the passage appeared to lose its text. Restoring the
-        // graphics state alone does not cover it; the text matrix is not part
-        // of what `saveGState` saves.
-        context.textMatrix = .identity
     }
 
     // MARK: - Input
