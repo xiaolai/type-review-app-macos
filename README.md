@@ -19,6 +19,10 @@ account, no server, no telemetry.
   a heatmap of thirty keys into "the right pinky is the slow one".
 - **An on-screen keyboard**, optional, coloured by how well you know each key
   and lit as you press them.
+- **Play** — letters, words or sentences fall, and typing one makes it burst.
+  A second screen of the same window, switched from the toolbar: nothing is
+  lost under the default rules, nothing is recorded to your statistics, and
+  Letters drops the letters your lessons have unlocked.
 - **Keystroke sound, optionally everywhere.** Seven packs — three synthesised
   mechanical profiles, a real typewriter recording, a muted one, a laptop one,
   and off. The synthesised ones sound the key coming back up as well as going

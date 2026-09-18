@@ -410,6 +410,26 @@ Everything else builds with any recent toolchain. Only the icon needs the newer
 one — but `Resources/AppIcon.icon` is compiled on every build, so in practice
 the requirement is unconditional.
 
+### Where `swift build` put the app, asked
+
+Swift 6.4, which ships with Xcode 27, made a new build system SwiftPM's default,
+and it broke the bundle recipe twice without failing it.
+
+It writes under `.build/out/Products` and leaves `.build/release` pointing at
+whatever the previous build system last built. The recipe copied from
+`.build/$(CONFIG)`, so it bundled a binary and a corpus days old and printed
+success. Both are copied from `swift build --show-bin-path` now.
+
+It also hands clang only `--sysroot` when linking, which clang cannot read an
+SDK version from, so the binary recorded its deployment target, 14.0, as the
+SDK it was built with. macOS reads that record to decide how to draw an app:
+one claiming SDK 14 runs in compatibility mode, with a grey title bar and no
+glass on the toolbar. `LINK_SDK` passes the SDK to the linker driver as
+`-isysroot`, and the recipe reads the record back with `vtool` and stops below
+26. The corpus check accepts the new build system's `Contents/Resources` bundle
+as well as the old flat one — `Bundle` reads both, and a check that looked in
+one place would have failed every build.
+
 ### Two artworks, one set of numbers
 
 `Mark.geometry` is the single definition. `RasterWriter` draws it with
@@ -679,6 +699,22 @@ passage and never appears or disappears. A clipping band inside the window
 eats the window's own height. A drawer is, by definition, outside its parent.
 (`NSDrawer`, the class that owns the name, has been deprecated since 10.13.)
 
+### One ground
+
+The practice screen draws its text on `textBackgroundColor`, and it used to
+leave the window around the text at its default background. In Light Mode the
+two are the same white. In Dark Mode they are not: macOS tints a window's
+default background with the wallpaper and never tints the text background, so
+the title bar, margins and status strip came out bluish around a neutral
+rectangle — #272a2f around #282828, measured.
+
+`GroundedView`, the root of both screens, sets the window's background to the
+text's and sets it again when the appearance changes. It has to be resolved
+first. Handed `textBackgroundColor` itself, the window still draws the tinted
+material exactly as if nothing had been set; handed the colour resolved for the
+current appearance, it paints it. The self-test checks the window's background
+is a resolved colour equal to the text's, in both appearances.
+
 ### Two kinds of setting
 
 Window shape and drawer speed live in `UserDefaults`, in their own Settings
@@ -688,6 +724,61 @@ added there would either break those vectors or have to be invented on both
 sides for something only a Mac window has. Both stores clamp on read as well
 as write, so a value typed straight into `defaults write` is no more able to
 produce a four-character window than a control is.
+
+## Play
+
+Things fall — letters, words or sentences — and typing one makes it burst. It
+is the practice screen with gravity: the same ground, the same typing font and
+status colours, the user's own caret, the same whitespace marks, the same status
+bar in the same place, the same keyboard drawer and the same sounds. Only motion
+is new, and the effects take their colour from the caret rather than adding one.
+
+**A screen, not a window.** Statistics has a window because it is worth seeing
+beside practice. Practice and Play are the reverse: one keyboard between them,
+the same drawer, the same window shape, never wanted side by side. So they are
+the two screens of the main window, switched from the middle of the toolbar, and
+`MainScreenController` keeps both alive — the passage keeps its place and a game
+pauses. Window tabs were the other way to put them in one frame, and are the
+wrong one: tabs are for documents, and each could be closed, dragged out or
+multiplied. The two leading toolbar items belong to the screen showing and swap
+with it; the three trailing ones open windows from either screen and never move.
+The shortcuts are ⌥⌘1 and ⌥⌘2 because every free ⌘-digit is taken — ⌘2 and ⌘3
+open windows and ⌘4 to ⌘8 pick a source.
+
+**The rules are in the Kit.** `FallingGame` has no AppKit and no clock: time
+arrives through `update(dt:)`, keys through `type(_:)`, and every random choice
+draws from a seeded `Mulberry32`, so `FallingGameTests` replay games exactly.
+Gentle rules are the default — something that reaches the floor waits there,
+nothing new falls until it is typed, and the pace eases off. Keys are matched
+without case, unlike practice, because a child with Caps Lock on would otherwise
+miss every key and not know why.
+
+**It never writes the profile.** A falling game's keystroke timings include
+finding the target and waiting for it, and fed to the planner they would read as
+slow keys; the profile format is also pinned to the website's. Letters mode reads
+the lesson plan through `lessonPlan(for:)` — the function `Session` plans from —
+so it drops the letters practice has unlocked, and the keyboard dims the rest as
+it does in a lesson. The self-test plays a game after practice has recorded its
+run and requires the profile on disk to be unchanged.
+
+**Drawn the way passage text is drawn.** `PassageInk` holds the caret shapes,
+the mistyped-space cell and the whitespace marks, moved out of `TypingView` so
+both screens draw through one copy. A falling item is rendered into an image
+once per keystroke and moved by a layer every frame, which is the cheap way to
+move text that only changes when a key is pressed. With Reduce Motion on, a
+finished word fades where it stands instead of flying apart.
+
+**Keys arrive as they do on the practice screen**: key codes from `keyDown` for
+the highlight and the click, committed characters through the input context,
+Latin keyboards only when that is set, one error tone per commit. `Playfield`
+follows `TypingView`'s rules without sharing its code, which is the one
+duplication left; the self-test types through `insertText` on both.
+
+The words and sentences are held to the corpus's rules by `PlayTextTests`. Every
+sentence must read as English on its own: judged together, all of Play's text
+with three German sentences mixed in still reads as English at 0.998, while one
+sentence at a time names French, Spanish, German, Italian and Dutch correctly.
+"the cat sat on the mat." read as Turkish and was rephrased.
 
 ## The library
 
