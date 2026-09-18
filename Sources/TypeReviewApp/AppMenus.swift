@@ -120,6 +120,15 @@ extension AppDelegate {
     /// offered to "show or hide" without saying which. One function, called
     /// from the three places that change the drawer, is what keeps them from
     /// disagreeing.
+    /// The current screen's checkmark, and the name of ⌘N and its menu.
+    func markScreenMenus(_ screen: MainScreen) {
+        for (candidate, item) in screenMenuItems {
+            item.state = candidate == screen ? .on : .off
+        }
+        screenCommandsMenu?.title = screen == .play ? "Play" : "Practice"
+        newTextMenuItem?.title = screen == .play ? "New Game" : "New Text"
+    }
+
     func markKeyboardMenus(_ visible: Bool) {
         keyboardMenuItem?.state = visible ? .on : .off
         statusKeyboardItem?.state = visible ? .on : .off
@@ -161,6 +170,19 @@ extension AppDelegate {
 
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
+        // The two screens first, then the windows. ⌥⌘ because every free
+        // ⌘-digit is taken: ⌘2 and ⌘3 open Statistics and Library, and ⌘4 to ⌘8
+        // pick a source.
+        for (screen, title, action, key) in [
+            (MainScreen.practice, "Practice", #selector(showPractice(_:)), "1"),
+            (MainScreen.play, "Play", #selector(showPlay(_:)), "2"),
+        ] {
+            let item = viewMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.target = self
+            screenMenuItems[screen] = item
+        }
+        viewMenu.addItem(.separator())
         let statsItem = viewMenu.addItem(
             withTitle: "Statistics", action: #selector(showStats(_:)), keyEquivalent: "2")
         statsItem.target = self
@@ -205,6 +227,9 @@ extension AppDelegate {
         newText.target = self
         practiceItem.submenu = practiceMenu
         root.addItem(practiceItem)
+        // Renamed with the screen: Practice ▸ New Text, or Play ▸ New Game.
+        screenCommandsMenu = practiceMenu
+        newTextMenuItem = newText
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")

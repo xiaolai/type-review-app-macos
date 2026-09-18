@@ -173,6 +173,36 @@ enum AppPreferences {
     /// the second person.
     static let showKeyboard = Flag(key: "ShowKeyboard", default: true)
 
+    /// Which screen the main window showed last, so it opens where it was
+    /// left. A check always starts on Practice, whatever this says.
+    enum mainScreen {
+        static let key = "MainScreen"
+        static var value: MainScreen {
+            get { MainScreen(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .practice }
+            set {
+                UserDefaults.standard.set(newValue.rawValue, forKey: key)
+                AppPreferences.announce(key)
+            }
+        }
+    }
+
+    /// What Play drops: letters, words or sentences.
+    enum playMode {
+        static let key = "PlayMode"
+        static var value: PlayMode {
+            get { PlayMode(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .words }
+            set {
+                UserDefaults.standard.set(newValue.rawValue, forKey: key)
+                AppPreferences.announce(key)
+            }
+        }
+    }
+
+    /// Arcade rules — three lives — rather than the gentle ones, where
+    /// something reaching the floor waits there and nothing is lost. Gentle is
+    /// the default because the people Play is for are still finding the keys.
+    static let playArcade = Flag(key: "PlayArcade")
+
     /// What the practice grid counts.
     ///
     /// Characters by default. Sessions answers "did I show up", which the

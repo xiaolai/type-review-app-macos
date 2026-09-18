@@ -524,6 +524,16 @@ final class PracticeViewController: NSViewController {
         return stats
     }
 
+    /// The view that takes the keys when this screen is shown.
+    var focusView: NSView { typingView }
+
+    /// The lesson this profile's history calls for next, for Play: Letters
+    /// drops the letters practice has unlocked. Read, never written back —
+    /// see `FallingGame` for why a game's keystrokes stay out of the profile.
+    var nextLessonPlan: LessonPlan {
+        lessonPlan(for: session?.profile ?? Profile())
+    }
+
     /// Credits the passage's source when there is one to credit.
     private func attribution() -> String {
         guard let entry = entryBox.value, let attribution = entry.attribution else { return "" }

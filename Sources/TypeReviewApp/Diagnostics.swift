@@ -662,7 +662,17 @@ enum Diagnostics {
     /// The same discipline the web-view shell used, for the same reason: unit
     /// tests cover the engine exhaustively, and none of them can tell whether
     /// the app is wired to it.
-    static func runSelfTest(practice: PracticeViewController) {
+    /// A check that failed, and what it has to say.
+    struct CheckFailure: Error {
+        let message: String
+    }
+
+    /// `playCheck` runs Play once Practice has recorded its run — see
+    /// `checkPlay` — and answers nil if there is no Play screen to check.
+    static func runSelfTest(
+        practice: PracticeViewController,
+        playCheck: @escaping () -> Result<String, CheckFailure>?
+    ) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let store = try? ProfileFileStore.standard()
             let before: Int
@@ -1438,6 +1448,26 @@ enum Diagnostics {
                     print("  recorded head:    \(String(recorded.text.prefix(50)).debugDescription)")
                     exit(1)
                 }
+                // Play, after Practice has recorded its run, so the check can
+                // see that a whole game leaves that record alone.
+                let played: String
+                switch playCheck() {
+                case .success(let summary)?:
+                    played = summary
+                case .failure(let failure)?:
+                    print("SELFTEST FAIL: \(failure.message)")
+                    exit(1)
+                case nil:
+                    print("SELFTEST FAIL: there is no Play screen to check")
+                    exit(1)
+                }
+                guard case .ok(let afterPlay) = store.load(),
+                    afterPlay.results.count == profile.results.count,
+                    afterPlay.results.last?.index == profile.results.last?.index
+                else {
+                    print("SELFTEST FAIL: playing a game changed the profile on disk")
+                    exit(1)
+                }
                 // The status item's mark, before the summary. A template
                 // image is only ever read for its alpha, so one that draws
                 // nothing is not a faint icon — it is an empty menu-bar slot,
@@ -1480,7 +1510,7 @@ enum Diagnostics {
                 print(
                     "SELFTEST OK: typed \(typeable.count) chars — "
                         + "\(Int(metrics.netWpm)) wpm, \(Int(metrics.accuracy))% accuracy, "
-                        + "\(profile.results.count) run(s) on disk")
+                        + "\(profile.results.count) run(s) on disk; play: \(played)")
                 exit(0)
             }
         }

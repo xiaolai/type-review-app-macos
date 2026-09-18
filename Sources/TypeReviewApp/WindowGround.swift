@@ -27,7 +27,9 @@ final class GroundedView: NSView {
         ground()
     }
 
-    private func ground() {
+    /// Internal rather than private so `--selftest` can check it in both
+    /// appearances without waiting on one to change.
+    func ground() {
         guard let window else { return }
         var resolved = Theme.background
         window.effectiveAppearance.performAsCurrentDrawingAppearance {
