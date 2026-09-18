@@ -50,8 +50,10 @@ BIN_DIR = $(shell swift build -c $(CONFIG) --show-bin-path)
 # with. macOS decides how to draw an app from that record: one claiming SDK 14
 # gets compatibility mode — a grey title bar, no glass on the toolbar — and
 # nothing in the build fails. The bundle recipe asserts on the record.
+# Quoted, because an Xcode kept under a name with a space in it — "Xcode
+# Beta.app" — would otherwise reach swift build as two arguments.
 LINK_SDK = -Xswiftc -Xclang-linker -Xswiftc -isysroot \
-           -Xswiftc -Xclang-linker -Xswiftc $(shell xcrun --show-sdk-path)
+           -Xswiftc -Xclang-linker -Xswiftc "$(shell xcrun --show-sdk-path)"
 
 # A real identity, not ad-hoc, and the reason is Input Monitoring.
 #
