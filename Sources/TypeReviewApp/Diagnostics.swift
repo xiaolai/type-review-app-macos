@@ -657,16 +657,17 @@ enum Diagnostics {
         exit(0)
     }
 
-    /// Drives a full run through the real UI and reports what reached disk.
-    ///
-    /// The same discipline the web-view shell used, for the same reason: unit
-    /// tests cover the engine exhaustively, and none of them can tell whether
-    /// the app is wired to it.
     /// A check that failed, and what it has to say.
     struct CheckFailure: Error {
         let message: String
     }
 
+    /// Drives a full run through the real UI and reports what reached disk.
+    ///
+    /// The same discipline the web-view shell used, for the same reason: unit
+    /// tests cover the engine exhaustively, and none of them can tell whether
+    /// the app is wired to it.
+    ///
     /// `playCheck` runs Play once Practice has recorded its run — see
     /// `checkPlay` — and answers nil if there is no Play screen to check.
     static func runSelfTest(
@@ -1461,10 +1462,9 @@ enum Diagnostics {
                     print("SELFTEST FAIL: there is no Play screen to check")
                     exit(1)
                 }
-                guard case .ok(let afterPlay) = store.load(),
-                    afterPlay.results.count == profile.results.count,
-                    afterPlay.results.last?.index == profile.results.last?.index
-                else {
+                // The whole profile, not its length: a game that rewrote a
+                // setting, or a result in place, leaves the count alone.
+                guard case .ok(let afterPlay) = store.load(), afterPlay == profile else {
                     print("SELFTEST FAIL: playing a game changed the profile on disk")
                     exit(1)
                 }

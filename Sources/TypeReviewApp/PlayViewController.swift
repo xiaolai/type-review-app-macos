@@ -5,9 +5,10 @@ import TypeReviewKit
 ///
 /// The practice screen with gravity. The same ground, typing font, status
 /// colours, caret and whitespace marks, drawn through `PassageInk`; the
-/// practice screen's status bar, in the same place and set the same way; the
-/// same keyboard drawer, driven the same way; the same sounds, routed by the
-/// same switch in `AppDelegate`. Only motion is new.
+/// practice screen's status bar, built by the same `StatusBar`; the same keys,
+/// through the same `KeyInput`; the same keyboard drawer, driven the same way;
+/// the same sounds, routed by the same switch in `AppDelegate` and gated by
+/// the same `MistypeGate`. Only motion is new.
 ///
 /// The rules are `FallingGame`, in the Kit. This screen gives them time, keys
 /// and a place to be seen, and never touches the profile.
@@ -23,7 +24,9 @@ final class PlayViewController: NSViewController {
     private enum Hint {
         static let ready = "type to start · esc pauses"
         static let playing = "esc pauses · ⇥ new game"
-        static let paused = "paused · any key carries on"
+        // Typing, not any key: only a character reaches the game, so Esc,
+        // Return and the arrows leave it paused.
+        static let paused = "paused · type to carry on"
         static let over = "game over · ⏎ new game"
     }
 
@@ -39,8 +42,17 @@ final class PlayViewController: NSViewController {
     var onKeyStruck: ((UInt16) -> Void)?
     var onKeyReleased: ((UInt16) -> Void)?
     var onMistype: (() -> Void)?
-    /// The lesson practice would plan next. Letters drops its letters.
-    var planSource: () -> LessonPlan = { lessonPlan(for: Profile()) }
+    /// The lesson practice would plan next, or nil when practice has no
+    /// profile to plan from. Letters drops its letters.
+    var planSource: () -> LessonPlan? = { nil }
+    /// Keystroke clock for the error tone's guard. Injectable, as practice's
+    /// is, so the two screens' guards run on the same time.
+    var clock: () -> Double = { Date().timeIntervalSince1970 * 1000 }
+    /// Whether a wrong key asks for the error tone. The Mistype Sound setting,
+    /// applied by `applyTypingPreferences`; the self-test sets it directly, so
+    /// it can hear the tone's wiring whatever the user chose without writing
+    /// over their choice.
+    var soundsMistypes = true
 
     /// The view that takes the keys when this screen is shown.
     var focusView: NSView { playfield }
@@ -50,7 +62,14 @@ final class PlayViewController: NSViewController {
     private var art = PlayArt()
     private lazy var stage = PlayStage(world: playfield.world, art: art)
     private(set) lazy var game = makeGame()
-    private var plan = lessonPlan(for: Profile())
+    /// The lesson this game was planned from. What Letters drops, and what the
+    /// keyboard shows while it does.
+    private(set) var plan = PlayViewController.firstLesson
+
+    /// What Letters drops when practice has no lesson to offer — it could not
+    /// start, and says so on its own screen. The first lesson, which is where
+    /// a typist with no history begins anyway.
+    private static let firstLesson = lessonPlan(for: Profile())
 
     enum State { case ready, playing, paused, over }
     private(set) var state = State.ready
@@ -62,15 +81,20 @@ final class PlayViewController: NSViewController {
 
     private let speech = SpeechPlayer()
     private var speaksWords = false
-    private var soundsMistypes = true
-    private var soundedThisCommit = false
-    private var lastMistypeSoundMs: Double?
+    /// Moves on whenever what was queued to be said stops being wanted — a
+    /// new game, or leaving the screen — so a word queued for a game that is
+    /// gone is dropped rather than said over the next one.
+    private var speechEpoch = 0
+    private var mistypeGate = MistypeGate()
+    /// Held for the controller's life, which is the app's.
+    private var motionObserver: NSObjectProtocol?
 
     override func loadView() {
-        let root = GroundedView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
+        // A plain view: the window's ground belongs to `MainScreenController`.
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
         root.wantsLayer = true
-        styleReadouts()
-        let status = makeStatusBar()
+        let status = StatusBar.make(
+            readouts: [scoreLabel, streakLabel, livesLabel], mode: modeIcon, hint: hintLabel)
         for subview in [playfield, status] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
@@ -91,38 +115,10 @@ final class PlayViewController: NSViewController {
         view = root
     }
 
-    /// `PracticeViewController.styleReadouts`, for three readouts.
-    private func styleReadouts() {
-        for label in [scoreLabel, streakLabel, livesLabel] {
-            label.font = Theme.statFont
-            label.textColor = Theme.secondaryText
-        }
-        hintLabel.font = NSFont.systemFont(ofSize: 11)
-        hintLabel.textColor = Theme.secondaryText
-        modeIcon.contentTintColor = Theme.secondaryText
-        modeIcon.imageScaling = .scaleProportionallyDown
-        modeIcon.setContentHuggingPriority(.required, for: .horizontal)
-    }
-
-    /// `PracticeViewController.makeStatusBar`, with the game's readouts.
-    private func makeStatusBar() -> NSStackView {
-        let metrics = NSStackView(views: [scoreLabel, streakLabel, livesLabel, modeIcon])
-        metrics.spacing = 14
-        metrics.alignment = .centerY
-        let status = NSStackView(views: [metrics, hintLabel])
-        status.spacing = 16
-        status.alignment = .centerY
-        status.distribution = .fill
-        metrics.setContentCompressionResistancePriority(.required, for: .horizontal)
-        hintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        hintLabel.lineBreakMode = .byTruncatingTail
-        return status
-    }
-
     override func viewDidLoad() {
         super.viewDidLoad()
         playfield.onCharacter = { [weak self] character in self?.type(character) }
-        playfield.onCommitBegan = { [weak self] in self?.soundedThisCommit = false }
+        playfield.onCommitBegan = { [weak self] in self?.mistypeGate.beginCommit() }
         playfield.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
         playfield.onKeyStruck = { [weak self] code in self?.onKeyStruck?(code) }
         playfield.onKeyReleased = { [weak self] code in self?.onKeyReleased?(code) }
@@ -134,6 +130,23 @@ final class PlayViewController: NSViewController {
         playfield.onFocusLost = { [weak self] in self?.pause() }
         playfield.onFrame = { [weak self] dt in self?.advance(by: dt) }
         playfield.onDisplayChange = { [weak self] in self?.displayChanged() }
+        playfield.caretIndex = { [weak self] in self?.game.target?.typed ?? 0 }
+        playfield.caretRect = { [weak self] in
+            guard let self else { return nil }
+            return self.stage.caretRect(in: self.game)
+        }
+        playfield.onCompositionChanged = { [weak self] text in
+            guard let self else { return }
+            self.stage.showComposition(text, in: self.game)
+        }
+        // Reduce Motion can change while a game is on screen, and nothing else
+        // this screen hears about would carry it.
+        motionObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.displayChanged() }
+        }
         // The voice follows the language of what is spoken, as it does for a
         // passage; everything Play says is English.
         speech.setPassage(PlayText.sentences.joined(separator: " "))
@@ -151,28 +164,33 @@ final class PlayViewController: NSViewController {
         return game
     }
 
-    /// A fresh game, remembering the mode and rules it is given.
-    func newGame(mode: PlayMode? = nil, gentle: Bool? = nil) {
+    /// A fresh game in the mode and rules given, or the current ones.
+    ///
+    /// What it is given is remembered for the next launch unless `remember` is
+    /// false — the self-test's case, which must leave the user's choices as it
+    /// found them.
+    func newGame(mode: PlayMode? = nil, gentle: Bool? = nil, remember: Bool = true) {
         if let mode {
             self.mode = mode
-            AppPreferences.playMode.value = mode
+            if remember { AppPreferences.playMode.value = mode }
         }
         if let gentle {
             self.gentle = gentle
-            AppPreferences.playArcade.value = !gentle
+            if remember { AppPreferences.playArcade.value = !gentle }
         }
-        plan = planSource()
+        // Before the old game goes: a half-typed character belongs to it.
+        playfield.discardComposition()
+        silence()
+        plan = planSource() ?? Self.firstLesson
         stage.clear()
         game = makeGame()
         state = .ready
         stopFor = 0
-        lastMistypeSoundMs = nil
-        soundedThisCommit = false
+        mistypeGate.reset()
         keyboardIsStale = true
         modeIcon.image = Theme.symbol(
-            Self.symbol(for: self.mode), size: Theme.SymbolSize.statusBar,
-            description: Self.label(for: self.mode))
-        modeIcon.toolTip = Self.label(for: self.mode)
+            self.mode.symbol, size: Theme.SymbolSize.statusBar, description: self.mode.label)
+        modeIcon.toolTip = self.mode.label
         refreshStatus()
         pushKeyboard()
     }
@@ -182,6 +200,13 @@ final class PlayViewController: NSViewController {
         state = .paused
         refreshStatus()
         pushKeyboard()
+    }
+
+    /// The screen is going: the game waits, and nothing it queued is said over
+    /// the screen that replaces it.
+    func leave() {
+        pause()
+        silence()
     }
 
     /// One step of time. The display link calls this once a frame; the
@@ -195,11 +220,18 @@ final class PlayViewController: NSViewController {
         game.field = PlaySize(width: Double(playfield.bounds.width), height: Double(height))
         switch state {
         case .playing:
+            // A burst's stop takes only the time it has left, and the rest of
+            // the frame runs. Dropping the whole frame made every stop up to a
+            // frame longer than it says, and lost that time from the game.
+            var running = dt
             if stopFor > 0 {
-                stopFor -= dt
-            } else {
-                apply(game.update(dt: dt))
-                stage.step(dt, height: height)
+                let held = min(stopFor, dt)
+                stopFor -= held
+                running -= held
+            }
+            if stopFor <= 0 {
+                apply(game.update(dt: running))
+                stage.step(running, height: height)
             }
         case .over:
             stage.step(dt, height: height)
@@ -258,14 +290,10 @@ final class PlayViewController: NSViewController {
         }
     }
 
-    /// The practice screen's two guards, for the practice screen's reasons:
-    /// one tone per commit, and none faster than a held key would repeat.
+    /// The practice screen's gate, for the practice screen's reasons: one tone
+    /// per commit, and none faster than a held key would repeat.
     private func soundMistype() {
-        guard soundsMistypes, !soundedThisCommit else { return }
-        let now = Date().timeIntervalSince1970 * 1000
-        guard mistypeMaySound(lastSoundedMs: lastMistypeSoundMs, nowMs: now) else { return }
-        soundedThisCommit = true
-        lastMistypeSoundMs = now
+        guard soundsMistypes, mistypeGate.admit(nowMs: clock()) else { return }
         onMistype?()
     }
 
@@ -275,10 +303,17 @@ final class PlayViewController: NSViewController {
     /// measured what happens otherwise.
     private func speak(_ text: String) {
         guard speaksWords, !text.isEmpty else { return }
+        let epoch = speechEpoch
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.speaksWords else { return }
+            guard let self, self.speaksWords, self.speechEpoch == epoch else { return }
             self.speech.speak(word: text)
         }
+    }
+
+    /// Drops what is queued to be said and stops what is being said.
+    private func silence() {
+        speechEpoch += 1
+        speech.stop()
     }
 
     // MARK: - Preferences and display
@@ -296,7 +331,9 @@ final class PlayViewController: NSViewController {
     private func displayChanged() {
         art.caret = AppPreferences.caretStyle.value
         art.showsWhitespace = AppPreferences.showWhitespace.value
-        if let window = view.window {
+        // `viewIfLoaded`: preferences are applied before this screen is ever
+        // shown, and asking an unloaded controller for its view loads it.
+        if let window = viewIfLoaded?.window {
             art.scale = window.backingScaleFactor
             if let space = window.colorSpace?.cgColorSpace { art.colorSpace = space }
         }
@@ -334,27 +371,7 @@ final class PlayViewController: NSViewController {
         guard expected != lastExpected || keyboardIsStale else { return }
         lastExpected = expected
         keyboardIsStale = false
-        keyboard?.update(
-            stats: OrderedMap(), plan: mode == .letters ? plan : nil, expected: expected,
-            targetWpm: 35)
-    }
-
-    static func label(for mode: PlayMode) -> String {
-        switch mode {
-        case .letters: return "Letters"
-        case .words: return "Words"
-        case .sentences: return "Sentences"
-        }
-    }
-
-    /// The status bar's mark for a mode, as `target` and `stopwatch` are for
-    /// practice's two.
-    static func symbol(for mode: PlayMode) -> String {
-        switch mode {
-        case .letters: return "character"
-        case .words: return "textformat.abc"
-        case .sentences: return "text.alignleft"
-        }
+        keyboard?.showWithoutHeat(plan: mode == .letters ? plan : nil, expected: expected)
     }
 
     // MARK: - For the self-test
@@ -374,5 +391,23 @@ final class PlayViewController: NSViewController {
     /// Commits text through the input client, the path AppKit uses.
     func typeThroughInput(_ text: String) {
         playfield.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+
+    /// Starts a composition through the input client, as a dead key does.
+    func markThroughInput(_ text: String) {
+        playfield.setMarkedText(
+            text, selectedRange: NSRange(location: text.utf16.count, length: 0),
+            replacementRange: NSRange(location: NSNotFound, length: 0))
+    }
+
+    /// Whether the input client is holding a composition.
+    var hasComposition: Bool { playfield.hasMarkedText() }
+
+    /// Whether a composition is drawn on the field.
+    var showsComposition: Bool { stage.showsComposition }
+
+    /// Where an input method would put its candidate window, on screen.
+    func candidateRect() -> NSRect {
+        playfield.firstRect(forCharacterRange: playfield.markedRange(), actualRange: nil)
     }
 }

@@ -708,8 +708,9 @@ default background with the wallpaper and never tints the text background, so
 the title bar, margins and status strip came out bluish around a neutral
 rectangle — #272a2f around #282828, measured.
 
-`GroundedView`, the root of both screens, sets the window's background to the
-text's and sets it again when the appearance changes. It has to be resolved
+`GroundedView`, the main window's root — one per window, so the two screens
+inside it are plain views — sets the window's background to the text's and
+sets it again when the appearance changes. It has to be resolved
 first. Handed `textBackgroundColor` itself, the window still draws the tinted
 material exactly as if nothing had been set; handed the colour resolved for the
 current appearance, it paints it. The self-test checks the window's background
@@ -758,8 +759,11 @@ finding the target and waiting for it, and fed to the planner they would read as
 slow keys; the profile format is also pinned to the website's. Letters mode reads
 the lesson plan through `lessonPlan(for:)` — the function `Session` plans from —
 so it drops the letters practice has unlocked, and the keyboard dims the rest as
-it does in a lesson. The self-test plays a game after practice has recorded its
-run and requires the profile on disk to be unchanged.
+it does in a lesson. That plan is only right once practice has read the profile,
+which it does when its view loads — so practice loads first at every launch, and
+a screen never shown is never loaded just to be taken away. The self-test plays
+a game after practice has recorded its run and requires the profile on disk to
+be unchanged, and it changes no setting of the user's while it plays.
 
 **Drawn the way passage text is drawn.** `PassageInk` holds the caret shapes,
 the mistyped-space cell and the whitespace marks, moved out of `TypingView` so
@@ -770,9 +774,14 @@ finished word fades where it stands instead of flying apart.
 
 **Keys arrive as they do on the practice screen**: key codes from `keyDown` for
 the highlight and the click, committed characters through the input context,
-Latin keyboards only when that is set, one error tone per commit. `Playfield`
-follows `TypingView`'s rules without sharing its code, which is the one
-duplication left; the self-test types through `insertText` on both.
+Latin keyboards only when that is set, one error tone per commit. Both surfaces
+take keys through one `KeyInput` — which keys are held and which sounded, the
+composition, how a commit is handed on — and gate the tone through one
+`MistypeGate`; a second copy had already lost the composition's selection and
+its reset. What stays each surface's own is where its caret is: on Play, the
+next character of the falling target, which is where a composition is drawn and
+an input method's candidate window goes. The self-test types through
+`insertText` on both, and composes on Play.
 
 The words and sentences are held to the corpus's rules by `PlayTextTests`. Every
 sentence must read as English on its own: judged together, all of Play's text

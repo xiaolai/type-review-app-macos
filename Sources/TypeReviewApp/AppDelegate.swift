@@ -98,7 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.practice = practice
         let play = PlayViewController()
         self.play = play
-        play.planSource = { [weak practice] in practice?.nextLessonPlan ?? lessonPlan(for: Profile()) }
+        play.planSource = { [weak practice] in practice?.nextLessonPlan }
         let screens = MainScreenController(practice: practice, play: play)
         self.screens = screens
 
@@ -146,7 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // backdrop rather than to the separator. Making the backdrop
         // transparent is what removes it, and it also lets the toolbar sit on
         // the same white as the text instead of on a slightly different one.
-        // In Dark Mode that holds only because the practice screen's root is a
+        // In Dark Mode that holds only because the main window's root is a
         // `GroundedView`: the default window background is tinted by the
         // wallpaper, and the text's is not.
         //
@@ -177,6 +177,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let drawer = KeyboardDrawer()
         self.drawer = drawer
         drawer.attach(to: window)
+        // Practice first, whichever screen shows first. Play's first game
+        // plans its Letters from the profile, and Practice reads the profile
+        // when its view loads — so a launch straight into Play would otherwise
+        // plan for a typist with no history.
+        practice.loadViewIfNeeded()
         // Where the window was left, except for a check: every check drives
         // Practice first, whatever the last person to use this Mac chose.
         show(runningCheck ? .practice : AppPreferences.mainScreen.value, remember: false)
@@ -484,8 +489,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc func showPractice(_ sender: Any?) { show(.practice) }
-    @objc func showPlay(_ sender: Any?) { show(.play) }
+    /// View ▸ Practice and View ▸ Play. The main window comes forward first:
+    /// the menu is live while Library or Statistics is in front, or with the
+    /// main window closed, and a switch behind them changed nothing anyone
+    /// could see.
+    @objc func showScreen(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let screen = MainScreen(rawValue: raw)
+        else { return }
+        showMainWindow(nil)
+        show(screen)
+    }
 
     /// Shows a screen, and moves everything that follows the screen with it:
     /// the toolbar's leading items, the drawer's keyboard, the menus'
@@ -496,7 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// to light a key on it.
     func show(_ screen: MainScreen, remember: Bool = true) {
         guard let screens else { return }
-        if screen == .practice { play?.pause() }
+        if screen == .practice { play?.leave() }
         screens.show(screen)
         toolbarController?.show(screen)
         practice?.keyboard = screen == .practice ? drawer?.keyboard : nil

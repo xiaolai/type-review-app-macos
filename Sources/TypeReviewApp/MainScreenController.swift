@@ -1,7 +1,8 @@
 import AppKit
 
-/// Which screen the main window is showing.
-enum MainScreen: String {
+/// Which screen the main window is showing, in the order the toolbar's switch
+/// and the View menu list them.
+enum MainScreen: String, CaseIterable {
     case practice, play
 }
 
@@ -43,9 +44,18 @@ final class MainScreenController: NSViewController {
     func show(_ screen: MainScreen) {
         guard screen != current else { return }
         current = screen
-        let incoming: NSViewController = screen == .practice ? practice : play
-        let outgoing: NSViewController = screen == .practice ? play : practice
-        outgoing.view.removeFromSuperview()
+        let incoming: NSViewController
+        let outgoing: NSViewController
+        let focus: NSView
+        switch screen {
+        case .practice: (incoming, outgoing, focus) = (practice, play, practice.focusView)
+        case .play: (incoming, outgoing, focus) = (play, practice, play.focusView)
+        }
+        // Only a screen that was ever shown has anything to take away. Asking
+        // one that was not for its view loads it — and loading Play before
+        // Practice started its first game before Practice had read the
+        // profile, so Letters planned for a typist with no history.
+        if outgoing.isViewLoaded { outgoing.view.removeFromSuperview() }
         incoming.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(incoming.view)
         NSLayoutConstraint.activate([
@@ -54,6 +64,6 @@ final class MainScreenController: NSViewController {
             incoming.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             incoming.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
-        view.window?.makeFirstResponder(screen == .practice ? practice.focusView : play.focusView)
+        view.window?.makeFirstResponder(focus)
     }
 }

@@ -113,6 +113,18 @@ extension AppDelegate {
         statusOpenItem?.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
     }
 
+    /// The current screen's checkmark, and the name of ⌘N and its menu.
+    func markScreenMenus(_ screen: MainScreen) {
+        for (candidate, item) in screenMenuItems {
+            item.state = candidate == screen ? .on : .off
+        }
+        screenCommandsMenu?.title = screen.title
+        switch screen {
+        case .practice: newTextMenuItem?.title = "New Text"
+        case .play: newTextMenuItem?.title = "New Game"
+        }
+    }
+
     /// Three surfaces offer the keyboard toggle, so all three show its state.
     ///
     /// The toolbar button was the one that did not, for as long as it existed:
@@ -120,15 +132,6 @@ extension AppDelegate {
     /// offered to "show or hide" without saying which. One function, called
     /// from the three places that change the drawer, is what keeps them from
     /// disagreeing.
-    /// The current screen's checkmark, and the name of ⌘N and its menu.
-    func markScreenMenus(_ screen: MainScreen) {
-        for (candidate, item) in screenMenuItems {
-            item.state = candidate == screen ? .on : .off
-        }
-        screenCommandsMenu?.title = screen == .play ? "Play" : "Practice"
-        newTextMenuItem?.title = screen == .play ? "New Game" : "New Text"
-    }
-
     func markKeyboardMenus(_ visible: Bool) {
         keyboardMenuItem?.state = visible ? .on : .off
         statusKeyboardItem?.state = visible ? .on : .off
@@ -170,16 +173,15 @@ extension AppDelegate {
 
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
-        // The two screens first, then the windows. ⌥⌘ because every free
-        // ⌘-digit is taken: ⌘2 and ⌘3 open Statistics and Library, and ⌘4 to ⌘8
-        // pick a source.
-        for (screen, title, action, key) in [
-            (MainScreen.practice, "Practice", #selector(showPractice(_:)), "1"),
-            (MainScreen.play, "Play", #selector(showPlay(_:)), "2"),
-        ] {
-            let item = viewMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = [.command, .option]
+        // The two screens first, then the windows, named and keyed as the
+        // toolbar's switch names them — see `MainScreen.menuKey`.
+        for screen in MainScreen.allCases {
+            let item = viewMenu.addItem(
+                withTitle: screen.title, action: #selector(showScreen(_:)),
+                keyEquivalent: screen.menuKey)
+            item.keyEquivalentModifierMask = MainScreen.menuModifiers
             item.target = self
+            item.representedObject = screen.rawValue
             screenMenuItems[screen] = item
         }
         viewMenu.addItem(.separator())
@@ -358,5 +360,15 @@ extension AppDelegate {
                 }
             }
         }
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// Source is practice's, so it is greyed out while Play shows — its key
+    /// equivalents with it. Enabled there, a pick reached a practice screen
+    /// nobody could see and threw away the run waiting on it.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(chooseSource(_:)) { return screens?.current != .play }
+        return true
     }
 }

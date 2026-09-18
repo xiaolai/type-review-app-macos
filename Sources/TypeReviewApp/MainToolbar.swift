@@ -22,7 +22,8 @@ import TypeReviewKit
 ///
 /// Its own type rather than an extension on `AppDelegate`: the delegate is
 /// already the longest file in the app, and the toolbar needs none of its state
-/// — only somewhere to send five actions.
+/// — only somewhere to send its actions, and a way to read the two things its
+/// menus tick: the source, and the game's mode and rules.
 @MainActor
 final class MainToolbarController: NSObject, NSToolbarDelegate {
     var onNewText: () -> Void = {}
@@ -61,7 +62,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     /// Items are swapped in place rather than the toolbar being replaced, so
     /// the switch and the trailing three stay exactly where they were.
     func show(_ screen: MainScreen) {
-        screenSwitch?.selectedSegment = screen == .practice ? 0 : 1
+        screenSwitch?.selectedSegment = Self.segment(of: screen)
         guard screen != self.screen, let toolbar else { return }
         self.screen = screen
         let (leaving, arriving) =
@@ -135,54 +136,21 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     ) -> NSToolbarItem? {
         switch identifier {
         case Self.source:
-            let item = NSMenuToolbarItem(itemIdentifier: identifier)
-            item.label = "Source"
-            item.toolTip = "Where practice text comes from"
-            item.image = symbol("text.book.closed")
-            item.menu = sourceMenu()
-            sourceItem = item
-            return item
+            return makeSourceItem()
         case Self.newText:
             return button(
                 identifier, label: "New Text", symbol: "shuffle",
                 tip: "Fresh passage (⇥)", action: #selector(newTextPressed))
         case Self.screenSwitch:
-            let control = NSSegmentedControl(
-                labels: ["Practice", "Play"], trackingMode: .selectOne, target: self,
-                action: #selector(screenPicked(_:)))
-            control.selectedSegment = screen == .practice ? 0 : 1
-            control.setToolTip("Practice (⌥⌘1)", forSegment: 0)
-            control.setToolTip("Play (⌥⌘2)", forSegment: 1)
-            screenSwitch = control
-            let item = NSToolbarItem(itemIdentifier: identifier)
-            item.label = "Screen"
-            item.paletteLabel = "Screen"
-            item.view = control
-            return item
+            return makeScreenSwitchItem()
         case Self.game:
-            let item = NSMenuToolbarItem(itemIdentifier: identifier)
-            item.label = "Game"
-            item.toolTip = "What falls, and what happens when it lands"
-            item.image = symbol("gamecontroller")
-            item.menu = gameMenu()
-            gameItem = item
-            return item
+            return makeGameItem()
         case Self.newGame:
             return button(
                 identifier, label: "New Game", symbol: "arrow.counterclockwise",
                 tip: "Start again (⇥)", action: #selector(newGamePressed))
         case Self.keyboard:
-            let (item, button) = ToolbarItems.toggle(
-                identifier, label: "Keyboard", symbol: "keyboard",
-                tip: "Show or hide the on-screen keyboard",
-                target: self, action: #selector(keyboardPressed))
-            keyboardButton = button
-            // Seeded from the preference rather than left off. The toolbar is
-            // built after the drawer has already been opened or not, so a
-            // button that started off would have been wrong on every launch
-            // where the keyboard is showing — which is the default one.
-            button.state = AppPreferences.showKeyboard.value ? .on : .off
-            return item
+            return makeKeyboardItem()
         case Self.library:
             return button(
                 identifier, label: "Library", symbol: "books.vertical",
@@ -198,6 +166,64 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
         default:
             return nil
         }
+    }
+
+    private func makeSourceItem() -> NSToolbarItem {
+        let item = NSMenuToolbarItem(itemIdentifier: Self.source)
+        item.label = "Source"
+        item.toolTip = "Where practice text comes from"
+        item.image = symbol("text.book.closed")
+        item.menu = sourceMenu()
+        sourceItem = item
+        return item
+    }
+
+    /// One segment per screen, in `MainScreen`'s order, named and tipped as
+    /// the View menu names them.
+    private func makeScreenSwitchItem() -> NSToolbarItem {
+        let screens = MainScreen.allCases
+        let control = NSSegmentedControl(
+            labels: screens.map(\.title), trackingMode: .selectOne, target: self,
+            action: #selector(screenPicked(_:)))
+        for (segment, screen) in screens.enumerated() {
+            control.setToolTip("\(screen.title) (\(screen.shortcutLabel))", forSegment: segment)
+        }
+        control.selectedSegment = Self.segment(of: screen)
+        screenSwitch = control
+        let item = NSToolbarItem(itemIdentifier: Self.screenSwitch)
+        item.label = "Screen"
+        item.paletteLabel = "Screen"
+        item.view = control
+        return item
+    }
+
+    private static func segment(of screen: MainScreen) -> Int {
+        // Every case is in `allCases`; -1, no segment, is unreachable.
+        MainScreen.allCases.firstIndex(of: screen) ?? -1
+    }
+
+    private func makeGameItem() -> NSToolbarItem {
+        let item = NSMenuToolbarItem(itemIdentifier: Self.game)
+        item.label = "Game"
+        item.toolTip = "What falls, and what happens when it lands"
+        item.image = symbol("gamecontroller")
+        item.menu = gameMenu()
+        gameItem = item
+        return item
+    }
+
+    private func makeKeyboardItem() -> NSToolbarItem {
+        let (item, button) = ToolbarItems.toggle(
+            Self.keyboard, label: "Keyboard", symbol: "keyboard",
+            tip: "Show or hide the on-screen keyboard",
+            target: self, action: #selector(keyboardPressed))
+        keyboardButton = button
+        // Seeded from the preference rather than left off. The toolbar is
+        // built after the drawer has already been opened or not, so a
+        // button that started off would have been wrong on every launch
+        // where the keyboard is showing — which is the default one.
+        button.state = AppPreferences.showKeyboard.value ? .on : .off
+        return item
     }
 
     private func button(
@@ -235,8 +261,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
         let now = currentPlay()
         for mode in PlayMode.allCases {
             let item = NSMenuItem(
-                title: PlayViewController.label(for: mode), action: #selector(playModePicked(_:)),
-                keyEquivalent: "")
+                title: mode.label, action: #selector(playModePicked(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = mode.rawValue
             item.state = mode == now.mode ? .on : .off
@@ -260,7 +285,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     @objc private func newGamePressed() { onNewGame() }
 
     @objc private func screenPicked(_ sender: NSSegmentedControl) {
-        onSwitchScreen(sender.selectedSegment == 0 ? .practice : .play)
+        let screens = MainScreen.allCases
+        guard screens.indices.contains(sender.selectedSegment) else { return }
+        onSwitchScreen(screens[sender.selectedSegment])
     }
 
     @objc private func playModePicked(_ sender: NSMenuItem) {
