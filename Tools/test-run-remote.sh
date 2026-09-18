@@ -80,6 +80,13 @@ expect_exit 9 "refuses a remote directory of ~" dry example.invalid '~' test
 expect_exit 9 "refuses a remote directory with a space" dry example.invalid 'ci/a b' test
 expect_exit 9 "refuses a host that is an ssh option" dry -oProxyCommand=true ci/x test
 expect_exit 9 "refuses checks that are not make target names" dry example.invalid ci/x 'test; rm -rf ~'
+fetch() { TYPE_E2E_DRY_RUN=1 TYPE_E2E_DIR=ci/x TYPE_E2E_CHECKS=test TYPE_E2E_FETCH=$1 "$runner" example.invalid; }
+expect_exit 9 "refuses to fetch anything outside dist/" fetch Sources
+expect_exit 9 "refuses to fetch dist/ itself" fetch dist
+expect_exit 9 "refuses to fetch with .. inside" fetch dist/../Sources
+expect_exit 9 "refuses to fetch a dot-folder under dist/" fetch dist/.env
+expect_exit 9 "refuses an absolute fetch" fetch /tmp/x
+expect_exit 0 "accepts a folder under dist/" fetch dist/screenshots/
 out=$(dry example.invalid ci/x/ selftest 2>&1) || true
 if [[ $out == *'example.invalid:ci/x,'* && $out == *'ci/x.build-cache'* ]]; then
   pass "strips a trailing slash before deriving the cache path"
