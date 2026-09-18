@@ -24,7 +24,12 @@ struct PlayArt {
     let popFont: NSFont
     var scale: CGFloat = 2
     var appearance = NSAppearance(named: .aqua)!
-    var colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    var colorSpace = CGColorSpace(name: CGColorSpace.sRGB)! {
+        didSet { colorSpaceIdentity = Self.identity(of: colorSpace) }
+    }
+    /// `colorSpace`, as the signature compares it. Worked out once per change,
+    /// because the signature is read for every item on every frame.
+    private var colorSpaceIdentity = PlayArt.identity(of: CGColorSpace(name: CGColorSpace.sRGB)!)
     var caret = AppPreferences.caretStyle.value
     var showsWhitespace = AppPreferences.showWhitespace.value
 
@@ -37,9 +42,25 @@ struct PlayArt {
         popFont = NSFont(descriptor: Theme.statFont.fontDescriptor, size: 17) ?? Theme.statFont
     }
 
-    /// Everything that changes how an image looks, so a stale one is redrawn.
+    /// Everything that changes how an image looks, so a stale one is redrawn —
+    /// the colour space included, since two displays can share a scale.
     var signature: String {
-        "\(appearance.name.rawValue) \(scale) \(caret.rawValue) \(showsWhitespace)"
+        "\(appearance.name.rawValue) \(scale) \(colorSpaceIdentity) \(caret.rawValue) \(showsWhitespace)"
+    }
+
+    /// A colour space by its profile, not its name. The name is only what the
+    /// space was created with, and two displays' profiles can share one — so a
+    /// window moved between them kept images drawn for the first.
+    private static func identity(of space: CGColorSpace) -> String {
+        let name = (space.name as String?) ?? "unnamed"
+        guard let profile = space.copyICCData() as Data? else {
+            return "\(name) model \(space.model.rawValue)"
+        }
+        // Every byte. `Data`'s own hash samples only a prefix, and an ICC
+        // profile's header can match another display's.
+        var hasher = Hasher()
+        profile.withUnsafeBytes { hasher.combine(bytes: $0) }
+        return "\(name) \(profile.count) \(hasher.finalize())"
     }
 
     func face(_ mode: PlayMode) -> NSFont { mode == .letters ? letterFont : font }
@@ -114,6 +135,35 @@ struct PlayArt {
             if let index = caretAt, !PassageInk.caretGoesUnderGlyphs(caret) {
                 PassageInk.drawCaret(caret, cell: cellRect(index), in: context)
             }
+        }
+    }
+
+    /// What an input method is composing, drawn as the practice screen draws
+    /// a composition: the typing face, underlined, in the typed colour — the
+    /// platform's way of saying "not accepted yet" — on the passage's ground,
+    /// so it covers the character it sits over.
+    func composition(_ text: String, mode: PlayMode) -> CGImage? {
+        let face = face(mode)
+        let cell = cell(mode)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: face,
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): Theme.correct.cgColor,
+            NSAttributedString.Key(kCTUnderlineStyleAttributeName as String): CTUnderlineStyle.single.rawValue,
+        ]
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+        let width = max(CGFloat(cell.width), ceil(CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))))
+        return render(size: CGSize(width: width, height: cell.height), opaque: true) { context in
+            // Resolved inside the render, where the appearance is current.
+            let resolved = CTLineCreateWithAttributedString(
+                NSAttributedString(
+                    string: text,
+                    attributes: attributes.merging([
+                        NSAttributedString.Key(kCTForegroundColorAttributeName as String):
+                            Theme.correct.cgColor
+                    ]) { $1 }))
+            context.textMatrix = .identity
+            context.textPosition = CGPoint(x: 0, y: Self.caretRoom - face.descender)
+            CTLineDraw(resolved, context)
         }
     }
 

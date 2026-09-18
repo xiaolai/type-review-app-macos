@@ -15,7 +15,20 @@ final class PlayStage {
     var art: PlayArt {
         didSet { if art.signature != oldValue.signature { invalidate() } }
     }
-    var reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    /// Set by the screen when Reduce Motion changes, as well as at start.
+    /// Turned on, it also ends whatever is already flying.
+    var reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        didSet { if reducesMotion, !oldValue { stopFlying() } }
+    }
+    /// The field's height as of the last sync or step, for placing an effect
+    /// the moment it is made.
+    private var height: CGFloat = 0
+    /// What an input method is composing, and the layer it is drawn on at the
+    /// caret. The text is kept, not just drawn once, because the caret falls:
+    /// every sync puts the composition back over it.
+    private var composition = ""
+    private var compositionLayer: CALayer?
+    private var compositionDrawnAs: String?
 
     private var itemLayers: [Int: CALayer] = [:]
     private var drawnAs: [Int: String] = [:]
@@ -63,6 +76,9 @@ final class PlayStage {
     /// Pieces of bursts still in flight, for the self-test to see one happen.
     var effectsInFlight: Int { pieces.count + sparks.count + rings.count }
 
+    /// Whether a composition is drawn, for the self-test.
+    var showsComposition: Bool { compositionLayer?.contents != nil }
+
     /// The image a falling item's layer is showing, for the self-test to read.
     func image(forItem id: Int) -> CGImage? {
         guard let contents = itemLayers[id]?.contents else { return nil }
@@ -74,22 +90,33 @@ final class PlayStage {
     func invalidate() {
         drawnAs.removeAll()
         glyphs.removeAll()
+        compositionDrawnAs = nil
         for layer in itemLayers.values { layer.contentsScale = art.scale }
     }
 
     func clear() {
+        composition = ""
+        removeComposition()
+        stopFlying()
         for layer in itemLayers.values { layer.removeFromSuperlayer() }
-        pieces.forEach { $0.layer.removeFromSuperlayer() }
-        sparks.forEach { $0.layer.removeFromSuperlayer() }
-        rings.forEach { $0.layer.removeFromSuperlayer() }
         pops.forEach { $0.layer.removeFromSuperlayer() }
         itemLayers = [:]
         drawnAs = [:]
         lastSeen = [:]
+        pops = []
+    }
+
+    /// Takes away every piece, spark and ring in flight. The effects made
+    /// under Reduce Motion never fly, so switching it on mid-burst must not
+    /// leave the ones already thrown to finish their arcs; the points that
+    /// rise read the setting as they go, and stay.
+    private func stopFlying() {
+        pieces.forEach { $0.layer.removeFromSuperlayer() }
+        sparks.forEach { $0.layer.removeFromSuperlayer() }
+        rings.forEach { $0.layer.removeFromSuperlayer() }
         pieces = []
         sparks = []
         rings = []
-        pops = []
     }
 
     // MARK: - Items
@@ -98,6 +125,7 @@ final class PlayStage {
     /// measured down from the top, as the rules keep them, and flipped only
     /// when handed to a layer.
     func sync(_ game: FallingGame, height: CGFloat) {
+        self.height = height
         let targetID = game.target?.id
         var alive = Set<Int>()
         for item in game.items {
@@ -109,8 +137,12 @@ final class PlayStage {
             // leave the wrong letter red in the passage.
             let wrong = isTarget && game.clock - item.wrongAt < 0.3
             let key = "\(item.typed) \(item.gone.count) \(isTarget) \(wrong) \(art.signature)"
-            if drawnAs[item.id] != key {
-                layer.contents = art.image(of: item, mode: game.mode, target: isTarget, wrong: wrong)
+            // Recorded only once drawn: a render that failed is tried again
+            // next frame rather than remembered as done.
+            if drawnAs[item.id] != key,
+                let image = art.image(of: item, mode: game.mode, target: isTarget, wrong: wrong)
+            {
+                layer.contents = image
                 drawnAs[item.id] = key
             }
             let box = art.box(for: item)
@@ -124,6 +156,7 @@ final class PlayStage {
             drawnAs[id] = nil
             lastSeen[id] = nil
         }
+        placeComposition(in: game)
     }
 
     private func addItemLayer(_ id: Int) -> CALayer {
@@ -133,6 +166,59 @@ final class PlayStage {
         world.addSublayer(layer)
         itemLayers[id] = layer
         return layer
+    }
+
+    /// The cell of the next character to type, in the field's coordinates,
+    /// or nil when nothing is falling. Where a composition is drawn and an
+    /// input method's candidate window goes.
+    func caretRect(in game: FallingGame) -> CGRect? {
+        guard let target = game.target else { return nil }
+        let cell = art.cell(game.mode)
+        let index = game.mode == .letters ? 0 : target.typed
+        return CGRect(
+            x: target.x + cell.width * Double(index), y: Double(height) - target.y - cell.height,
+            width: cell.width, height: cell.height)
+    }
+
+    /// Shows what an input method is composing over the next character,
+    /// underlined, as the practice screen shows one; empty text removes it.
+    func showComposition(_ text: String, in game: FallingGame) {
+        composition = text
+        placeComposition(in: game)
+    }
+
+    /// Puts the composition over the caret as it is now, drawing it again only
+    /// when the text or the look has changed.
+    private func placeComposition(in game: FallingGame) {
+        guard !composition.isEmpty, let rect = caretRect(in: game) else {
+            removeComposition()
+            return
+        }
+        let layer = compositionLayer ?? addCompositionLayer()
+        let key = "\(composition) \(game.mode.rawValue) \(art.signature)"
+        // Recorded only once drawn, as an item's image is.
+        if compositionDrawnAs != key, let image = art.composition(composition, mode: game.mode) {
+            layer.contents = image
+            layer.contentsScale = art.scale
+            layer.bounds.size = CGSize(
+                width: CGFloat(image.width) / art.scale, height: CGFloat(image.height) / art.scale)
+            compositionDrawnAs = key
+        }
+        layer.frame.origin = rect.origin
+    }
+
+    private func addCompositionLayer() -> CALayer {
+        let layer = CALayer()
+        layer.zPosition = 4
+        world.addSublayer(layer)
+        compositionLayer = layer
+        return layer
+    }
+
+    private func removeComposition() {
+        compositionLayer?.removeFromSuperlayer()
+        compositionLayer = nil
+        compositionDrawnAs = nil
     }
 
     private func glyph(_ character: String, mode: PlayMode, role: PlayArt.GlyphRole) -> CGImage? {
@@ -148,6 +234,7 @@ final class PlayStage {
     /// A finished word flies apart: its own letters, sparks in the caret's
     /// colour, and a ring.
     func burst(_ id: Int, indices: [Int], mode: PlayMode) {
+        defer { settle() }
         guard let item = lastSeen[id], let first = indices.first, let last = indices.last else { return }
         let big: CGFloat = mode == .letters ? 1.6 : 1
         let cell = art.cell(mode)
@@ -194,6 +281,7 @@ final class PlayStage {
     /// An item that reached the floor under arcade rules: its letters drop
     /// away in the untyped colour. No red, and nothing louder than that.
     func crumble(_ id: Int, mode: PlayMode) {
+        defer { settle() }
         guard let item = lastSeen[id] else { return }
         let cell = art.cell(mode)
         for (index, character) in item.chars.enumerated()
@@ -213,6 +301,7 @@ final class PlayStage {
     /// The points a cleared item earned, rising from where it was, in the
     /// status bar's face and colour.
     func pop(_ id: Int, points: Int) {
+        defer { settle() }
         guard let item = lastSeen[id] else { return }
         let layer = CATextLayer()
         layer.string = "+\(points)"
@@ -232,6 +321,7 @@ final class PlayStage {
 
     /// A whole sentence done: sparks rise from the floor across the field.
     func shower(width: CGFloat, height: CGFloat) {
+        defer { settle() }
         guard !reducesMotion else { return }
         let accent = art.resolve(Theme.caret)
         for _ in 0..<70 {
@@ -272,8 +362,22 @@ final class PlayStage {
             Spark(layer: layer, x: x, y: y, vx: vx, vy: vy, life: 0, span: span, gravity: gravity))
     }
 
+    /// Puts every effect where it starts, without moving time. Called as each
+    /// is made: the screen holds the world still for a moment after a burst,
+    /// and an effect not placed until the next step sat at the field's corner
+    /// for all of it.
+    private func settle() { step(0, height: height) }
+
     /// Moves every effect one frame on.
     func step(_ dt: Double, height: CGFloat) {
+        self.height = height
+        stepPieces(dt)
+        stepSparks(dt)
+        stepRings(dt)
+        stepPops(dt)
+    }
+
+    private func stepPieces(_ dt: Double) {
         let t = CGFloat(dt)
         for index in pieces.indices {
             pieces[index].life += dt
@@ -290,12 +394,11 @@ final class PlayStage {
             let fadeFrom = reducesMotion ? 0 : 0.6
             piece.layer.opacity = Float(k > fadeFrom ? 1 - (k - fadeFrom) / (1 - fadeFrom) : 1)
         }
-        pieces.removeAll { piece in
-            let done = piece.life >= piece.span
-            if done { piece.layer.removeFromSuperlayer() }
-            return done
-        }
+        pieces.removeAll { Self.retire($0.layer, if: $0.life >= $0.span) }
+    }
 
+    private func stepSparks(_ dt: Double) {
+        let t = CGFloat(dt)
         let drag = CGFloat(pow(0.06, dt))
         for index in sparks.indices {
             sparks[index].life += dt
@@ -307,12 +410,10 @@ final class PlayStage {
             spark.layer.position = CGPoint(x: spark.x, y: height - spark.y)
             spark.layer.opacity = Float(1 - min(1, spark.life / spark.span))
         }
-        sparks.removeAll { spark in
-            let done = spark.life >= spark.span
-            if done { spark.layer.removeFromSuperlayer() }
-            return done
-        }
+        sparks.removeAll { Self.retire($0.layer, if: $0.life >= $0.span) }
+    }
 
+    private func stepRings(_ dt: Double) {
         for index in rings.indices {
             rings[index].life += dt
             let ring = rings[index]
@@ -325,12 +426,10 @@ final class PlayStage {
             ring.layer.lineWidth = 3 * (1 - k) + 0.5
             ring.layer.opacity = Float(0.8 * (1 - k))
         }
-        rings.removeAll { ring in
-            let done = ring.life >= ring.span
-            if done { ring.layer.removeFromSuperlayer() }
-            return done
-        }
+        rings.removeAll { Self.retire($0.layer, if: $0.life >= $0.span) }
+    }
 
+    private func stepPops(_ dt: Double) {
         for index in pops.indices {
             pops[index].life += dt
             let pop = pops[index]
@@ -339,10 +438,12 @@ final class PlayStage {
             pop.layer.position = CGPoint(x: pop.x, y: height - (pop.y - rise))
             pop.layer.opacity = Float(k > 0.6 ? 1 - (k - 0.6) / 0.4 : 1)
         }
-        pops.removeAll { pop in
-            let done = pop.life >= pop.span
-            if done { pop.layer.removeFromSuperlayer() }
-            return done
-        }
+        pops.removeAll { Self.retire($0.layer, if: $0.life >= $0.span) }
+    }
+
+    /// Takes a finished effect's layer away, and says whether it did.
+    private static func retire(_ layer: CALayer, if done: Bool) -> Bool {
+        if done { layer.removeFromSuperlayer() }
+        return done
     }
 }
