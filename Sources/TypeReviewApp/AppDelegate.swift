@@ -416,7 +416,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func observeWindowClosing() {
         windowCloseObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
-        ) { notification in
+        ) { [weak self] notification in
+            // Weak here as well as below. Without it this closure captures self
+            // strongly to hand it on, which makes the inner weak capture
+            // pointless — and Swift 6.4 warns that it is.
             let closing = notification.object as? NSWindow
             MainActor.assumeIsolated {
                 // On the next pass of the runloop, because this fires *before*
