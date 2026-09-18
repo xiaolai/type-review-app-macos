@@ -274,7 +274,8 @@ final class StatsViewController: NSViewController {
                 calendar: statsCalendar),
             unit: PracticeCalendarView.Unit(chosen))
         streakLabel.stringValue =
-            "\(days.current)-day streak · longest \(days.longest) · \(practiceDays) days practised"
+            "\(days.current)-day streak · longest \(days.longest) · \(practiceDays) "
+            + (practiceDays == 1 ? "day practised" : "days practised")
 
         // Sorted slowest first: the table is a list of what to work on, so the
         // useful row is at the top rather than wherever the alphabet puts it.
