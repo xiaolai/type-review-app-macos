@@ -42,16 +42,7 @@ enum AppPreferences {
         }
     }
 
-    enum caretStyle {
-        static let key = "CaretStyle"
-        static var value: CaretStyle {
-            get { CaretStyle(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .block }
-            set {
-                UserDefaults.standard.set(newValue.rawValue, forKey: key)
-                AppPreferences.announce(key)
-            }
-        }
-    }
+    static let caretStyle = Choice<CaretStyle>(key: "CaretStyle", default: .block)
 
     /// Whether spaces, tabs and line ends are marked on the typing surface.
     ///
@@ -175,33 +166,19 @@ enum AppPreferences {
 
     /// Which screen the main window showed last, so it opens where it was
     /// left. A check always starts on Practice, whatever this says.
-    enum mainScreen {
-        static let key = "MainScreen"
-        static var value: MainScreen {
-            get { MainScreen(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .practice }
-            set {
-                UserDefaults.standard.set(newValue.rawValue, forKey: key)
-                AppPreferences.announce(key)
-            }
-        }
-    }
+    ///
+    /// This and the two below are remembered, not observed: nothing reacts to
+    /// them changing, so they do not announce. Announcing re-applied sound,
+    /// speech, typing preferences and the drawer on every switch of screen.
+    static let mainScreen = Choice<MainScreen>(key: "MainScreen", default: .practice, announces: false)
 
     /// What Play drops: letters, words or sentences.
-    enum playMode {
-        static let key = "PlayMode"
-        static var value: PlayMode {
-            get { PlayMode(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .words }
-            set {
-                UserDefaults.standard.set(newValue.rawValue, forKey: key)
-                AppPreferences.announce(key)
-            }
-        }
-    }
+    static let playMode = Choice<PlayMode>(key: "PlayMode", default: .words, announces: false)
 
     /// Arcade rules — three lives — rather than the gentle ones, where
     /// something reaching the floor waits there and nothing is lost. Gentle is
     /// the default because the people Play is for are still finding the keys.
-    static let playArcade = Flag(key: "PlayArcade")
+    static let playArcade = Flag(key: "PlayArcade", announces: false)
 
     /// What the practice grid counts.
     ///
@@ -227,16 +204,7 @@ enum AppPreferences {
         }
     }
 
-    enum statsMetric {
-        static let key = "StatsMetric"
-        static var value: StatsMetric {
-            get { StatsMetric(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .characters }
-            set {
-                UserDefaults.standard.set(newValue.rawValue, forKey: key)
-                AppPreferences.announce(key)
-            }
-        }
-    }
+    static let statsMetric = Choice<StatsMetric>(key: "StatsMetric", default: .characters)
 
     /// Whether launching TYPE puts a window on screen.
     ///
@@ -600,15 +568,46 @@ enum AppPreferences {
             name: didChange, object: nil, userInfo: [changedKey: key])
     }
 
+    /// A preference stored as the raw value of a string-backed enum.
+    ///
+    /// Four of these were hand-written enums differing only in key, type and
+    /// default — the same shape `Flag` already replaced for booleans.
+    struct Choice<Value: RawRepresentable & Equatable & Sendable>: Sendable
+    where Value.RawValue == String {
+        let key: String
+        let `default`: Value
+        /// Whether a change is announced. Every observer of `didChange` does
+        /// real work, so a value nothing observes should not wake them.
+        let announces: Bool
+
+        init(key: String, default: Value, announces: Bool = true) {
+            self.key = key
+            self.default = `default`
+            self.announces = announces
+        }
+
+        var value: Value {
+            get { Value(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? `default` }
+            nonmutating set {
+                guard newValue != value else { return }
+                UserDefaults.standard.set(newValue.rawValue, forKey: key)
+                if announces { AppPreferences.announce(key) }
+            }
+        }
+    }
+
     /// A boolean preference. Two of these existed as hand-written enums that
     /// differed only in their key.
     struct Flag {
         let key: String
         let `default`: Bool
+        /// Whether a change is announced; see `Choice.announces`.
+        let announces: Bool
 
-        init(key: String, default: Bool = false) {
+        init(key: String, default: Bool = false, announces: Bool = true) {
             self.key = key
             self.default = `default`
+            self.announces = announces
         }
 
         var value: Bool {
@@ -619,7 +618,7 @@ enum AppPreferences {
             nonmutating set {
                 guard newValue != value else { return }
                 UserDefaults.standard.set(newValue, forKey: key)
-                AppPreferences.announce(key)
+                if announces { AppPreferences.announce(key) }
             }
         }
     }
