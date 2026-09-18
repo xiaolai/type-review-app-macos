@@ -54,7 +54,16 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     private var expected: String = ""
     private var statuses: [CharStatus] = []
     private var cursor: Int = 0
-    private var markedText: String = ""
+    /// Keys and composition, shared with Play's surface. See `KeyInput`.
+    private lazy var input: KeyInput = {
+        let input = KeyInput()
+        input.onCharacter = { [weak self] in self?.onCharacter?($0) }
+        input.onCommitBegan = { [weak self] in self?.onCommitBegan?() }
+        input.onKeyPressed = { [weak self] in self?.onKeyPressed?($0) }
+        input.onKeyStruck = { [weak self] in self?.onKeyStruck?($0) }
+        input.onKeyReleased = { [weak self] in self?.onKeyReleased?($0) }
+        return input
+    }()
 
     /// Read from `AppPreferences` and pushed in, rather than read here: this
     /// view is drawn on every keystroke and should not be querying
@@ -111,8 +120,6 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         utf16Cache = units
         return units
     }
-    /// The selection inside the composition, in composition coordinates.
-    private var markedSelection = NSRange(location: 0, length: 0)
     /// Height of the whole passage at the current width, which can exceed the
     /// view's.
     private var contentHeight: CGFloat = 0
@@ -153,10 +160,7 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// Ends any composition in progress without committing it, and tells the
     /// input context so its candidate window goes away with it.
     private func discardComposition() {
-        guard !markedText.isEmpty else { return }
-        markedText = ""
-        markedSelection = NSRange(location: 0, length: 0)
-        inputContext?.discardMarkedText()
+        input.discard(from: inputContext)
     }
 
     // MARK: - Blinking
@@ -166,8 +170,6 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     private var blinkTimer: Timer?
     /// Key-window observers for the window this view is currently in.
     private var windowObservers: [NSObjectProtocol] = []
-    /// Key codes currently held down, so releasing one does not unlight another.
-    private var held: Set<UInt16> = []
 
     /// How long the caret stays lit and dark, from the system's own settings.
     ///
@@ -267,6 +269,14 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
                 windowObservers.append(
                     centre.addObserver(forName: name, object: window, queue: .main, using: restart))
             }
+            // Keys still down when the window stops taking keys are released
+            // somewhere else, so this view never hears it: let them go now.
+            windowObservers.append(
+                centre.addObserver(
+                    forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.input.releaseAll() }
+                })
         }
         restartBlink()
     }
@@ -437,15 +447,8 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// showed nothing until it committed. Underlined and in the pending
     /// colour, which is the platform's way of saying "not accepted yet".
     private func drawComposition(in context: CGContext) {
-        guard !markedText.isEmpty else { return }
-        let attributed = NSAttributedString(
-            string: markedText,
-            attributes: [
-                .font: Theme.typingFont,
-                .foregroundColor: Theme.correct,
-                .underlineStyle: NSUnderlineStyle.single.rawValue,
-            ])
-        let line = CTLineCreateWithAttributedString(attributed)
+        guard !input.markedText.isEmpty else { return }
+        let line = compositionLine()
         var ascent: CGFloat = 0
         CTLineGetTypographicBounds(line, &ascent, nil, nil)
         let origin = caretOrigin()
@@ -459,6 +462,19 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
         // `CTLineDraw` leaves the text matrix altered and `restoreGState` does
         // not cover it — the same trap the whitespace marks hit.
         context.textMatrix = .identity
+    }
+
+    /// The composition as one line of text, as it is drawn — which is also
+    /// what an input method's character positions inside it are measured on.
+    private func compositionLine() -> CTLine {
+        CTLineCreateWithAttributedString(
+            NSAttributedString(
+                string: input.markedText,
+                attributes: [
+                    .font: Theme.typingFont,
+                    .foregroundColor: Theme.correct,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                ]))
     }
 
     /// How far down the passage the viewport sits, so the caret is on screen.
@@ -734,49 +750,21 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - Input
 
     override func keyUp(with event: NSEvent) {
-        // Only the key that was actually released. Clearing unconditionally
-        // meant pressing A, then B, then releasing A unlit B while it was
-        // still held — and the keyboard showed nothing pressed while a finger
-        // was still down.
-        held.remove(event.keyCode)
-        onKeyPressed?(held.first)
-        // The same rule the press follows, for the same reason: ⌘S is a menu
-        // command rather than typing, and its release is not typing either.
-        if event.modifierFlags.intersection([.command, .control]).isEmpty {
-            onKeyReleased?(event.keyCode)
-        }
+        input.keyUp(event)
         super.keyUp(with: event)
     }
 
     override func resignFirstResponder() -> Bool {
-        // Keys released while another view has focus never reach this one, so
-        // the highlight would stay lit on a key nobody is holding. The caret
-        // stops blinking here for the same reason it starts on becoming first
-        // responder: it marks where keystrokes land, and they no longer do.
-        held.removeAll()
-        onKeyPressed?(nil)
+        // Keys released while another view has focus never reach this one. The
+        // caret stops blinking here for the same reason it starts on becoming
+        // first responder: it marks where keystrokes land, and they no longer do.
+        input.releaseAll()
         defer { restartBlink() }
         return super.resignFirstResponder()
     }
 
     override func keyDown(with event: NSEvent) {
-        held.insert(event.keyCode)
-        onKeyPressed?(event.keyCode)
-        // Not on auto-repeat. Holding a key down would otherwise fire the
-        // click at the system's repeat rate, which is both unlike a real
-        // keyboard — where a held key makes one sound — and, at ~30 Hz, a
-        // machine-gun burst through eight voices.
-        //
-        // Also not for shortcuts: ⌘S is not typing, and it is about to be
-        // handled by the menu bar rather than by this view.
-        if !event.isARepeat, event.modifierFlags.intersection([.command, .control]).isEmpty {
-            onKeyStruck?(event.keyCode)
-        }
-        // Modified keys are never typing: they belong to the menu bar, and
-        // consuming them here would break every shortcut in the app.
-        if event.modifierFlags.intersection([.command, .control]).isEmpty {
-            if inputContext?.handleEvent(event) == true { return }
-        }
+        if input.keyDown(event), inputContext?.handleEvent(event) == true { return }
         super.keyDown(with: event)
     }
 
@@ -796,103 +784,26 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
-        // Checked *before* the composition is cleared. `isReplaceable`
-        // compares the requested range against `markedRange()`, and clearing
-        // first made that range `NSNotFound` — so an input method committing
-        // its composition by naming the range it occupies was refused, and the
-        // text was lost.
-        guard isReplaceable(replacementRange) else { return }
-        markedText = ""
-        markedSelection = NSRange(location: 0, length: 0)
-        let text = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
-        // A replacement of anything other than the composition currently being
-        // held is not something this surface can do — there is no editable
-        // document behind it, only a passage being typed against. Silently
-        // appending was the wrong answer: an input method asking to replace
-        // two characters got two *extra* ones, and the run's statistics
-        // counted keystrokes the user never made.
-        // One code unit at a time, because that is the engine's coordinate
-        // system. A committed CJK character is one unit and arrives whole.
-        //
-        // Anything outside the basic plane is refused rather than split. An
-        // emoji is a surrogate pair, and feeding the halves separately turned
-        // one character into two `\u{FFFD}` replacements — two fabricated
-        // mistakes, and the cursor advanced by two.
-        deliver(text)
+        guard input.isReplaceable(replacementRange, markedRange: markedRange()) else { return }
+        input.insert(string)
         needsDisplay = true
-    }
-
-    /// Hands one committed string to the engine, one code unit at a time.
-    ///
-    /// Both commit paths go through here, and that is the point rather than
-    /// tidiness. `unmarkText` had its own copy of this loop, and when the
-    /// commit boundary was added to the other one it was not added here — so a
-    /// composition committed through unmarking inherited the previous commit's
-    /// latch and went silent. One loop cannot drift from itself.
-    private func deliver(_ text: String) {
-        // One commit, however many code units it carries. The error tone needs
-        // this boundary rather than a stopwatch: an input method committing
-        // three wrong characters is one act by the typist and deserves one
-        // sound, and no interval in milliseconds can tell that apart from
-        // three deliberate keys typed quickly.
-        onCommitBegan?()
-        for unit in Array(text.utf16) {
-            guard !(0xD800...0xDFFF).contains(unit) else { continue }
-            onCharacter?(String(utf16CodeUnits: [unit], count: 1))
-        }
-    }
-
-    /// Whether a requested replacement range is one this surface can honour.
-    ///
-    /// `NSNotFound` means "wherever the insertion point is", which is the only
-    /// place text can go here. A range covering exactly the current
-    /// composition is the ordinary commit and means the same thing.
-    private func isReplaceable(_ range: NSRange) -> Bool {
-        // `NSNotFound` is the documented "wherever the insertion point is".
-        if range.location == NSNotFound { return true }
-        // A zero-length range replaces nothing, which is an insertion however
-        // it is located. Requiring it to sit exactly at the cursor rejected
-        // every character after the first — the self-test caught it, because
-        // AppKit's own committed-text path passes a plain `NSRange()`.
-        if range.length == 0 { return true }
-        // What is left is a real replacement, and the only span this surface
-        // can replace is the composition it is holding.
-        return range == markedRange()
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        guard isReplaceable(replacementRange) else { return }
-        // Composition in progress. Held, not committed — the engine never sees
-        // a pre-composition keystroke.
-        markedText = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
-        // Kept so `selectedRange()` can answer in document coordinates. An
-        // input method moving its selection inside a composition was told the
-        // caret had not moved at all, which is what places a candidate window
-        // under the wrong character.
-        markedSelection = selectedRange
-        if markedText.isEmpty { markedSelection = NSRange(location: 0, length: 0) }
+        guard input.isReplaceable(replacementRange, markedRange: markedRange()) else { return }
+        input.mark(string, selectedRange: selectedRange)
         needsDisplay = true
     }
 
-    /// Ends the composition by *accepting* it.
-    ///
-    /// Apple's contract is that the marked text stops being marked, not that
-    /// it disappears. Throwing it away lost text the user had already
-    /// accepted — a committed syllable vanishing when the input method
-    /// happened to unmark rather than insert. Cancelling is a different verb
-    /// and lives in `discardComposition`.
     func unmarkText() {
-        let pending = markedText
-        markedText = ""
-        markedSelection = NSRange(location: 0, length: 0)
-        deliver(pending)
+        input.unmark()
         needsDisplay = true
     }
 
-    func hasMarkedText() -> Bool { !markedText.isEmpty }
+    func hasMarkedText() -> Bool { !input.markedText.isEmpty }
     func markedRange() -> NSRange {
-        markedText.isEmpty ? NSRange(location: NSNotFound, length: 0)
-            : NSRange(location: cursor, length: markedText.utf16.count)
+        input.markedText.isEmpty ? NSRange(location: NSNotFound, length: 0)
+            : NSRange(location: cursor, length: input.markedText.utf16.count)
     }
 
     /// The selection, in document coordinates.
@@ -900,10 +811,11 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// Inside a composition that is the composition's own selection offset by
     /// the caret; outside one it is the caret itself.
     func selectedRange() -> NSRange {
-        guard !markedText.isEmpty, markedSelection.location != NSNotFound else {
+        let selection = input.markedSelection
+        guard !input.markedText.isEmpty, selection.location != NSNotFound else {
             return NSRange(location: cursor, length: 0)
         }
-        return NSRange(location: cursor + markedSelection.location, length: markedSelection.length)
+        return NSRange(location: cursor + selection.location, length: selection.length)
     }
 
     func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
@@ -939,10 +851,23 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     /// palette appears under the text being composed rather than at the
     /// window's corner — which is what a hardcoded rectangle at the view's
     /// origin actually did, despite the comment that used to sit here.
+    /// Where an input method's candidate window goes: the requested character
+    /// of the composition, which is drawn from the caret on, or the caret when
+    /// there is none. One character at most, and `actualRange` says exactly
+    /// what the rect covers — it used to echo the whole request back, for a
+    /// rect one point wide.
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        actualRange?.pointee = range
+        let marked = input.markedText.utf16.count
+        let location = range.location == NSNotFound ? cursor : range.location
+        let start = min(max(0, location - cursor), marked)
+        let length = min(range.length, 1, marked - start)
+        actualRange?.pointee = NSRange(location: cursor + start, length: length)
+        let line = compositionLine()
+        let from = CTLineGetOffsetForStringIndex(line, start, nil)
+        let to = CTLineGetOffsetForStringIndex(line, start + length, nil)
+        let origin = caretOrigin()
         let height = Theme.typingFont.pointSize * 1.6
-        let local = NSRect(origin: caretOrigin(), size: NSSize(width: 1, height: height))
+        let local = NSRect(x: origin.x + from, y: origin.y, width: to - from, height: height)
         guard let window else { return local }
         return window.convertToScreen(convert(local, to: nil))
     }

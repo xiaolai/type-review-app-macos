@@ -3,12 +3,13 @@ import QuartzCore
 
 /// Play's surface: where things fall, and where keys arrive.
 ///
-/// Keys arrive exactly as they do in `TypingView`, and for its reasons: the key
-/// code from `keyDown` for the keyboard highlight and the click, committed
-/// characters through the input context — never `NSEvent.characters` — and
-/// the same rules for held keys, key repeat, shortcuts and Latin-only
-/// keyboards. The comments on `TypingView` explain each; they are not repeated
-/// here.
+/// Keys arrive exactly as they do on the practice screen, through the same
+/// `KeyInput`: the key code from `keyDown` for the keyboard highlight and the
+/// click, committed characters through the input context — never
+/// `NSEvent.characters` — and Latin keyboards only when that is set. What is
+/// Play's own is where the caret is: the next character of the item being
+/// typed, which the screen tells this view through `caretIndex` and
+/// `caretRect`, so an input method's selection and candidate window sit there.
 ///
 /// Layer-hosting rather than layer-backed: every layer inside is this view's
 /// to arrange, and AppKit draws into none of them.
@@ -27,16 +28,31 @@ final class Playfield: NSView, @preconcurrency NSTextInputClient {
     var onDisplayChange: (() -> Void)?
     /// The window stopped being the one that takes keys.
     var onFocusLost: (() -> Void)?
+    /// The text an input method is composing changed; empty when it ends.
+    var onCompositionChanged: ((String) -> Void)?
+    /// Where the caret is in the text being typed, in characters: the
+    /// document position an input method's ranges are measured from.
+    var caretIndex: () -> Int = { 0 }
+    /// The next character's cell, in this view's coordinates, or nil when
+    /// nothing is being typed.
+    var caretRect: () -> NSRect? = { nil }
 
     let world = CALayer()
     var latinInputOnly = true {
         didSet { applyInputSourceRestriction() }
     }
 
+    private lazy var input: KeyInput = {
+        let input = KeyInput()
+        input.onCharacter = { [weak self] in self?.onCharacter?($0) }
+        input.onCommitBegan = { [weak self] in self?.onCommitBegan?() }
+        input.onKeyPressed = { [weak self] in self?.onKeyPressed?($0) }
+        input.onKeyStruck = { [weak self] in self?.onKeyStruck?($0) }
+        input.onKeyReleased = { [weak self] in self?.onKeyReleased?($0) }
+        return input
+    }()
     private var link: CADisplayLink?
     private var lastTimestamp: CFTimeInterval?
-    private var held: Set<UInt16> = []
-    private var markedText = ""
     private var windowObserver: NSObjectProtocol?
 
     override init(frame: NSRect) {
@@ -59,7 +75,12 @@ final class Playfield: NSView, @preconcurrency NSTextInputClient {
         lastTimestamp = nil
         if let windowObserver { NotificationCenter.default.removeObserver(windowObserver) }
         windowObserver = nil
-        guard let window else { return }
+        guard let window else {
+            // Out of the window — switched to Practice. A composition left
+            // here would commit into a game nobody is looking at.
+            discardComposition()
+            return
+        }
         // Frames only while the view is in a window: switching to Practice
         // takes it out, and a game nobody can see should not be running.
         let link = displayLink(target: self, selector: #selector(advance(_:)))
@@ -68,7 +89,11 @@ final class Playfield: NSView, @preconcurrency NSTextInputClient {
         windowObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: window, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onFocusLost?() }
+            MainActor.assumeIsolated {
+                // Keys still down are released somewhere else now.
+                self?.input.releaseAll()
+                self?.onFocusLost?()
+            }
         }
         applyInputSourceRestriction()
         paintGround()
@@ -108,29 +133,26 @@ final class Playfield: NSView, @preconcurrency NSTextInputClient {
         onFrame?(dt)
     }
 
+    /// Ends a composition without committing it — for a new game, where a
+    /// half-typed character belongs to text that is gone.
+    func discardComposition() {
+        if input.discard(from: inputContext) { onCompositionChanged?("") }
+    }
+
     // MARK: - Keys
 
     override func keyDown(with event: NSEvent) {
-        held.insert(event.keyCode)
-        onKeyPressed?(event.keyCode)
-        let isShortcut = !event.modifierFlags.intersection([.command, .control]).isEmpty
-        if !event.isARepeat, !isShortcut { onKeyStruck?(event.keyCode) }
-        if !isShortcut, inputContext?.handleEvent(event) == true { return }
+        if input.keyDown(event), inputContext?.handleEvent(event) == true { return }
         super.keyDown(with: event)
     }
 
     override func keyUp(with event: NSEvent) {
-        held.remove(event.keyCode)
-        onKeyPressed?(held.first)
-        if event.modifierFlags.intersection([.command, .control]).isEmpty {
-            onKeyReleased?(event.keyCode)
-        }
+        input.keyUp(event)
         super.keyUp(with: event)
     }
 
     override func resignFirstResponder() -> Bool {
-        held.removeAll()
-        onKeyPressed?(nil)
+        input.releaseAll()
         return super.resignFirstResponder()
     }
 
@@ -147,39 +169,43 @@ final class Playfield: NSView, @preconcurrency NSTextInputClient {
     // MARK: - NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
-        guard isReplaceable(replacementRange) else { return }
-        markedText = ""
-        let text = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
-        // One commit, one error tone at most; one code unit at a time, and
-        // never half of a surrogate pair. `TypingView.deliver` explains all three.
-        onCommitBegan?()
-        for unit in Array(text.utf16) where !(0xD800...0xDFFF).contains(unit) {
-            onCharacter?(String(utf16CodeUnits: [unit], count: 1))
-        }
+        guard input.isReplaceable(replacementRange, markedRange: markedRange()) else { return }
+        let hadComposition = !input.markedText.isEmpty
+        input.insert(string)
+        if hadComposition { onCompositionChanged?("") }
     }
 
-    // A Latin layout's dead keys still compose, so composition is accepted,
-    // though nothing here draws it: the key is committed a moment later.
+    // A Latin layout's dead keys compose too, so a composition is shown at the
+    // caret until it commits — the way the practice screen shows one.
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        guard isReplaceable(replacementRange) else { return }
-        markedText = (string as? String) ?? (string as? NSAttributedString)?.string ?? ""
+        guard input.isReplaceable(replacementRange, markedRange: markedRange()) else { return }
+        input.mark(string, selectedRange: selectedRange)
+        onCompositionChanged?(input.markedText)
     }
 
     func unmarkText() {
-        let text = markedText
-        markedText = ""
-        if !text.isEmpty { insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+        input.unmark()
+        onCompositionChanged?("")
     }
 
-    func hasMarkedText() -> Bool { !markedText.isEmpty }
+    func hasMarkedText() -> Bool { !input.markedText.isEmpty }
 
     func markedRange() -> NSRange {
-        markedText.isEmpty
+        input.markedText.isEmpty
             ? NSRange(location: NSNotFound, length: 0)
-            : NSRange(location: 0, length: markedText.utf16.count)
+            : NSRange(location: caretIndex(), length: input.markedText.utf16.count)
     }
 
-    func selectedRange() -> NSRange { NSRange(location: NSNotFound, length: 0) }
+    /// The selection in document coordinates: the composition's own selection
+    /// offset by the caret, or the caret itself.
+    func selectedRange() -> NSRange {
+        let selection = input.markedSelection
+        guard !input.markedText.isEmpty, selection.location != NSNotFound else {
+            return NSRange(location: caretIndex(), length: 0)
+        }
+        return NSRange(location: caretIndex() + selection.location, length: selection.length)
+    }
+
     func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
 
     func attributedSubstring(forProposedRange range: NSRange, actualRange: NSRangePointer?)
@@ -188,13 +214,28 @@ final class Playfield: NSView, @preconcurrency NSTextInputClient {
 
     func characterIndex(for point: NSPoint) -> Int { NSNotFound }
 
+    /// Where the candidate window goes: under the requested character of what
+    /// is being typed, as on the practice screen, or the field's lower-left
+    /// corner when nothing is.
+    ///
+    /// One character's cell, and `actualRange` says it is one character: the
+    /// rect covers no more than that, whatever was asked for. An empty range is
+    /// the insertion point, so it has no width.
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        window?.convertToScreen(convert(bounds, to: nil)) ?? .zero
-    }
-
-    /// `TypingView.isReplaceable`: the insertion point, an empty range, or
-    /// exactly the composition being held.
-    private func isReplaceable(_ range: NSRange) -> Bool {
-        range.location == NSNotFound || range.length == 0 || range == markedRange()
+        let caret = caretIndex()
+        let location = range.location == NSNotFound ? caret : range.location
+        actualRange?.pointee = NSRange(location: location, length: min(range.length, 1))
+        var local: NSRect
+        if let cell = caretRect() {
+            // Every cell is one advance wide, so a character past the caret —
+            // inside a composition, which is drawn from the caret on — is that
+            // many cells along.
+            local = cell.offsetBy(dx: CGFloat(max(0, location - caret)) * cell.width, dy: 0)
+        } else {
+            local = NSRect(x: bounds.minX, y: bounds.minY, width: 1, height: 1)
+        }
+        if range.length == 0 { local.size.width = 0 }
+        guard let window else { return local }
+        return window.convertToScreen(convert(local, to: nil))
     }
 }
