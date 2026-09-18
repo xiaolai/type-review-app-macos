@@ -85,6 +85,10 @@ enum PassageInk {
                 string: mark, attributes: [.font: font, .foregroundColor: colour]))
         let markWidth = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
         context.saveGState()
+        // Set on the way in as well as the way out. Play draws a mark straight
+        // after its own `CTLineDraw`, which is free to leave the matrix as it
+        // likes, and the mark must not inherit that.
+        context.textMatrix = .identity
         context.textPosition = CGPoint(x: point.x + (width - markWidth) / 2, y: point.y)
         CTLineDraw(line, context)
         context.restoreGState()
