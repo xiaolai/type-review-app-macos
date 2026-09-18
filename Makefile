@@ -36,6 +36,23 @@ endif
 BIN      := TypeReviewApp
 CONFIG   := release
 
+# Where `swift build` put its products, asked rather than assumed. The layout
+# belongs to the build system, and Swift 6.4's default one writes under
+# .build/out/Products while leaving .build/release pointing at whatever the
+# previous build system last produced. The hard-coded .build/$(CONFIG) this
+# replaces therefore copied a binary and a corpus days old into the bundle, and
+# the build reported success. Recursive, so only the bundle recipe asks.
+BIN_DIR = $(shell swift build -c $(CONFIG) --show-bin-path)
+
+# The SDK, handed to the linker driver as -isysroot. Swift 6.4's default build
+# system gives clang only --sysroot, which it cannot read an SDK version from,
+# so the binary records its deployment target (14.0) as the SDK it was built
+# with. macOS decides how to draw an app from that record: one claiming SDK 14
+# gets compatibility mode — a grey title bar, no glass on the toolbar — and
+# nothing in the build fails. The bundle recipe asserts on the record.
+LINK_SDK = -Xswiftc -Xclang-linker -Xswiftc -isysroot \
+           -Xswiftc -Xclang-linker -Xswiftc $(shell xcrun --show-sdk-path)
+
 # A real identity, not ad-hoc, and the reason is Input Monitoring.
 #
 # TCC does not remember "this app"; it remembers a *code requirement*. For a
@@ -230,10 +247,16 @@ all: $(APP)
 
 $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
         Resources/TypeReview.icns Resources/typewriter.m4a $(ICON_SOURCE)
-	swift build -c $(CONFIG) --product $(BIN)
+	swift build -c $(CONFIG) --product $(BIN) $(LINK_SDK)
 	@rm -rf "$(STAGE)"
 	@mkdir -p $(CONTENTS)/MacOS $(CONTENTS)/Resources
-	@cp .build/$(CONFIG)/$(BIN) $(CONTENTS)/MacOS/$(BIN)
+	@cp $(BIN_DIR)/$(BIN) $(CONTENTS)/MacOS/$(BIN)
+	# Read back the SDK the binary claims, which is what macOS reads. 26 is
+	# the floor because it is the look this app is drawn for, and the same
+	# floor CI already demands of Xcode for the icon.
+	@sdk=$$(vtool -show-build $(CONTENTS)/MacOS/$(BIN) | awk '$$1 == "sdk" { print $$2 }'); \
+		[ "$${sdk%%.*}" -ge 26 ] 2>/dev/null \
+		|| { echo "error: $(BIN) records SDK '$$sdk'; macOS would draw it in compatibility mode" >&2; exit 1; }
 	@cp Info.plist $(CONTENTS)/Info.plist
 	# Stamped into the copy, not into the tracked file: the repository's
 	# Info.plist would otherwise change on every commit, and a build number
@@ -317,10 +340,15 @@ $(APP): $(SOURCES) $(CORPUS) Package.swift Makefile Info.plist $(ENTITLEMENTS) \
 	# directory happened to hold — test resource bundles left by
 	# `swift test -c release`, and bundles from targets that no longer
 	# exist — so what shipped depended on this machine's build history.
-	cp -R .build/$(CONFIG)/TypeReview_TypeReviewKit.bundle $(CONTENTS)/Resources/
+	cp -R $(BIN_DIR)/TypeReview_TypeReviewKit.bundle $(CONTENTS)/Resources/
 	# And prove it landed, rather than trusting that cp said nothing. The
 	# assertion is the part that stops this regressing quietly a second time.
-	@test -d "$(CONTENTS)/Resources/TypeReview_TypeReviewKit.bundle/Resources/code" \
+	# Either layout: the old build system writes a flat bundle, the new one a
+	# Contents/Resources one, and `Bundle` reads both. Looking in only the flat
+	# place would fail every build made by the build system now the default.
+	@find "$(CONTENTS)/Resources/TypeReview_TypeReviewKit.bundle" -type d \
+		\( -path '*.bundle/Resources/code' -o -path '*.bundle/Contents/Resources/Resources/code' \) \
+		| grep -q . \
 		|| { echo "error: corpus bundle missing from $(APP)" >&2; exit 1; }
 	@test -s "$(CONTENTS)/Resources/typewriter.m4a" \
 		|| { echo "error: typewriter sample missing from $(APP)" >&2; exit 1; }
