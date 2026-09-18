@@ -16,6 +16,9 @@ import AppKit
 /// exactly as if nothing had been set; given that colour resolved for the
 /// current appearance, it paints it. So it is resolved again whenever the
 /// appearance changes.
+///
+/// One per window, at its root. A screen inside that root does not need its
+/// own, and one there would ground the same window twice on every change.
 final class GroundedView: NSView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -31,9 +34,16 @@ final class GroundedView: NSView {
     /// appearances without waiting on one to change.
     func ground() {
         guard let window else { return }
-        var resolved = Theme.background
+        var resolved: NSColor?
         window.effectiveAppearance.performAsCurrentDrawingAppearance {
-            resolved = NSColor(cgColor: Theme.background.cgColor) ?? Theme.background
+            resolved = Theme.background.usingColorSpace(.sRGB)
+        }
+        // Never the dynamic colour as a fallback: that is the one value known to
+        // draw the tint. A colour that cannot be resolved leaves the window as
+        // it was, and the self-test's ground check is what says so.
+        guard let resolved else {
+            assertionFailure("the passage's ground did not resolve to a concrete colour")
+            return
         }
         window.backgroundColor = resolved
     }
