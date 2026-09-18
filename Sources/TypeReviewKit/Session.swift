@@ -155,7 +155,7 @@ public final class Session {
         var nextRNG = rng
 
         if settings.mode == .adaptive {
-            let plan = buildPlan()
+            let plan = lessonPlan(for: profile)
             nextPlan = plan
             let filter = Filter(allowed: plan.included, focus: plan.focus)
             nextPassage = try adaptiveSource.map {
@@ -287,10 +287,6 @@ public final class Session {
             plan: plan,
             lastResult: lastResult,
             passageId: passage.id)
-    }
-
-    private func buildPlan() -> LessonPlan {
-        lessonPlan(for: profile)
     }
 
     private func recordResult() throws {
