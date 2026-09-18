@@ -128,7 +128,10 @@ final class PlayViewController: NSViewController {
             if self?.state == .over { self?.newGame() }
         }
         playfield.onFocusLost = { [weak self] in self?.pause() }
-        playfield.onFrame = { [weak self] dt in self?.advance(by: dt) }
+        playfield.onFrame = { [weak self] dt in
+            guard let self, !self.holdsTime else { return }
+            self.advance(by: dt)
+        }
         playfield.onDisplayChange = { [weak self] in self?.displayChanged() }
         playfield.caretIndex = { [weak self] in self?.game.target?.typed ?? 0 }
         playfield.caretRect = { [weak self] in
@@ -159,7 +162,7 @@ final class PlayViewController: NSViewController {
     private func makeGame() -> FallingGame {
         let game = FallingGame(
             mode: mode, gentle: gentle, letters: plan.included, cell: art.cell(mode),
-            seed: UInt32.random(in: .min ... .max))
+            seed: nextSeed())
         game.margin = Double(PracticeWindowMetrics.horizontalInset)
         return game
     }
@@ -374,7 +377,16 @@ final class PlayViewController: NSViewController {
         keyboard?.showWithoutHeat(plan: mode == .letters ? plan : nil, expected: expected)
     }
 
-    // MARK: - For the self-test
+    // MARK: - For the self-test and the screenshots
+
+    /// Holds the game still whatever the display link says, so `--screenshots`
+    /// can stage a moment and have it stay put while AppKit draws it.
+    var holdsTime = false
+    /// The seed for the next game: random, unless `--screenshots` fixes it.
+    var nextSeed: () -> UInt32 = { .random(in: .min ... .max) }
+
+    /// Seeds the effects, so a staged burst sprays the same way every run.
+    func seedEffects(_ seed: UInt64) { stage.spray = Spray(seed: seed) }
 
     /// Pieces of bursts still in flight.
     var effectsInFlight: Int { stage.effectsInFlight }

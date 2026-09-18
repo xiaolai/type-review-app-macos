@@ -105,6 +105,10 @@ final class PracticeViewController: NSViewController {
     /// test that types a passage in two milliseconds produces a run at 750,000
     /// wpm, which is not a measurement of anything.
     var clock: () -> Double = { Date().timeIntervalSince1970 * 1000 }
+    /// When a finished run is recorded as having happened — what Statistics'
+    /// calendar and streak count. Injectable for the same reason `clock` is:
+    /// `--screenshots` spreads a typed history over weeks with it.
+    var runClock: () -> Double = { Date().timeIntervalSince1970 * 1000 }
     private var session: Session?
     private var store: ProfileFileStore?
     /// The user's library. Held here because the corpus adapter needs it on
@@ -250,6 +254,7 @@ final class PracticeViewController: NSViewController {
             }
             session = try Session(
                 profile: profile,
+                now: { [unowned self] in runClock() },
                 adaptiveSource: { [unowned self] filter, wordCount, passageLength, rng in
                     // The third argument used to be discarded, which is what
                     // made Short, Medium and Long do nothing at all.
