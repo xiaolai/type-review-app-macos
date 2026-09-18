@@ -182,6 +182,153 @@ final class FallingGameTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(slow.pace, FallingGame.paceRange.lowerBound)
     }
 
+    func testAKeyWithNothingFallingIsIgnored() {
+        for mode in PlayMode.allCases {
+            let game = game(mode)
+            _ = game.update(dt: 0.1)
+            XCTAssertTrue(game.items.isEmpty)
+            XCTAssertEqual(game.type("e"), [], "\(mode) scored a key with nothing falling")
+            XCTAssertEqual(game.streak, 0)
+        }
+    }
+
+    /// Four letters landing in one step with three lives left take three
+    /// lives, not four: lives stop at none, and so do the losses reported.
+    func testLivesNeverGoBelowNone() {
+        let game = game(.letters, gentle: false)
+        advance(game) { game, _ in game.items.count >= 4 }
+        let events = game.update(dt: 100)
+        XCTAssertEqual(game.lives, 0)
+        XCTAssertEqual(events.filter { if case .lost = $0 { return true } else { return false } }.count, 3)
+        XCTAssertEqual(events.last, .over)
+        XCTAssertTrue(game.isOver)
+    }
+
+    /// Where a new arrival starts does not depend on how time was cut up.
+    func testOneLongStepPlacesAnArrivalAsManyShortOnesDo() throws {
+        let long = game(.words, seed: 5)
+        let short = game(.words, seed: 5)
+        _ = long.update(dt: 1)
+        for _ in 0..<20 { _ = short.update(dt: 0.05) }
+        let a = try XCTUnwrap(long.items.first)
+        let b = try XCTUnwrap(short.items.first)
+        XCTAssertEqual(long.items.count, short.items.count)
+        XCTAssertEqual(a.chars, b.chars)
+        XCTAssertEqual(a.x, b.x)
+        XCTAssertEqual(a.y, b.y, accuracy: 1e-6)
+    }
+
+    /// Plays `seconds` of game time cut into steps of `step`, the last one
+    /// short, and answers every event in order.
+    private func play(_ game: FallingGame, for seconds: Double, step: Double) -> [PlayEvent] {
+        var events: [PlayEvent] = []
+        var left = seconds
+        while left > 1e-12 {
+            let dt = min(step, left)
+            events += game.update(dt: dt)
+            left -= dt
+        }
+        return events
+    }
+
+    private func assertSameGame(
+        _ a: FallingGame, _ b: FallingGame, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertEqual(a.items.count, b.items.count, "items", file: file, line: line)
+        for (x, y) in zip(a.items, b.items) {
+            XCTAssertEqual(x.id, y.id, file: file, line: line)
+            XCTAssertEqual(x.chars, y.chars, file: file, line: line)
+            XCTAssertEqual(x.x, y.x, file: file, line: line)
+            XCTAssertEqual(x.y, y.y, accuracy: 1e-6, file: file, line: line)
+            XCTAssertEqual(x.landed, y.landed, file: file, line: line)
+        }
+        XCTAssertEqual(a.lives, b.lives, "lives", file: file, line: line)
+        XCTAssertEqual(a.pace, b.pace, accuracy: 1e-9, "pace", file: file, line: line)
+        XCTAssertEqual(a.isOver, b.isOver, "over", file: file, line: line)
+    }
+
+    /// How time is cut into frames changes nothing: landings slow the pace at
+    /// the moment they happen, and lives go at the moment they are lost,
+    /// however long the step that contains them.
+    func testTheGameDoesNotDependOnHowTimeIsCutUp() {
+        for (mode, gentle) in [(PlayMode.letters, false), (.words, true), (.words, false)] {
+            let fine = game(mode, gentle: gentle, seed: 11)
+            let coarse = game(mode, gentle: gentle, seed: 11)
+            let ragged = game(mode, gentle: gentle, seed: 11)
+            let seen = play(fine, for: 30, step: 0.05)
+            XCTAssertEqual(play(coarse, for: 30, step: 1.5), seen, "\(mode) gentle \(gentle)")
+            XCTAssertEqual(play(ragged, for: 30, step: 0.37), seen, "\(mode) gentle \(gentle)")
+            XCTAssertTrue(
+                seen.contains { if case .landed = $0 { true } else if case .lost = $0 { true } else { false } },
+                "\(mode) gentle \(gentle): nothing reached the floor, so this proved nothing")
+            assertSameGame(fine, coarse)
+            assertSameGame(fine, ragged)
+        }
+    }
+
+    /// What falls due exactly as a step ends is on the field when it returns,
+    /// whether that moment ends one step or two. The first arrival is due at
+    /// 0.3 seconds.
+    func testAnArrivalDueAsAStepEndsIsThereWhenItReturns() {
+        let whole = game(.words, seed: 5)
+        let split = game(.words, seed: 5)
+        _ = whole.update(dt: 0.3)
+        _ = split.update(dt: 0.2)
+        _ = split.update(dt: 0.1)
+        XCTAssertEqual(whole.items.count, 1)
+        assertSameGame(whole, split)
+    }
+
+    /// A field made shorter under something falling lands it at once, not at
+    /// the end of whatever step comes next — the landing slows the pace, and
+    /// everything still falling feels that from the moment it happens.
+    func testAFieldMadeShorterLandsWhatItPassedAtOnce() {
+        for gentle in [true, false] {
+            let whole = game(.words, gentle: gentle, seed: 5)
+            let split = game(.words, gentle: gentle, seed: 5)
+            for game in [whole, split] {
+                advance(game) { game, _ in game.items.count == 2 }
+                let lowest = game.items.max { $0.y < $1.y }!
+                // The floor a point above the lowest item's bottom.
+                game.field = PlaySize(
+                    width: field.width, height: lowest.y + lowest.size.height - 1)
+            }
+            XCTAssertEqual(
+                whole.update(dt: 1), split.update(dt: 0.5) + split.update(dt: 0.5),
+                "gentle \(gentle)")
+            assertSameGame(whole, split)
+        }
+    }
+
+    /// A hold ending partway through a step lets the next arrival in at that
+    /// moment, not at the end of the step.
+    func testAHoldEndsWhenItEndsInsideALongStep() {
+        let fine = game(.sentences, seed: 3)
+        let coarse = game(.sentences, seed: 3)
+        for game in [fine, coarse] {
+            advance(game) { game, _ in !game.items.isEmpty }
+            _ = typeTarget(game)
+            XCTAssertTrue(game.items.isEmpty)
+        }
+        XCTAssertEqual(play(coarse, for: 3, step: 3), play(fine, for: 3, step: 0.05))
+        XCTAssertFalse(fine.items.isEmpty, "nothing arrived after the hold, so this proved nothing")
+        assertSameGame(fine, coarse)
+    }
+
+    /// Time spent held back is not banked: what arrives after a hold starts
+    /// near the top, not as far down as the hold was long.
+    func testAnArrivalAfterAHoldStartsAtTheTop() throws {
+        let game = game(.sentences)
+        advance(game) { game, _ in !game.items.isEmpty }
+        _ = typeTarget(game)
+        _ = game.update(dt: 1.7)
+        XCTAssertTrue(game.items.isEmpty)
+        _ = game.update(dt: 0.2)
+        let arrival = try XCTUnwrap(game.items.first)
+        let speed = field.height / PlayMode.sentences.fallSeconds * game.pace
+        XCTAssertLessThanOrEqual(arrival.y, -cell.height + speed * 0.2 + 1e-9)
+    }
+
     func testTheSameSeedPlaysTheSameGame() {
         func arrivals(_ seed: UInt32) -> [String] {
             let game = game(.words, gentle: false, seed: seed)

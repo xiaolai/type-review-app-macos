@@ -108,9 +108,12 @@ public final class FallingGame {
     private var bag: [String] = []
 
     /// `letters` is what Letters mode drops — the lesson plan's included
-    /// letters, so the game drills what practice has unlocked.
+    /// letters, so the game drills what practice has unlocked. Each must be one
+    /// character, as the plan's are: a falling letter is one key.
     public init(mode: PlayMode, gentle: Bool, letters: [String], cell: PlaySize, seed: UInt32) {
-        precondition(!letters.isEmpty, "Play needs at least one letter to drop")
+        precondition(mode != .letters || !letters.isEmpty, "Letters mode needs a letter to drop")
+        precondition(
+            letters.allSatisfy { $0.utf16.count == 1 }, "each letter Play drops must be one character")
         self.mode = mode
         self.gentle = gentle
         self.letters = letters
@@ -138,32 +141,103 @@ public final class FallingGame {
 
     // MARK: - Time
 
+    /// Moves the game on by `dt` seconds.
+    ///
+    /// In steps that end at every moment something changes — an arrival falling
+    /// due, a hold ending, something reaching the floor — so how time is cut
+    /// into frames never changes what happens. A landing slows the pace and a
+    /// hold ending lets the next arrival in; one long step that ran past either
+    /// applied the old pace, or the old hold, to all of it.
     public func update(dt: Double) -> [PlayEvent] {
         guard !isOver, dt > 0 else { return [] }
+        var events: [PlayEvent] = []
+        var left = dt
+        while left > 0, !isOver {
+            arrive()
+            let step = min(left, untilNextChange())
+            events += advance(by: step)
+            left -= step
+        }
+        // The last boundary too. Left to the next call, what fell due exactly
+        // now was missing from this one's result — or present, when the same
+        // time cut in two left a rounding remainder that took one more lap.
+        if !isOver { arrive() }
+        return events
+    }
+
+    private var fallSpeed: Double { field.height / mode.fallSeconds * pace }
+
+    /// How many may be falling at once.
+    private var mostFalling: Int {
+        switch mode {
+        case .letters: return min(6, 2 + Int(pace * 2))
+        case .words: return min(4, 1 + Int(pace * 1.5))
+        case .sentences: return 1
+        }
+    }
+
+    private var arrivalInterval: Double {
+        (mode == .letters ? 1.5 : mode == .words ? 3.4 : 0.9) / pace.squareRoot()
+    }
+
+    /// Lets in whatever is due, at the top, unless something holds it back.
+    ///
+    /// Only ever at a step's boundary, which is the only moment an arrival can
+    /// fall due or stop being held — so it arrives exactly then, and starts at
+    /// the top. It used to be let in at a step's end and started as far down
+    /// as the time since it was due; that also counted time it had spent held
+    /// back, and so as far down as the step was long. While held, the clock
+    /// does not bank time.
+    private func arrive() {
+        // Nothing on the field: the next arrival is a moment away at most.
+        if items.isEmpty { spawnIn = min(spawnIn, 0.35) }
+        guard spawnIn <= 0, holdFor <= 0, items.count < mostFalling,
+            !(gentle && items.contains { $0.landed })
+        else { return }
+        spawn()
+        spawnIn = arrivalInterval
+    }
+
+    /// The floor for an item: where its bottom meets the field's.
+    private func floorLine(for item: FallingItem) -> Double {
+        max(0, field.height - item.size.height)
+    }
+
+    /// Seconds until the next arrival falls due, a hold ends, or something
+    /// falling reaches the floor — whichever is first — or infinity when none
+    /// of them is coming. Zero when something is already at the floor or past
+    /// it, which a field made shorter underneath it leaves: that landing is
+    /// now, not at the end of whatever step comes next.
+    private func untilNextChange() -> Double {
+        var soonest = Double.infinity
+        if spawnIn > 0 { soonest = spawnIn }
+        if holdFor > 0 { soonest = min(soonest, holdFor) }
+        let speed = fallSpeed
+        guard speed > 0 else { return soonest }
+        for item in items where !item.landed {
+            let toFloor = (floorLine(for: item) - item.y) / speed
+            guard toFloor > 0 else { return 0 }
+            soonest = min(soonest, toFloor)
+        }
+        return soonest
+    }
+
+    /// One step in which nothing changes until its end: `update` never asks
+    /// for more time than that.
+    private func advance(by dt: Double) -> [PlayEvent] {
         clock += dt
         holdFor = max(0, holdFor - dt)
-        let speed = field.height / mode.fallSeconds * pace
-        let most: Int
-        switch mode {
-        case .letters: most = min(6, 2 + Int(pace * 2))
-        case .words: most = min(4, 1 + Int(pace * 1.5))
-        case .sentences: most = 1
-        }
-        let interval = (mode == .letters ? 1.5 : mode == .words ? 3.4 : 0.9) / pace.squareRoot()
-        let waiting = items.contains { $0.landed }
-        spawnIn -= dt
-        if items.isEmpty { spawnIn = min(spawnIn, 0.35) }
-        if spawnIn <= 0, holdFor <= 0, items.count < most, !(gentle && waiting) {
-            spawn()
-            spawnIn = interval
-        }
+        spawnIn = max(0, spawnIn - dt)
+        let speed = fallSpeed
 
         var events: [PlayEvent] = []
         var lost: [Int] = []
         for index in items.indices where !items[index].landed {
             items[index].y += speed * dt
-            let floor = max(0, field.height - items[index].size.height)
-            guard items[index].y >= floor else { continue }
+            let floor = floorLine(for: items[index])
+            // Within a billionth of a point: a step ends exactly when an item
+            // arrives, and the arithmetic can leave it that far short.
+            guard items[index].y >= floor - 1e-9 else { continue }
             if gentle {
                 items[index].y = floor
                 items[index].landed = true
@@ -173,14 +247,17 @@ public final class FallingGame {
                 lost.append(items[index].id)
             }
         }
-        for id in lost {
+        // A life per landing, never below none: a field made shorter under
+        // things already falling can land more at once than there are lives
+        // left. What lands after the last life is simply gone.
+        for id in lost where lives > 0 {
             lives -= 1
             streak = 0
             pace = max(Self.paceRange.lowerBound, pace * 0.88)
             events.append(.lost(id: id))
         }
         items.removeAll { lost.contains($0.id) }
-        if lives <= 0 {
+        if lives == 0 {
             isOver = true
             events.append(.over)
         }
@@ -214,7 +291,8 @@ public final class FallingGame {
                 }
             }
         }
-        items.append(FallingItem(id: nextID, chars: chars, size: size, x: x, y: -size.height))
+        items.append(
+            FallingItem(id: nextID, chars: chars, size: size, x: x, y: -size.height))
         nextID += 1
     }
 
@@ -252,19 +330,26 @@ public final class FallingGame {
     /// child with Caps Lock on would otherwise miss every key with no idea
     /// why; which letter it is matters here, not which case.
     public func type(_ character: String) -> [PlayEvent] {
-        guard !isOver else { return [] }
+        // Nothing falling is nothing to miss, in every mode.
+        guard !isOver, !items.isEmpty else { return [] }
         let key = character.lowercased()
-        if mode == .letters {
-            // Any falling copy of the letter counts; the lowest goes first.
-            guard
-                let index = items.indices.filter({ items[$0].chars[0].lowercased() == key })
-                    .max(by: { items[$0].y < items[$1].y })
-            else { return miss() }
-            hit(items[index].chars[0], at: index)
-            let item = items.remove(at: index)
-            return [.burst(id: item.id, indices: [0], word: item.chars[0])] + clear(item)
-        }
+        return mode == .letters ? typeLetter(key) : typeText(key)
+    }
 
+    /// Any falling copy of the letter counts; the lowest goes first.
+    private func typeLetter(_ key: String) -> [PlayEvent] {
+        guard
+            let index = items.indices.filter({ items[$0].chars[0].lowercased() == key })
+                .max(by: { items[$0].y < items[$1].y })
+        else { return miss() }
+        hit(items[index].chars[0], at: index)
+        let item = items.remove(at: index)
+        return [.burst(id: item.id, indices: [0], word: item.chars[0])] + clear(item)
+    }
+
+    /// The next character of the target: a word bursts as it is finished, and
+    /// a whole item clears when its last character is typed.
+    private func typeText(_ key: String) -> [PlayEvent] {
         guard let index = targetIndex else { return [] }
         let position = items[index].typed
         let chars = items[index].chars
