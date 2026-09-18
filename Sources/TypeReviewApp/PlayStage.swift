@@ -15,6 +15,9 @@ final class PlayStage {
     var art: PlayArt {
         didSet { if art.signature != oldValue.signature { invalidate() } }
     }
+    /// Where a burst's spray comes from: the system's generator, unless
+    /// `--screenshots` seeds one so a staged burst lands the same every run.
+    var spray = Spray()
     /// Set by the screen when Reduce Motion changes, as well as at start.
     /// Turned on, it also ends whatever is already flying.
     var reducesMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -253,16 +256,16 @@ final class PlayStage {
             }
             addPiece(
                 image, size: size, x: x, y: y,
-                vx: .random(in: -190...190) + (CGFloat(index) - middle) * 55,
-                vy: -.random(in: 260...520) * big, spin: .random(in: -9...9),
-                span: .random(in: 0.9...1.25), gravity: 1100)
+                vx: .random(in: -190...190, using: &spray) + (CGFloat(index) - middle) * 55,
+                vy: -.random(in: 260...520, using: &spray) * big, spin: .random(in: -9...9, using: &spray),
+                span: .random(in: 0.9...1.25, using: &spray), gravity: 1100)
             for _ in 0..<(mode == .sentences ? 8 : 12) {
-                let angle = CGFloat.random(in: 0..<(2 * .pi))
-                let speed = CGFloat.random(in: 140...460) * big
+                let angle = CGFloat.random(in: 0..<(2 * .pi), using: &spray)
+                let speed = CGFloat.random(in: 140...460, using: &spray) * big
                 addSpark(
                     x: x, y: y, vx: cos(angle) * speed, vy: sin(angle) * speed - 60,
-                    size: .random(in: 3...5.5) * big, colour: accent,
-                    span: .random(in: 0.45...0.9), gravity: 380)
+                    size: .random(in: 3...5.5, using: &spray) * big, colour: accent,
+                    span: .random(in: 0.45...0.9, using: &spray), gravity: 380)
             }
         }
         guard !xs.isEmpty, !reducesMotion else { return }
@@ -291,9 +294,9 @@ final class PlayStage {
                 image, size: CGSize(width: cell.width, height: cell.height),
                 x: CGFloat(item.x + cell.width * (Double(index) + 0.5)),
                 y: CGFloat(item.y + item.size.height / 2),
-                vx: reducesMotion ? 0 : .random(in: -60...60),
-                vy: reducesMotion ? 0 : -.random(in: 40...120),
-                spin: reducesMotion ? 0 : .random(in: -2...2), span: reducesMotion ? 0.3 : 0.8,
+                vx: reducesMotion ? 0 : .random(in: -60...60, using: &spray),
+                vy: reducesMotion ? 0 : -.random(in: 40...120, using: &spray),
+                spin: reducesMotion ? 0 : .random(in: -2...2, using: &spray), span: reducesMotion ? 0.3 : 0.8,
                 gravity: reducesMotion ? 0 : 900)
         }
     }
@@ -326,9 +329,9 @@ final class PlayStage {
         let accent = art.resolve(Theme.caret)
         for _ in 0..<70 {
             addSpark(
-                x: .random(in: width * 0.1...width * 0.9), y: height,
-                vx: .random(in: -80...80), vy: -.random(in: 380...720),
-                size: .random(in: 3...6), colour: accent, span: .random(in: 1.0...1.6), gravity: 520)
+                x: .random(in: width * 0.1...width * 0.9, using: &spray), y: height,
+                vx: .random(in: -80...80, using: &spray), vy: -.random(in: 380...720, using: &spray),
+                size: .random(in: 3...6, using: &spray), colour: accent, span: .random(in: 1.0...1.6, using: &spray), gravity: 520)
         }
     }
 
@@ -445,5 +448,25 @@ final class PlayStage {
     private static func retire(_ layer: CALayer, if done: Bool) -> Bool {
         if done { layer.removeFromSuperlayer() }
         return done
+    }
+}
+
+/// Randomness for the effects, which a seed makes repeatable. SplitMix64 when
+/// seeded: small, and good enough to scatter sparks.
+struct Spray: RandomNumberGenerator {
+    private var state: UInt64?
+
+    init(seed: UInt64? = nil) { state = seed }
+
+    mutating func next() -> UInt64 {
+        guard var z = state else {
+            var system = SystemRandomNumberGenerator()
+            return system.next()
+        }
+        z &+= 0x9E37_79B9_7F4A_7C15
+        state = z
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
     }
 }

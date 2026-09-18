@@ -6,6 +6,7 @@
 #   TYPE_E2E_HOST=<host> Tools/run-remote.sh
 #   TYPE_E2E_CHECKS='selftest' Tools/run-remote.sh <host>
 #   TYPE_E2E_DRY_RUN=1 Tools/run-remote.sh <host>    checks and stages, contacts nothing
+#   TYPE_E2E_FETCH=dist/screenshots ...              copies that folder back afterwards
 #
 # Why move them at all, when this project's checks were built not to steal the
 # screen. `Diagnostics.isRunningCheck` is the reason they are polite: a check
@@ -76,10 +77,17 @@ refuse() { print -u2 "run-remote: $1"; exit 9; }
 REMOTE_DIR="${TYPE_E2E_DIR:-ci/type-review-app-macos}"
 while [[ $REMOTE_DIR == */ ]]; do REMOTE_DIR=${REMOTE_DIR%/}; done
 CHECKS="${TYPE_E2E_CHECKS:-test selftest speechbench}"
+# What to bring back, for a check that makes something: a folder under dist/,
+# which is gitignored output. Nothing else, so a fetch can never write over
+# the sources here with the far end's copy of them.
+FETCH="${TYPE_E2E_FETCH:-}"
 [[ $HOST =~ '^[A-Za-z0-9_][A-Za-z0-9._@-]*$' ]] || refuse "host '$HOST' is not a plain ssh host name"
 [[ $REMOTE_DIR =~ '^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$' ]] \
   || refuse "remote directory '$REMOTE_DIR' must be a relative path of plain names"
 [[ $CHECKS =~ '^[a-z][a-z0-9-]*( [a-z][a-z0-9-]*)*$' ]] || refuse "checks '$CHECKS' must be make target names"
+while [[ $FETCH == */ ]]; do FETCH=${FETCH%/}; done
+[[ -z $FETCH || $FETCH =~ '^dist(/[A-Za-z0-9_][A-Za-z0-9_.-]*)+$' ]] \
+  || refuse "fetch '$FETCH' must be a folder under dist/, of plain names"
 CACHE="$REMOTE_DIR.build-cache"
 LOCK="$REMOTE_DIR.lock"
 
@@ -97,6 +105,7 @@ count=$(Tools/stage-tree.sh "$stage")
 if [[ -n ${TYPE_E2E_DRY_RUN:-} ]]; then
   print "dry run: $count files staged for $HOST:$REMOTE_DIR, build kept at $CACHE while copying"
   print "dry run: would run make SIGN_ID=- $CHECKS"
+  [[ -n $FETCH ]] && print "dry run: would copy $HOST:$REMOTE_DIR/$FETCH back to $FETCH"
   exit 0
 fi
 
@@ -160,4 +169,15 @@ print "Running: make SIGN_ID=- $CHECKS on $HOST ..."
 remote_status=0
 ssh -o ConnectTimeout=10 "$HOST" "cd '$REMOTE_DIR' && make SIGN_ID=- $CHECKS" || remote_status=$?
 print "$HOST finished with status $remote_status."
+# Whatever the status: a check that failed partway has made something worth
+# reading. No --delete, so nothing already here is removed.
+if [[ -n $FETCH ]]; then
+  mkdir -p "$FETCH"
+  if rsync -az "$HOST:$REMOTE_DIR/$FETCH/" "$FETCH/"; then
+    print "Copied $HOST:$REMOTE_DIR/$FETCH back to $FETCH."
+  else
+    print -u2 "run-remote: could not copy $FETCH back from $HOST"
+    (( remote_status == 0 )) && remote_status=13
+  fi
+fi
 exit $remote_status

@@ -22,7 +22,7 @@ enum Diagnostics {
     /// that decides whether to come to the front, and by the mutual-exclusion
     /// check. Three copies of this list is three chances for a new check to be
     /// forgotten by one of them.
-    static let flags = ["--soundcheck", "--selftest", "--speechbench"]
+    static let flags = ["--soundcheck", "--selftest", "--speechbench", "--screenshots"]
 
     /// Whether this launch is a check rather than somebody opening the app.
     ///

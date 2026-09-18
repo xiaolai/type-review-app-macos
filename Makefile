@@ -451,6 +451,14 @@ speechbench: $(APP) quit-running
 test:
 	swift test
 
+# The App Store screenshots, rendered by the app itself from a staged moment
+# rather than caught from the screen -- see `Diagnostics.runScreenshots` -- into
+# dist/screenshots/<version>. It puts a window on screen, so it belongs on a Mac
+# nobody is using:
+#   TYPE_E2E_CHECKS=screenshots TYPE_E2E_FETCH=dist/screenshots make remote REMOTE_HOST=<host>
+screenshots: $(APP)
+	@Tools/screenshots.sh $(APP) dist/screenshots/$(DIST_VERSION)
+
 # The same checks, on a Mac nobody is typing on.
 #
 # They are already polite about the screen — `Diagnostics.isRunningCheck` is

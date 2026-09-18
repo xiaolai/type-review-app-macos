@@ -1031,7 +1031,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func addRow(
         _ grid: NSGridView, _ label: String, _ control: NSControl, hint: String? = nil
     ) {
-        let name = NSTextField(labelWithString: "\(label):")
+        // No colon on a row with no name, such as a button under the row it
+        // belongs to: a colon alone is punctuation for nothing.
+        let name = NSTextField(labelWithString: label.isEmpty ? "" : "\(label):")
         let row = grid.addRow(with: [name, control])
         row.yPlacement = .center
         row.topPadding = 4
