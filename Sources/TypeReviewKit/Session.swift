@@ -41,6 +41,19 @@ func stripSurrogates(_ string: String) -> String {
     return String(utf16CodeUnits: units, count: units.count)
 }
 
+/// The lesson a profile's history calls for next.
+///
+/// What `Session` plans an adaptive run from, public so that something which
+/// only reads a profile — Play dropping the letters practice has unlocked —
+/// asks the same question the same way instead of keeping a second copy of it.
+public func lessonPlan(for profile: Profile) -> LessonPlan {
+    planLesson(
+        letters: buildAlphabet(profile.settings),
+        bigramStats: buildBigramStatsMap(profile.results.map(\.histogram)),
+        target: Target(targetSpeed: profile.settings.targetWpm),
+        settings: profile.settings.adaptive)
+}
+
 public struct SessionSnapshot {
     public let mode: Mode
     public let typing: TypingSnapshot
@@ -277,12 +290,7 @@ public final class Session {
     }
 
     private func buildPlan() -> LessonPlan {
-        let stats = buildBigramStatsMap(profile.results.map(\.histogram))
-        return planLesson(
-            letters: buildAlphabet(profile.settings),
-            bigramStats: stats,
-            target: Target(targetSpeed: profile.settings.targetWpm),
-            settings: profile.settings.adaptive)
+        lessonPlan(for: profile)
     }
 
     private func recordResult() throws {
