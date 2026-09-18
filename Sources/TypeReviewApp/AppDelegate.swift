@@ -8,6 +8,9 @@ import TypeReviewKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow?
     var practice: PracticeViewController?
+    var play: PlayViewController?
+    /// Holds Practice and Play, and shows one. See `MainScreenController`.
+    var screens: MainScreenController?
     // Built in applicationDidFinishLaunching, for the same reason the stats
     // controller is: a main-actor default value cannot be initialised from
     // AppDelegate's nonisolated init.
@@ -19,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settings: SettingsWindowController?
     private var libraryWindow: LibraryWindowController?
     var keyboardMenuItem: NSMenuItem?
+    /// View ▸ Practice and View ▸ Play, which carry the current screen's mark.
+    var screenMenuItems: [MainScreen: NSMenuItem] = [:]
+    /// The menu holding ⌘N, whose title and item follow the screen.
+    var screenCommandsMenu: NSMenu?
+    var newTextMenuItem: NSMenuItem?
     private var preferencesObserver: NSObjectProtocol?
     private var windowCloseObserver: NSObjectProtocol?
     var statusItem: NSStatusItem?
@@ -88,8 +96,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menuBarOnly = atLogin || AppPreferences.startInMenuBar.value || runningCheck
         let practice = PracticeViewController()
         self.practice = practice
+        let play = PlayViewController()
+        self.play = play
+        play.planSource = { [weak practice] in practice?.nextLessonPlan }
+        let screens = MainScreenController(practice: practice, play: play)
+        self.screens = screens
 
-        let window = NSWindow(contentViewController: practice)
+        let window = NSWindow(contentViewController: screens)
         window.title = "TYPE"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         // The toolbar, and the unified style, are what give this window the
@@ -106,6 +119,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolbarController.onChooseSource = { [weak self] channel in
             self?.practice?.channel = channel
             self?.markSourceMenu()
+        }
+        toolbarController.onSwitchScreen = { [weak self] screen in self?.show(screen) }
+        toolbarController.onNewGame = { [weak self] in self?.play?.newGame() }
+        toolbarController.onChoosePlayMode = { [weak self] mode in self?.play?.newGame(mode: mode) }
+        toolbarController.onChoosePlayRules = { [weak self] gentle in self?.play?.newGame(gentle: gentle) }
+        toolbarController.currentPlay = { [weak self] in
+            (self?.play?.mode ?? .words, self?.play?.gentle ?? true)
         }
         window.toolbar = toolbarController.makeToolbar()
         window.toolbarStyle = .unified
@@ -126,6 +146,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // backdrop rather than to the separator. Making the backdrop
         // transparent is what removes it, and it also lets the toolbar sit on
         // the same white as the text instead of on a slightly different one.
+        // In Dark Mode that holds only because the main window's root is a
+        // `GroundedView`: the default window background is tinted by the
+        // wallpaper, and the text's is not.
         //
         // Note this is *not* `.fullSizeContentView`: the content still begins
         // below the title bar, so nothing scrolls under the toolbar and the
@@ -153,8 +176,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !runningCheck { installStatusItem() }
         let drawer = KeyboardDrawer()
         self.drawer = drawer
-        practice.keyboard = drawer.keyboard
         drawer.attach(to: window)
+        // Practice first, whichever screen shows first. Play's first game
+        // plans its Letters from the profile, and Practice reads the profile
+        // when its view loads — so a launch straight into Play would otherwise
+        // plan for a typist with no history.
+        practice.loadViewIfNeeded()
+        // Where the window was left, except for a check: every check drives
+        // Practice first, whatever the last person to use this Mac chose.
+        show(runningCheck ? .practice : AppPreferences.mainScreen.value, remember: false)
         markSourceMenu()
         // Started by launchd rather than by a person: leave the menu bar icon
         // and the keystroke sound, and nothing else. A window thrown across
@@ -211,6 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // mark for one notification.
                 self.applySoundPreferences()
                 self.practice?.applyTypingPreferences()
+                self.play?.applyTypingPreferences()
                 if changed == nil || changed == AppPreferences.soundShortcut.keyCodeKey
                     || changed == AppPreferences.summonShortcut.keyCodeKey
                 {
@@ -254,7 +285,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         switch checks.first {
         case "--soundcheck": Diagnostics.runSoundCheck()
-        case "--selftest": Diagnostics.runSelfTest(practice: practice)
+        case "--selftest":
+            Diagnostics.runSelfTest(practice: practice) { [weak self] in
+                guard let self, let play = self.play, let screens = self.screens else { return nil }
+                return Diagnostics.checkPlay(
+                    play: play, practice: practice, screens: screens,
+                    show: { self.show($0, remember: false) })
+            }
         case "--speechbench": Diagnostics.runSpeechBench(practice: practice)
         case .some(let flag):
             // Recognised by `Diagnostics.flags` and handled by nothing. Adding a
@@ -413,7 +450,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func observeWindowClosing() {
         windowCloseObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
-        ) { notification in
+        ) { [weak self] notification in
+            // Weak here as well as below. Without it this closure captures self
+            // strongly to hand it on, which makes the inner weak capture
+            // pointless — and Swift 6.4 warns that it is.
             let closing = notification.object as? NSWindow
             MainActor.assumeIsolated {
                 // On the next pass of the runloop, because this fires *before*
@@ -440,8 +480,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
 
+    /// ⌘N: new text on Practice, a new game on Play.
     @objc func newText(_ sender: Any?) {
-        practice?.startFreshRun()
+        if screens?.current == .play {
+            play?.newGame()
+        } else {
+            practice?.startFreshRun()
+        }
+    }
+
+    /// View ▸ Practice and View ▸ Play. The main window comes forward first:
+    /// the menu is live while Library or Statistics is in front, or with the
+    /// main window closed, and a switch behind them changed nothing anyone
+    /// could see.
+    @objc func showScreen(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let screen = MainScreen(rawValue: raw)
+        else { return }
+        showMainWindow(nil)
+        show(screen)
+    }
+
+    /// Shows a screen, and moves everything that follows the screen with it:
+    /// the toolbar's leading items, the drawer's keyboard, the menus'
+    /// checkmarks and the name of ⌘N.
+    ///
+    /// The keyboard is handed over rather than shared. It belongs to whichever
+    /// screen is showing, and a screen that is not showing must not be able
+    /// to light a key on it.
+    func show(_ screen: MainScreen, remember: Bool = true) {
+        guard let screens else { return }
+        if screen == .practice { play?.leave() }
+        screens.show(screen)
+        toolbarController?.show(screen)
+        practice?.keyboard = screen == .practice ? drawer?.keyboard : nil
+        play?.keyboard = screen == .play ? drawer?.keyboard : nil
+        markScreenMenus(screen)
+        if remember { AppPreferences.mainScreen.value = screen }
     }
 
     @objc func chooseSource(_ sender: NSMenuItem) {
@@ -671,6 +745,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         practice?.onKeyReleased =
             coveredElsewhere || !AppPreferences.releaseSound.value
             ? nil : { [weak self] code in self?.playKey(code, .release) }
+        // Play is the same window's other screen, so the same switch.
+        play?.onKeyStruck = practice?.onKeyStruck
+        play?.onKeyReleased = practice?.onKeyReleased
         // Outside the switch above, and that is the point of it. Everything
         // `coveredElsewhere` governs is a question of which path sounds a key
         // that both paths can see. The error tone is not: the monitor sees key
@@ -685,6 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // wrong letter. `AppPreferences.mistypeSound` is the switch for that,
         // and the controller reads it.
         practice?.onMistype = { [weak self] in self?.sounds.playMistype() }
+        play?.onMistype = practice?.onMistype
         // Warmed here, where switching the feature on happens, rather than on
         // the first wrong key. See `prepareMistype`.
         if AppPreferences.mistypeSound.value { sounds.prepareMistype() }

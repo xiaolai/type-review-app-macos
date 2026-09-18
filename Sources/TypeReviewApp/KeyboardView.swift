@@ -71,13 +71,24 @@ final class KeyboardView: NSView {
         stats: OrderedMap<PerKeyStat>, plan: LessonPlan?, expected: String?, targetWpm: Double
     ) {
         self.stats = stats
+        targetMs = Target(targetSpeed: targetWpm).timePerChar
+        show(plan: plan, expected: expected)
+    }
+
+    /// The lesson and the next key, with no heat — for a screen that has no
+    /// statistics to show, and so no target speed to measure them against.
+    func showWithoutHeat(plan: LessonPlan?, expected: String?) {
+        stats = OrderedMap()
+        show(plan: plan, expected: expected)
+    }
+
+    private func show(plan: LessonPlan?, expected: String?) {
         // Kept as the two things this view draws rather than as the whole
         // plan: the locked set is a per-key lookup on every redraw, and a set
         // answers it in constant time where `keys` would be a linear scan.
         lockedLetters = Set(plan?.keys.lazy.filter { !$0.included }.map(\.letter) ?? [])
         focusLetter = plan?.focus
         self.expected = expected
-        targetMs = Target(targetSpeed: targetWpm).timePerChar
         needsDisplay = true
     }
 

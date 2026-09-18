@@ -113,6 +113,18 @@ extension AppDelegate {
         statusOpenItem?.keyEquivalentModifierMask = shortcut?.modifiers.cocoa ?? []
     }
 
+    /// The current screen's checkmark, and the name of ⌘N and its menu.
+    func markScreenMenus(_ screen: MainScreen) {
+        for (candidate, item) in screenMenuItems {
+            item.state = candidate == screen ? .on : .off
+        }
+        screenCommandsMenu?.title = screen.title
+        switch screen {
+        case .practice: newTextMenuItem?.title = "New Text"
+        case .play: newTextMenuItem?.title = "New Game"
+        }
+    }
+
     /// Three surfaces offer the keyboard toggle, so all three show its state.
     ///
     /// The toolbar button was the one that did not, for as long as it existed:
@@ -161,6 +173,18 @@ extension AppDelegate {
 
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
+        // The two screens first, then the windows, named and keyed as the
+        // toolbar's switch names them — see `MainScreen.menuKey`.
+        for screen in MainScreen.allCases {
+            let item = viewMenu.addItem(
+                withTitle: screen.title, action: #selector(showScreen(_:)),
+                keyEquivalent: screen.menuKey)
+            item.keyEquivalentModifierMask = MainScreen.menuModifiers
+            item.target = self
+            item.representedObject = screen.rawValue
+            screenMenuItems[screen] = item
+        }
+        viewMenu.addItem(.separator())
         let statsItem = viewMenu.addItem(
             withTitle: "Statistics", action: #selector(showStats(_:)), keyEquivalent: "2")
         statsItem.target = self
@@ -205,6 +229,9 @@ extension AppDelegate {
         newText.target = self
         practiceItem.submenu = practiceMenu
         root.addItem(practiceItem)
+        // Renamed with the screen: Practice ▸ New Text, or Play ▸ New Game.
+        screenCommandsMenu = practiceMenu
+        newTextMenuItem = newText
 
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
@@ -333,5 +360,15 @@ extension AppDelegate {
                 }
             }
         }
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// Source is practice's, so it is greyed out while Play shows — its key
+    /// equivalents with it. Enabled there, a pick reached a practice screen
+    /// nobody could see and threw away the run waiting on it.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(chooseSource(_:)) { return screens?.current != .play }
+        return true
     }
 }

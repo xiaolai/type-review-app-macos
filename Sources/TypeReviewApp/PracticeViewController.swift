@@ -19,6 +19,9 @@ final class PracticeViewController: NSViewController {
         static let practising = "⇥ new text · ⏎ next run"
         static let finished = "⏎ next run · ⇥ new text"
     }
+    /// The status bar's trailing half. The same label carries the attribution
+    /// and any save error, so the credit for a passage sits on the same line
+    /// as the numbers rather than on a line of its own.
     private let hintLabel = NSTextField(labelWithString: Hint.practising)
     private let resultsView = ResultsView()
     /// The on-screen keyboard. It lives in the drawer below the window, so
@@ -95,20 +98,8 @@ final class PracticeViewController: NSViewController {
     /// answered only when somebody opens Settings.
     private var soundsMistypes = true
 
-    /// When the last error tone played, so a held-down wrong key does not
-    /// machine-gun.
-    ///
-    /// This is an auto-repeat guard and nothing else. It used to be described
-    /// as the defence against an input-method commit, which it never was: no
-    /// interval in milliseconds can tell three characters committed at once
-    /// from three keys typed quickly, and picking one wrongly suppresses a
-    /// real mistake. `soundedThisCommit` is what handles commits. What is left
-    /// for a clock is a key held down, which `keyDown` filters for the click
-    /// but cannot filter here, because a repeat still produces characters.
-    private var lastMistypeSoundMs: Double?
-
-    /// Whether this commit has already sounded. Reset when one begins.
-    private var soundedThisCommit = false
+    /// When the error tone may play. Shared with Play; see `MistypeGate`.
+    private var mistypeGate = MistypeGate()
 
     /// Keystroke clock. Injectable for the same reason the engine's is: a
     /// test that types a passage in two milliseconds produces a run at 750,000
@@ -153,52 +144,18 @@ final class PracticeViewController: NSViewController {
     }
 
     override func loadView() {
+        // A plain view: the window's ground belongs to `MainScreenController`'s
+        // root, which holds this screen. See `GroundedView`.
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
         root.wantsLayer = true
-        styleReadouts()
-        let status = makeStatusBar()
+        let status = StatusBar.make(
+            readouts: [wpmLabel, accuracyLabel], mode: modeIcon, hint: hintLabel)
         // Results occupy the same space as the passage rather than a separate
         // screen: after a run the number you want is where your eyes already
         // are, and Enter starts the next one without moving anything.
         resultsView.isHidden = true
         install(status: status, in: root)
         view = root
-    }
-
-    /// The live numbers and the hint line. Readouts, not headings, so they are
-    /// set in the secondary colour at the stat size.
-    private func styleReadouts() {
-        for label in [wpmLabel, accuracyLabel] {
-            label.font = Theme.statFont
-            label.textColor = Theme.secondaryText
-        }
-        hintLabel.font = NSFont.systemFont(ofSize: 11)
-        hintLabel.textColor = Theme.secondaryText
-        modeIcon.contentTintColor = Theme.secondaryText
-        modeIcon.imageScaling = .scaleProportionallyDown
-        modeIcon.setContentHuggingPriority(.required, for: .horizontal)
-    }
-
-    /// A status bar, along the bottom, where a status bar goes.
-    ///
-    /// These change on every keystroke and are read by glancing; putting them
-    /// above the passage made the first line of text the second thing on the
-    /// screen. The trailing half is the same label that carries the
-    /// attribution and any save error, so the credit for a passage sits on the
-    /// same line as the numbers rather than on a line of its own.
-    private func makeStatusBar() -> NSStackView {
-        let metrics = NSStackView(views: [wpmLabel, accuracyLabel, modeIcon])
-        metrics.spacing = 14
-        metrics.alignment = .centerY
-        let status = NSStackView(views: [metrics, hintLabel])
-        status.spacing = 16
-        status.alignment = .centerY
-        status.distribution = .fill
-        // The hint takes the slack and truncates; the numbers never move.
-        metrics.setContentCompressionResistancePriority(.required, for: .horizontal)
-        hintLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        hintLabel.lineBreakMode = .byTruncatingTail
-        return status
     }
 
     private func install(status: NSStackView, in root: NSView) {
@@ -246,7 +203,7 @@ final class PracticeViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         typingView.onCharacter = { [weak self] character in self?.type(character) }
-        typingView.onCommitBegan = { [weak self] in self?.soundedThisCommit = false }
+        typingView.onCommitBegan = { [weak self] in self?.mistypeGate.beginCommit() }
         typingView.onBackspace = { [weak self] in try? self?.session?.backspace(); self?.refresh() }
         typingView.onRestart = { [weak self] in self?.startFreshRun() }
         typingView.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
@@ -402,14 +359,7 @@ final class PracticeViewController: NSViewController {
     private func soundMistype(at cursorBefore: Int) {
         guard soundsMistypes, let typing = lastTyping else { return }
         guard mistypeJustHappened(statuses: typing.statuses, at: cursorBefore) else { return }
-        // One sound per commit, then a clock for the held-key case. Two
-        // separate rules because they answer two separate questions, and the
-        // stopwatch alone answered neither correctly.
-        guard !soundedThisCommit else { return }
-        let now = clock()
-        guard mistypeMaySound(lastSoundedMs: lastMistypeSoundMs, nowMs: now) else { return }
-        soundedThisCommit = true
-        lastMistypeSoundMs = now
+        guard mistypeGate.admit(nowMs: clock()) else { return }
         onMistype?()
     }
 
@@ -520,6 +470,23 @@ final class PracticeViewController: NSViewController {
         let stats = aggregatePerKey(results)
         cachedPerKey = (token, stats)
         return stats
+    }
+
+    /// The view that takes the keys when this screen is shown.
+    var focusView: NSView { typingView }
+
+    /// The lesson this profile's history calls for next, for Play: Letters
+    /// drops the letters practice has unlocked. Read, never written back —
+    /// see `FallingGame` for why a game's keystrokes stay out of the profile.
+    ///
+    /// Nil when this screen could not start, which it says on its own status
+    /// bar. Asked before the screen has loaded, it has not read the profile
+    /// yet — and answering for an empty profile then is how Play once gave a
+    /// returning typist the first lesson — so that is a wiring error, not a
+    /// question with an answer.
+    var nextLessonPlan: LessonPlan? {
+        assert(isViewLoaded, "asked for a lesson before the profile was read")
+        return session.map { lessonPlan(for: $0.profile) }
     }
 
     /// Credits the passage's source when there is one to credit.
@@ -678,13 +645,8 @@ final class PracticeViewController: NSViewController {
         // statuses this refresh was given rather than the previous ones.
         lastTyping = snapshot.typing
         if resetPassage {
-            // A new passage is a new run, and the tone's history belongs to the
-            // old one. Left standing, the first mistake of a restart lands
-            // inside the previous run's guard window and is swallowed — rare,
-            // and indistinguishable from the feature being broken when it is
-            // the first thing somebody tries.
-            lastMistypeSoundMs = nil
-            soundedThisCommit = false
+            // A new passage is a new run, with no tone history.
+            mistypeGate.reset()
             beginSpeech(for: snapshot)
             typingView.setPassage(
                 snapshot.typing.expected, statuses: snapshot.typing.statuses,
