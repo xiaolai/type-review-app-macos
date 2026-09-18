@@ -153,7 +153,9 @@ final class PracticeViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
+        // Grounded, so the window around the passage is the passage's colour
+        // in Dark Mode too. See `GroundedView`.
+        let root = GroundedView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
         root.wantsLayer = true
         styleReadouts()
         let status = makeStatusBar()

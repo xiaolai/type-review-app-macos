@@ -126,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // backdrop rather than to the separator. Making the backdrop
         // transparent is what removes it, and it also lets the toolbar sit on
         // the same white as the text instead of on a slightly different one.
+        // In Dark Mode that holds only because the practice screen's root is a
+        // `GroundedView`: the default window background is tinted by the
+        // wallpaper, and the text's is not.
         //
         // Note this is *not* `.fullSizeContentView`: the content still begins
         // below the title bar, so nothing scrolls under the toolbar and the
