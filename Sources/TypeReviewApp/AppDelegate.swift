@@ -293,6 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     show: { self.show($0, remember: false) })
             }
         case "--speechbench": Diagnostics.runSpeechBench(practice: practice)
+        case "--screenshots": Diagnostics.runScreenshots(app: self)
         case .some(let flag):
             // Recognised by `Diagnostics.flags` and handled by nothing. Adding a
             // check to that list and forgetting this switch launched the app
