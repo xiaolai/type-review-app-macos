@@ -1,0 +1,196 @@
+{
+  "entries": [
+    {
+      "id": "early-01-aesop-north-wind",
+      "text": "The North Wind and the Sun had a quarrel about which of them was the stronger.",
+      "title": null,
+      "author": "Aesop",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-02-aesop-crow",
+      "text": "A crow sat on a branch with a large piece of cheese in her beak.",
+      "title": null,
+      "author": "Aesop",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-03-aesop-tortoise",
+      "text": "The hare ran far ahead and lay down to sleep. Slow and steady wins the race.",
+      "title": null,
+      "author": "Aesop",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-04-aesop-lion-mouse",
+      "text": "A lion lay asleep in the forest with his great head resting on his paws.",
+      "title": null,
+      "author": "Aesop",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-05-aesop-ant",
+      "text": "All summer long the ant worked hard, gathering grain for the winter to come.",
+      "title": null,
+      "author": "Aesop",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-06-mg-jack-jill",
+      "text": "Jack and Jill went up the hill to fetch a pail of water.",
+      "title": null,
+      "author": "Mother Goose",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-07-mg-hickory",
+      "text": "Hickory dickory dock, the mouse ran up the clock. The clock struck one.",
+      "title": null,
+      "author": "Mother Goose",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-08-mg-star",
+      "text": "Twinkle, twinkle, little star, how I wonder what you are.",
+      "title": null,
+      "author": "Mother Goose",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-09-mg-humpty",
+      "text": "Humpty Dumpty sat on a wall. Humpty Dumpty had a great fall.",
+      "title": null,
+      "author": "Mother Goose",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-10-redhen",
+      "text": "Who will help me plant the wheat? Not I, said the duck. Not I, said the cat.",
+      "title": null,
+      "author": "The Little Red Hen",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-11-gingerbread",
+      "text": "Run, run, as fast as you can. You cannot catch me, I am the gingerbread man.",
+      "title": null,
+      "author": "The Gingerbread Man",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-12-threepigs",
+      "text": "Then I will huff, and I will puff, and I will blow your house in.",
+      "title": null,
+      "author": "The Three Little Pigs",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-13-alice-open",
+      "text": "Alice was beginning to get very tired of sitting by her sister on the bank.",
+      "title": null,
+      "author": "Lewis Carroll",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-14-alice-rabbit",
+      "text": "A white rabbit with pink eyes ran close by her, looking at its watch.",
+      "title": null,
+      "author": "Lewis Carroll",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-15-oz-kansas",
+      "text": "Dorothy lived in the midst of the great Kansas prairies with Uncle Henry.",
+      "title": null,
+      "author": "L. Frank Baum",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-16-oz-road",
+      "text": "She followed the road of yellow brick, and her little dog Toto ran beside her.",
+      "title": null,
+      "author": "L. Frank Baum",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-17-potter-rabbits",
+      "text": "Once upon a time there were four little rabbits, and their names were Flopsy, Mopsy, Cottontail and Peter.",
+      "title": null,
+      "author": "Beatrix Potter",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-18-potter-garden",
+      "text": "Now run along, and do not get into mischief. I am going out to the baker.",
+      "title": null,
+      "author": "Beatrix Potter",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-19-kipling-elephant",
+      "text": "The elephant had no trunk at all, only a blackish bulgy nose as big as a boot.",
+      "title": null,
+      "author": "Rudyard Kipling",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-20-kipling-cat",
+      "text": "I am not a friend, and I am not a servant. I am the cat who walks by himself.",
+      "title": null,
+      "author": "Rudyard Kipling",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-21-grahame-river",
+      "text": "The mole had been working very hard all the morning, spring cleaning his little home.",
+      "title": null,
+      "author": "Kenneth Grahame",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-22-grahame-boat",
+      "text": "There is nothing half so much worth doing as simply messing about in boats.",
+      "title": null,
+      "author": "Kenneth Grahame",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-23-velveteen",
+      "text": "Real is not how you are made, said the skin horse. It is a thing that happens to you.",
+      "title": null,
+      "author": "Margery Williams",
+      "url": null,
+      "license": "public domain"
+    },
+    {
+      "id": "early-24-heidi-mountain",
+      "text": "The morning sun shone brightly on the green mountain, and the goats climbed high.",
+      "title": null,
+      "author": "Johanna Spyri",
+      "url": null,
+      "license": "public domain"
+    }
+  ]
+}

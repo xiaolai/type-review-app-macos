@@ -86,11 +86,27 @@ extension AppDelegate {
         item.menu = menu
         statusItem = item
     }
-    /// The digit each corpus source answers to, by name rather than by
-    /// position. Anything not listed gets no shortcut.
-    static let sourceShortcuts: [String: String] = [
-        "auto": "4", "quotes": "5", "code": "6", "user": "7", "generated": "8",
-    ]
+    /// The digit each corpus source answers to — by channel, not by position.
+    ///
+    /// Deriving it from declaration order meant reordering the enum silently
+    /// moved everyone's shortcuts, so it became a lookup instead. A dictionary
+    /// keyed by raw string then had the opposite fault: a typo or a renamed
+    /// channel matched nothing and the shortcut just vanished, because the
+    /// caller's `?? ""` cannot tell "deliberately none" from "spelt wrong".
+    /// A switch over the enum cannot be spelt wrong, and a new channel will
+    /// not compile until this says what it gets — including `nil` for none.
+    static func sourceShortcut(for channel: CorpusChannel) -> String {
+        switch channel {
+        case .auto: return "4"
+        case .quotes: return "5"
+        case .code: return "6"
+        case .user: return "7"
+        case .generated: return "8"
+        // 9 rather than the 5 its menu position suggests: this lookup exists
+        // so that adding a channel moves nobody's existing shortcut.
+        case .early: return "9"
+        }
+    }
 
     /// Prints the summon shortcut beside "Open TYPE".
     ///
@@ -203,12 +219,10 @@ extension AppDelegate {
             // Stated per channel, not derived from declaration order. `index +
             // 4` meant reordering the enum silently moved everyone's shortcuts,
             // and a seventh channel would have produced the two-character
-            // equivalent "10", which is not a shortcut at all. A channel with
-            // no entry here simply has none, which is the honest outcome for
-            // one added later.
+            // equivalent "10", which is not a shortcut at all.
             let item = sourceMenu.addItem(
                 withTitle: channel.label, action: #selector(chooseSource(_:)),
-                keyEquivalent: Self.sourceShortcuts[channel.rawValue] ?? "")
+                keyEquivalent: Self.sourceShortcut(for: channel))
             item.target = self
             item.representedObject = channel.rawValue
         }

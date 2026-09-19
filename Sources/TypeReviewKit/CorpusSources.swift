@@ -2,7 +2,7 @@ import Foundation
 
 /// Where a passage came from.
 public enum SourceKind: String, Sendable, Codable {
-    case quote, code, difficult, drills, user
+    case quote, code, early, user
 }
 
 public struct CorpusAttribution: Sendable, Equatable, Codable {
@@ -189,7 +189,8 @@ let resourceBundle: Bundle = {
 
 /// The corpus that ships inside the app.
 public enum BundledCorpus {
-    private struct QuotesFile: Decodable {
+    /// The shape both `quotes.json` and `early.json` share.
+    private struct StaticCorpusFile: Decodable {
         let entries: [RawStaticEntry]
     }
 
@@ -202,74 +203,112 @@ public enum BundledCorpus {
     /// *which* resource is missing rather than reporting an empty list.
     /// Every reason a bundled resource could not be loaded.
     ///
-    /// Computed from the two `let`s below rather than accumulated into a
-    /// shared `var`. A mutable static written from two lazy initialisers is a
-    /// data race — they can run concurrently, and `nonisolated(unsafe)` says
-    /// only that the compiler has stopped asking.
+    /// Computed from the three `let`s below rather than accumulated into a
+    /// shared `var`. A mutable static written from several lazy initialisers
+    /// is a data race — they can run concurrently, and `nonisolated(unsafe)`
+    /// says only that the compiler has stopped asking.
     public static var loadFailures: [String] {
         // The parentheses matter: `??` binds looser than `+`, so without them
         // a failed quotes load returned only its own reason and swallowed
         // every code failure.
-        (quotesFailure.map { [$0] } ?? []) + codeFailures
+        (quotesFailure.map { [$0] } ?? []) + codeFailures + (earlyFailure.map { [$0] } ?? [])
     }
 
     private static let quotesFailure: String? = quotesLoad.failure
+    private static let earlyFailure: String? = earlyLoad.failure
     private static let codeFailures: [String] = codeLoad.failures
 
     public static var quotes: StaticCorpusSource { quotesLoad.source }
+    /// The passages a beginner reads — see `Resources/early.json`.
+    public static var early: StaticCorpusSource { earlyLoad.source }
     public static var code: StaticCorpusSource { codeLoad.source }
 
-    private static let quotesLoad: (source: StaticCorpusSource, failure: String?) = {
-        guard let url = resourceBundle.url(forResource: "Resources/quotes", withExtension: "json")
+    /// Loads one JSON corpus file, or says why it could not.
+    ///
+    /// Written once and called twice. As two near-identical closures the
+    /// quotes and the early passages had two copies of the same error
+    /// handling, which is two places for it to drift and one of them to stop
+    /// reporting.
+    private static func load(
+        _ resource: String, kind: SourceKind
+    ) -> (source: StaticCorpusSource, failure: String?) {
+        guard let url = resourceBundle.url(forResource: "Resources/" + resource, withExtension: "json")
         else {
-            return (StaticCorpusSource(raw: [], kind: .quote), "Resources/quotes.json: not in the bundle")
+            return (StaticCorpusSource(raw: [], kind: kind), "Resources/\(resource).json: not in the bundle")
         }
         do {
-            let data = try Data(contentsOf: url)
-            let file = try JSONDecoder().decode(QuotesFile.self, from: data)
-            return (StaticCorpusSource(raw: file.entries, kind: .quote), nil)
+            let file = try JSONDecoder().decode(StaticCorpusFile.self, from: try Data(contentsOf: url))
+            return (StaticCorpusSource(raw: file.entries, kind: kind), nil)
         } catch {
-            return (StaticCorpusSource(raw: [], kind: .quote), "Resources/quotes.json: \(error)")
+            return (StaticCorpusSource(raw: [], kind: kind), "Resources/\(resource).json: \(error)")
         }
-    }()
+    }
+
+    private static let quotesLoad = load("quotes", kind: .quote)
+
+    /// The children's corpus, kept in its own file rather than added to
+    /// `quotes.json`: that file's entry count and its weighted picks are
+    /// pinned byte-for-byte against the website's vector, so a passage added
+    /// there is a two-repository change, and one that shifts which quote an
+    /// adult gets for a given seed.
+    private static let earlyLoad = load("early", kind: .early)
+
 
     /// Code keeps its indentation, so `preserveLayout` is on: collapsing the
     /// whitespace would turn a Python snippet into one unreadable line and
     /// remove exactly the keys that make code hard to type.
     private static let codeLoad: (source: StaticCorpusSource, failures: [String]) = {
-        guard let directory = resourceBundle.url(forResource: "Resources/code", withExtension: nil),
-            let files = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil)
-        else {
-            return (
-                StaticCorpusSource(raw: [], kind: .code, preserveLayout: true),
-                ["Resources/code: not in the bundle"])
+        func nothing(_ reason: String) -> (source: StaticCorpusSource, failures: [String]) {
+            (source: StaticCorpusSource(raw: [], kind: .code, preserveLayout: true), failures: [reason])
         }
+        guard let directory = resourceBundle.url(forResource: "Resources/code", withExtension: nil)
+        else { return nothing("Resources/code: not in the bundle") }
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil)
+        } catch {
+            // Its own branch, because `try?` folded it into "not in the
+            // bundle" — which sends whoever reads that message looking for a
+            // missing resource when the directory is there and unreadable.
+            return nothing("Resources/code: \(error)")
+        }
+        let jsons = files.filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
+        // A directory with no JSON in it produced an empty corpus and no
+        // reason at all, which is the failure that looks exactly like success:
+        // the picker simply never answers and the session serves generated
+        // words instead.
+        guard !jsons.isEmpty else { return nothing("Resources/code: the directory holds no JSON") }
         var failures: [String] = []
-        let raw = files.filter { $0.pathExtension == "json" }.sorted { $0.path < $1.path }
-            .compactMap { url -> RawStaticEntry? in
-                do {
-                    return try JSONDecoder().decode(
-                        RawStaticEntry.self, from: try Data(contentsOf: url))
-                } catch {
-                    failures.append("\(url.lastPathComponent): \(error)")
-                    return nil
-                }
+        let raw = jsons.compactMap { url -> RawStaticEntry? in
+            do {
+                return try JSONDecoder().decode(
+                    RawStaticEntry.self, from: try Data(contentsOf: url))
+            } catch {
+                failures.append("\(url.lastPathComponent): \(error)")
+                return nil
             }
+        }
         return (StaticCorpusSource(raw: raw, kind: .code, preserveLayout: true), failures)
     }()
 }
 
 
 /// Which corpus a run draws from.
+///
+/// Declaration order is menu order — both the View menu and the toolbar build
+/// themselves from `allCases` — so Early sits second, next to Auto, rather
+/// than below Code where it was easy to miss. Persistence is by `rawValue`,
+/// so moving a case costs a stored channel nothing.
 public enum CorpusChannel: String, Sendable, CaseIterable {
-    case auto, quotes, code, user, generated
+    case auto, early, quotes, code, user, generated
 
     public var label: String {
         switch self {
         case .auto: return "Auto"
         case .user: return "Library"
         case .quotes: return "Quotes"
+        case .early: return "Early"
         case .code: return "Code"
         case .generated: return "Generated"
         }
@@ -302,7 +341,7 @@ private let unspokenPassagePrefixes = ["pseudo:", "plain:", "code-"]
 /// reaches the code corpus too.
 public func passageMayBeSpoken(channel: CorpusChannel, passageId: String) -> Bool {
     switch channel {
-    case .quotes, .user, .auto:
+    case .quotes, .user, .auto, .early:
         break
     case .code, .generated:
         return false
@@ -341,6 +380,7 @@ public struct CorpusAdapter {
         switch channel {
         case .quotes: return [BundledCorpus.quotes]
         case .code: return [BundledCorpus.code]
+        case .early: return [BundledCorpus.early]
         case .user: return [UserCorpusSource(passages: library)]
         case .auto: return [UserCorpusSource(passages: library), BundledCorpus.quotes, BundledCorpus.code]
         case .generated: return []
@@ -418,10 +458,18 @@ public struct CorpusAdapter {
             if let passage = try firstPassage(matching: context, rng: &rng) { return passage }
         }
         onEntryPicked?(nil)
+        // Whose words the generator falls back to. `nil` means `commonWords`,
+        // which is general-service adult vocabulary — "because", "between",
+        // "should" — and is what every other channel has always got, so every
+        // other channel is unchanged here. Early asks for its own graded list
+        // instead: a beginner who turns on numbers, punctuation or a timed run
+        // reaches this line, and reaching it should not hand them the adult
+        // list they chose Early to avoid.
         return try generatePlainWords(
             options: PlainWordsOptions(
                 wordCount: wordCount, includeNumbers: settings.includeNumbers,
-                includePunctuation: settings.includePunctuation),
+                includePunctuation: settings.includePunctuation,
+                wordList: channel == .early ? EarlyWords.all : nil),
             rng: &rng)
     }
 }

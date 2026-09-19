@@ -13,7 +13,7 @@ extension MainScreen {
     }
 
     /// The View menu's key equivalent, with `menuModifiers`. ⌥⌘ because every
-    /// free ⌘-digit is taken: ⌘2 and ⌘3 open windows and ⌘4 to ⌘8 pick a source.
+    /// free ⌘-digit is taken: ⌘2 and ⌘3 open windows and ⌘4 to ⌘9 pick a source.
     var menuKey: String {
         switch self {
         case .practice: return "1"

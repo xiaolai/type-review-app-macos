@@ -603,8 +603,28 @@ ramp cannot say both.
 ## The corpus
 
 The 168 curated quotes and the code snippets ship inside the Kit as resources —
-domain data, not app chrome, and the same bytes the website serves. `⌘4`–`⌘8`
-switch source: Auto, Quotes, Code, Library, Generated.
+domain data, not app chrome, and the same bytes the website serves. `⌘4`–`⌘9`
+switch source: Auto, Early, Quotes, Code, Library, Generated. The shortcuts come
+from a table keyed by channel name rather than from declaration order, so
+reordering the enum or adding a channel moves nobody's shortcut — Early took
+`⌘9` for that reason rather than the `⌘5` its menu position would suggest.
+
+Early is the beginner's corpus, and it is a second resource file rather than
+more entries in `quotes.json`. That file's entry count and its weighted picks
+are pinned byte-for-byte against the website's vector, so a passage added there
+is a two-repository change that also shifts which quote an adult gets for a
+given seed. Early is kept out of `Auto` for a related reason: `firstPassage`
+takes the first source that answers, so Early ahead of Quotes would replace an
+adult's passages and Early behind them would never be reached at all.
+
+Its words are graded in four stages in synthetic-phonics order — `s a t p i n`,
+then `c k e h r m d`, `g o u l f b`, and the rare letters last. The order is
+measured rather than traditional: those first six letters spell 25 decodable
+words, where English frequency order spells 5 and the home row 3. That is what
+lets a beginner's first lesson be real words instead of drill noise. The
+generated fallback on this channel draws from those words rather than from
+`commonWords`, whose vocabulary — "because", "between", "should" — is the adult
+list a beginner chose Early to avoid.
 
 Both corpus sources draw from the *session's* RNG rather than one of their own.
 That is what keeps a seeded session reproducible in sequence rather than only
