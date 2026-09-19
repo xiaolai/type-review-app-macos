@@ -542,14 +542,20 @@ final class KeyboardView: NSView {
     /// rather than a character, and it is drawn faintly because it only has to
     /// do that much.
     ///
-    /// Three semantic colours, so it follows the appearance with no test for
-    /// which one is current, and both greys invert with the theme exactly as
-    /// the cap under them does. They are the two faintest the system has:
-    /// `quinaryLabelColor` for the glass and `quaternaryLabelColor`, a tenth
-    /// of the label colour, for its edge. The edge was a quarter to begin
-    /// with, which drew a ring heavier than some of the legends it sat
-    /// between — an outline around a hint has to be the quietest line on the
-    /// board, not a second border competing with the cap's own.
+    /// Semantic colours, so it follows the appearance with no test for which
+    /// one is current, and the greys invert with the theme exactly as the cap
+    /// under them does. `quaternaryLabelColor` is a tenth of the label colour
+    /// and draws the edge; the glass is half of that again. The edge was a
+    /// quarter to begin with, which drew a ring heavier than some of the
+    /// legends it sat between — an outline around a hint has to be the
+    /// quietest line on the board, not a second border competing with the
+    /// cap's own.
+    ///
+    /// Written as half of quaternary rather than as `quinaryLabelColor`, which
+    /// is the same colour by another name: that name is renamed in a later SDK
+    /// than this machine's, so it compiled here and failed on CI. An arithmetic
+    /// relation between two colours cannot be renamed out from under the
+    /// build.
     private func drawFingerTip(
         _ digit: Int, for key: KeyboardGeometry.Key, in rect: NSRect, unit: CGFloat
     ) {
@@ -559,7 +565,7 @@ final class KeyboardView: NSView {
         let box = NSRect(
             x: rect.midX - size / 2, y: rect.midY - size / 2, width: size, height: size)
 
-        NSColor.quinaryLabelColor.setFill()
+        NSColor.quaternaryLabelColor.withAlphaComponent(0.5).setFill()
         NSBezierPath(ovalIn: box).fill()
         let width = max(0.6, unit * 0.014)
         let ring = NSBezierPath(ovalIn: box.insetBy(dx: width / 2, dy: width / 2))
