@@ -88,7 +88,7 @@ extension Diagnostics {
             },
             Scene(name: "3-practice", dark: false) { () throws(CheckFailure) in
                 show(.practice)
-                typist.typePartOfARun()
+                try typist.typePartOfARun()
                 return main()
             },
             Scene(name: "4-statistics", dark: false) { () throws(CheckFailure) in
@@ -441,8 +441,20 @@ private final class Typist {
 
     /// A run under way: the first part of a passage typed, with a mistake in
     /// it, and the caret waiting.
-    func typePartOfARun() {
+    ///
+    /// On a public-domain passage, never a fair-use one. The listing is public,
+    /// App Review has asked about third-party text before, and which passage
+    /// comes up is random — one run put a copyrighted quotation on the
+    /// practice screenshot while the run before had put Dickens there.
+    func typePartOfARun() throws(Diagnostics.CheckFailure) {
         practice.startFreshRun()
+        for _ in 0..<200 where practice.currentLicense != "public domain" {
+            practice.startFreshRun()
+        }
+        guard practice.currentLicense == "public domain" else {
+            throw Diagnostics.CheckFailure(
+                message: "two hundred passages in a row were not public domain")
+        }
         type(practice.currentPassage, fraction: 0.4, forcedMistake: 9)
     }
 

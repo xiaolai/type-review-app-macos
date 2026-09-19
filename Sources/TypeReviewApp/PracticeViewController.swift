@@ -494,6 +494,10 @@ final class PracticeViewController: NSViewController {
         return session.map { lessonPlan(for: $0.profile) }
     }
 
+    /// The current passage's licence as its source states it, or nil for
+    /// text with none, such as a drill.
+    var currentLicense: String? { entryBox.value?.attribution?.license }
+
     /// Credits the passage's source when there is one to credit.
     private func attribution() -> String {
         guard let entry = entryBox.value, let attribution = entry.attribution else { return "" }
