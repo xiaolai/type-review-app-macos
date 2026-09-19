@@ -232,6 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.applyWindowSize(to: window)
                 }
                 self.drawer?.reframe()
+                self.drawer?.keyboard.showsFingerTips = AppPreferences.showFingerTips.value
                 // Sound is an app preference too, and it rides the same
                 // notification — so a pack or volume changed in Settings is
                 // live on the next keystroke rather than at the next launch.

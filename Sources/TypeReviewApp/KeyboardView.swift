@@ -18,7 +18,17 @@ final class KeyboardView: NSView {
     /// Per-key statistics, keyed by the character the key produces.
     private var stats: OrderedMap<PerKeyStat> = OrderedMap()
     private var pressed: UInt16?
-    private var expected: String?
+    /// Whether the key that is next shows the number of the finger that
+    /// presses it, in place of its legend. Read from the preference at birth
+    /// and set again whenever it changes, which is how every other live
+    /// setting reaches the view it draws.
+    var showsFingerTips = AppPreferences.showFingerTips.value {
+        didSet { if showsFingerTips != oldValue { needsDisplay = true } }
+    }
+    /// The next character, exactly as the passage has it. Matching a cap to it
+    /// is case-blind; whether ⇧ is part of the keystroke is exactly the case
+    /// question, so the case has to survive the journey here.
+    private var expectedAsWritten: String?
     /// Letters the curriculum knows about but has not unlocked yet. Empty in
     /// benchmark mode, where there is no lesson and so nothing is locked.
     private var lockedLetters: Set<String> = []
@@ -88,7 +98,7 @@ final class KeyboardView: NSView {
         // answers it in constant time where `keys` would be a linear scan.
         lockedLetters = Set(plan?.keys.lazy.filter { !$0.included }.map(\.letter) ?? [])
         focusLetter = plan?.focus
-        self.expected = expected
+        expectedAsWritten = expected
         needsDisplay = true
     }
 
@@ -248,9 +258,100 @@ final class KeyboardView: NSView {
         casePath.lineWidth = 1
         casePath.stroke()
 
+        // Asked of the system once per redraw, not once per key per question.
+        // `UCKeyTranslate` is a layout lookup and a translation, and the board
+        // was doing three per cap to draw it and two more per cap to find the
+        // next one — on every keystroke.
+        let printed = printedLegends(layout)
+        // Worked out once for the whole board: which keys the next character
+        // needs is decided by a *different* cap — the one that prints it — and
+        // ⇧ and ⌥ are drawn before some of those and after others.
+        let next = nextKeystroke(layout, printed: printed)
         for placed in layout.keys {
-            draw(placed.key, in: placed.rect, unit: layout.unit, corner: placed.corner)
+            draw(
+                placed.key, in: placed.rect, unit: layout.unit, corner: placed.corner,
+                printed: printed[placed.key.code], next: next)
         }
+    }
+
+    /// What a cap prints: unmodified, and with ⇧.
+    struct Printed {
+        let plain: String?
+        let shifted: String?
+        /// Both, for the heat map and for matching a key to a character.
+        var both: [String] { [plain, shifted].compactMap { $0 } }
+    }
+
+    /// Every typing cap's legends, for one redraw.
+    ///
+    /// Internal rather than private so the self-test can put the same question
+    /// to the same code the drawing uses. There is no other way to see which
+    /// keys the aid would mark without rendering the board and reading it back.
+    func printedLegends(_ layout: Layout) -> [UInt16: Printed] {
+        var table: [UInt16: Printed] = [:]
+        for placed in layout.keys where placed.key.types {
+            let code = placed.key.code
+            guard table[code] == nil else { continue }
+            table[code] = Printed(
+                plain: SystemKeyboard.character(forKeyCode: code),
+                shifted: SystemKeyboard.character(forKeyCode: code, shift: true))
+        }
+        return table
+    }
+
+    /// The cap the next character is typed on, and the modifiers held with it.
+    struct Keystroke {
+        let key: UInt16
+        /// ⇧ and ⌥, empty unless Finger tips is on: with the aid off the board
+        /// marks the letter alone, as it always has.
+        let modifiers: Set<UInt16>
+    }
+
+    /// Which keys the next character needs.
+    ///
+    /// The plain and shifted legends answer it on a US layout, and they are
+    /// already in hand. When they do not — `@`, `[`, `{`, `\\` and `|` are ⌥
+    /// chords on the German and Spanish keyboards, and a code drill is made of
+    /// those — the ⌥ combinations are asked for as well. That second pass is
+    /// worth its cost only because it runs when the first found nothing at all,
+    /// which on a US keyboard is never.
+    ///
+    /// A modifier is taken with the hand that is *not* typing the letter, so
+    /// the typing hand stays where it is. That is what the chart's hands are
+    /// for.
+    func nextKeystroke(_ layout: Layout, printed: [UInt16: Printed]) -> Keystroke? {
+        guard let wanted = expectedAsWritten, !wanted.isEmpty else { return nil }
+
+        func modifiers(for code: UInt16, shift: Bool, option: Bool) -> Set<UInt16> {
+            guard showsFingerTips, let hand = FingerTips.hand(of: code) else { return [] }
+            let other: FingerTips.Hand = hand == .left ? .right : .left
+            var held: Set<UInt16> = []
+            if shift { held.insert(FingerTips.shift(for: other)) }
+            if option { held.insert(FingerTips.option(for: other)) }
+            return held
+        }
+
+        let lowered = wanted.lowercased()
+        for placed in layout.keys {
+            guard let legends = printed[placed.key.code] else { continue }
+            guard legends.both.contains(where: { $0.lowercased() == lowered }) else { continue }
+            let code = placed.key.code
+            let shift = legends.shifted == wanted && legends.plain != wanted
+            return Keystroke(
+                key: code, modifiers: modifiers(for: code, shift: shift, option: false))
+        }
+
+        for placed in layout.keys where placed.key.types {
+            let code = placed.key.code
+            for shift in [false, true] {
+                guard SystemKeyboard.character(forKeyCode: code, shift: shift, option: true)
+                    == wanted
+                else { continue }
+                return Keystroke(
+                    key: code, modifiers: modifiers(for: code, shift: shift, option: true))
+            }
+        }
+        return nil
     }
 
     /// A rounded rectangle whose corners can differ.
@@ -303,9 +404,10 @@ final class KeyboardView: NSView {
     }
 
     private func draw(
-        _ key: KeyboardGeometry.Key, in rect: NSRect, unit: CGFloat, corner: Corner?
+        _ key: KeyboardGeometry.Key, in rect: NSRect, unit: CGFloat, corner: Corner?,
+        printed: Printed?, next: Keystroke?
     ) {
-        let isPressed = pressed == key.code && key.code != 0xFFFF
+        let isPressed = pressed == key.code && key.code != KeyboardGeometry.touchIDCode
         // A pressed cap sinks: the lip closes up and the whole cap moves down
         // by the point it loses. Same trick as the web's `translateY(1px)`,
         // and it reads as travel rather than as a highlight.
@@ -322,9 +424,8 @@ final class KeyboardView: NSView {
         // Read before the cap is drawn rather than after, because the lesson's
         // focus key is marked *by* its border rather than by a second ring
         // inside it, and the border is the first thing down.
-        let character = key.types ? SystemKeyboard.character(forKeyCode: key.code) : nil
-        let shifted = key.types ? SystemKeyboard.character(forKeyCode: key.code, shift: true) : nil
-        let produced = [character, shifted].compactMap { $0 }
+        let character = printed?.plain
+        let produced = printed?.both ?? []
         let isFocus = !isPressed && focusLetter != nil && character == focusLetter
 
         // The lip: the whole cap in the border colour, then the face inset by
@@ -348,7 +449,10 @@ final class KeyboardView: NSView {
         if let tint = heat(for: key, produced: produced), !isPressed {
             glaze(face, tint.color, strength: tint.strength)
         }
-        if let expected, produced.contains(where: { $0.lowercased() == expected }), !isPressed {
+        // The ⇧ or ⌥ held for a character is as much "next" as the letter is,
+        // so it takes the same tint and the same number.
+        let isNext = next.map { $0.key == key.code || $0.modifiers.contains(key.code) } ?? false
+        if isNext, !isPressed {
             // The drilling target. Laid over the heat rather than replacing it
             // — a ring or a border would say "next" while hiding "how is this
             // key going", and both are worth knowing at once.
@@ -372,9 +476,105 @@ final class KeyboardView: NSView {
         // `key.types`: the first version dimmed every digit and every mark of
         // punctuation, which claimed the lesson excluded a comma no lesson has
         // ever offered.
-        drawLabels(
-            key, character: character, in: faceRect, unit: unit,
-            locked: character.map(lockedLetters.contains) ?? false)
+        // The finger number instead of the legend, on the one key that is
+        // next. Instead, rather than beside: a keyboard whose every cap wears
+        // a second mark is a chart to study, and this is a keyboard to look at
+        // while typing. It also settles where the mark goes — it goes where
+        // the legend was, so nothing is covered and nothing moves.
+        if showsFingerTips, isNext, let digit = FingerTips.digit(of: key.code) {
+            drawFingerTip(digit, for: key, in: faceRect, unit: unit)
+        } else {
+            drawLabels(
+                key, printed: printed, in: faceRect, unit: unit,
+                locked: character.map(lockedLetters.contains) ?? false)
+        }
+        if key.isHoming {
+            drawHomingRidge(key, legend: legend(of: key, printed: printed), in: faceRect, unit: unit)
+        }
+    }
+
+    /// The bump on F and J: a short bar along the foot of the cap.
+    ///
+    /// On the real keyboard it is a ridge you feel rather than see — what
+    /// shows is its shadow. Drawn here as the faintest mark on the board,
+    /// because it is doing the same job a photograph of a keycap does: telling
+    /// you which two keys the index fingers belong on, without asking to be
+    /// read.
+    ///
+    /// As wide as the letter above it, and set a tenth of the cap's height
+    /// above the bottom edge. Measured rather than taken as a fraction of the
+    /// cap: a quarter of the cap's width — the moulding's own proportion —
+    /// draws a bar noticeably wider than the `F` it belongs to, and the two
+    /// being the same length is what makes it read as part of the key rather
+    /// than as a rule under it. Measured from the legend, not from the finger
+    /// number that may be standing in for it, because the ridge is a property
+    /// of the keyboard and not of the aid.
+    private func drawHomingRidge(
+        _ key: KeyboardGeometry.Key, legend: String, in rect: NSRect, unit: CGFloat
+    ) {
+        let font = NSFont.systemFont(ofSize: max(6, unit * Self.labelScale(for: key)))
+        let width = max(4, (legend as NSString).size(withAttributes: [.font: font]).width)
+        let height = max(1, unit * 0.035)
+        let bar = NSRect(
+            x: rect.midX - width / 2, y: rect.maxY - unit * 0.12 - height,
+            width: width, height: height)
+        NSColor.tertiaryLabelColor.setFill()
+        NSBezierPath(roundedRect: bar, xRadius: height / 2, yRadius: height / 2).fill()
+    }
+
+    /// What a cap has printed on it: its own label, or the character it types.
+    ///
+    /// One definition, because three things ask — the legend itself, the ridge
+    /// that is drawn as wide as it, and the badge that steps aside from it.
+    private func legend(of key: KeyboardGeometry.Key, printed: Printed?) -> String {
+        key.label ?? printed?.plain?.uppercased() ?? ""
+    }
+
+    /// The finger number, in the space the legend has stepped out of.
+    ///
+    /// Set at exactly the size of the letter it replaces, and in the same
+    /// face: the cap prints one thing at a time, and a number that arrived
+    /// larger would make the key jump when the aid was switched on.
+    ///
+    /// On glass rather than bare. A digit set like a legend *is* a legend to
+    /// read — on the number row a bare `2` on the `2` key says nothing about
+    /// which of the two it is. The disc is what marks it as an instruction
+    /// rather than a character, and it is drawn faintly because it only has to
+    /// do that much.
+    ///
+    /// Three semantic colours, so it follows the appearance with no test for
+    /// which one is current, and both greys invert with the theme exactly as
+    /// the cap under them does. They are the two faintest the system has:
+    /// `quinaryLabelColor` for the glass and `quaternaryLabelColor`, a tenth
+    /// of the label colour, for its edge. The edge was a quarter to begin
+    /// with, which drew a ring heavier than some of the legends it sat
+    /// between — an outline around a hint has to be the quietest line on the
+    /// board, not a second border competing with the cap's own.
+    private func drawFingerTip(
+        _ digit: Int, for key: KeyboardGeometry.Key, in rect: NSRect, unit: CGFloat
+    ) {
+        let font = NSFont.systemFont(ofSize: max(6, unit * Self.labelScale(for: key)))
+        let size = min(font.pointSize * 1.9, rect.height - 2, rect.width - 2)
+        guard size > 0 else { return }
+        let box = NSRect(
+            x: rect.midX - size / 2, y: rect.midY - size / 2, width: size, height: size)
+
+        NSColor.quinaryLabelColor.setFill()
+        NSBezierPath(ovalIn: box).fill()
+        let width = max(0.6, unit * 0.014)
+        let ring = NSBezierPath(ovalIn: box.insetBy(dx: width / 2, dy: width / 2))
+        NSColor.quaternaryLabelColor.setStroke()
+        ring.lineWidth = width
+        ring.stroke()
+
+        let text = String(digit) as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: NSColor.labelColor,
+        ]
+        let measured = text.size(withAttributes: attributes)
+        text.draw(
+            at: NSPoint(x: box.midX - measured.width / 2, y: box.midY - measured.height / 2),
+            withAttributes: attributes)
     }
 
     /// Legend size as a fraction of the key.
@@ -415,9 +615,10 @@ final class KeyboardView: NSView {
     /// asked the system for the shifted glyph, measured, filtered and drew —
     /// six jobs in one function, and the reason its length was flagged.
     private func labelLines(
-        _ key: KeyboardGeometry.Key, character: String?, unit: CGFloat, locked: Bool
+        _ key: KeyboardGeometry.Key, printed: Printed?, unit: CGFloat, locked: Bool
     ) -> (lines: [Line], shifted: String?, glyphInset: CGFloat) {
-        let label = key.label ?? character?.uppercased() ?? ""
+        let character = printed?.plain
+        let label = legend(of: key, printed: printed)
         guard !label.isEmpty, label != " " else { return ([], nil, 0) }
         let stat = character.flatMap { stats[$0] }
         var color: NSColor =
@@ -432,12 +633,12 @@ final class KeyboardView: NSView {
         // changed nothing at all.
         if locked { color = color.withAlphaComponent(0.28) }
 
-        // The shifted glyph, from the system rather than a table — so a German
-        // keyboard prints its own. Suppressed when it is merely the capital of
-        // the same letter, which is not a second glyph on any real cap.
+        // The shifted glyph, as the system reported it for this redraw — so a
+        // German keyboard prints its own. Suppressed when it is merely the
+        // capital of the same letter, which is not a second glyph on any real
+        // cap.
         var shiftedText: String?
-        if key.role == .letter, let character,
-            let shifted = SystemKeyboard.character(forKeyCode: key.code, shift: true),
+        if key.role == .letter, let character, let shifted = printed?.shifted,
             shifted.lowercased() != character.lowercased()
         {
             shiftedText = shifted
@@ -464,11 +665,11 @@ final class KeyboardView: NSView {
     }
 
     private func drawLabels(
-        _ key: KeyboardGeometry.Key, character: String?, in rect: NSRect, unit: CGFloat,
+        _ key: KeyboardGeometry.Key, printed: Printed?, in rect: NSRect, unit: CGFloat,
         locked: Bool = false
     ) {
         let (lines, shiftedText, glyphInset) = labelLines(
-            key, character: character, unit: unit, locked: locked)
+            key, printed: printed, unit: unit, locked: locked)
         guard !lines.isEmpty else { return }
 
         // Measured once, then carried. Every line was measured here to decide

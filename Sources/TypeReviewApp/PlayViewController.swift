@@ -321,8 +321,9 @@ final class PlayViewController: NSViewController {
 
     // MARK: - Preferences and display
 
-    /// Caret, whitespace marks, which keyboards may type, speech and the
-    /// error tone: the practice screen's typing preferences, applied here too.
+    /// Whitespace marks, which keyboards may type, speech and the error tone:
+    /// the practice screen's typing preferences, applied here too. Not the
+    /// caret — Play draws its own, and `PlayArt.caret` says why.
     func applyTypingPreferences() {
         playfield.latinInputOnly = AppPreferences.latinInputOnly.value
         speaksWords = AppPreferences.speakWords.value
@@ -332,7 +333,6 @@ final class PlayViewController: NSViewController {
     }
 
     private func displayChanged() {
-        art.caret = AppPreferences.caretStyle.value
         art.showsWhitespace = AppPreferences.showWhitespace.value
         // `viewIfLoaded`: preferences are applied before this screen is ever
         // shown, and asking an unloaded controller for its view loads it.
@@ -370,7 +370,7 @@ final class PlayViewController: NSViewController {
     /// is for reading afterwards, and during a game it is noise. The lesson
     /// only in Letters, where its letters are what falls.
     private func pushKeyboard() {
-        let expected = state == .playing ? game.expected?.lowercased() : nil
+        let expected = state == .playing ? game.expected : nil
         guard expected != lastExpected || keyboardIsStale else { return }
         lastExpected = expected
         keyboardIsStale = false

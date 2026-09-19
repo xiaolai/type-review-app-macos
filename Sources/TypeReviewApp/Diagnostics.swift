@@ -657,6 +657,236 @@ enum Diagnostics {
         exit(0)
     }
 
+    /// Every key on every shape has a finger, or is listed as deliberately
+    /// without one — and no key is on both lists.
+    ///
+    /// Three directions, because all three failures are invisible on screen. A
+    /// key missing from the chart draws no number, which looks exactly like a
+    /// key whose number was never wanted — that is how the ISO § and the four
+    /// JIS keys went unmarked while the ANSI board looked complete. A code in
+    /// the chart that no keyboard has never matches anything, so it reads as
+    /// coverage while covering nothing. And a key in *both* lists is a
+    /// contradiction that resolves itself silently, whichever way the lookup
+    /// happens to be written.
+    @MainActor private static func checkFingerChart() {
+        var placed: Set<UInt16> = []
+        for shape in SystemKeyboard.Shape.allCases {
+            for row in KeyboardGeometry.rows(for: shape) {
+                for key in row { placed.insert(key.key.code) }
+            }
+        }
+        func list(_ codes: Set<UInt16>) -> String {
+            codes.sorted().map(String.init).joined(separator: ", ")
+        }
+        let unexplained = placed.subtracting(FingerTips.assigned)
+            .subtracting(FingerTips.unassigned)
+        guard unexplained.isEmpty else {
+            print(
+                "SELFTEST FAIL: \(unexplained.count) key(s) have no finger and are not "
+                    + "listed as deliberately without one: \(list(unexplained))")
+            exit(1)
+        }
+        let phantom = FingerTips.assigned.union(FingerTips.unassigned).subtracting(placed)
+        guard phantom.isEmpty else {
+            print(
+                "SELFTEST FAIL: FingerTips names \(phantom.count) key(s) no keyboard has: "
+                    + list(phantom))
+            exit(1)
+        }
+        let both = FingerTips.assigned.intersection(FingerTips.unassigned)
+        guard both.isEmpty else {
+            print(
+                "SELFTEST FAIL: \(both.count) key(s) are both given a finger and listed as "
+                    + "deliberately without one: \(list(both))")
+            exit(1)
+        }
+    }
+
+    /// Two homing ridges on every shape, and the F cap actually draws one.
+    ///
+    /// Counting `isHoming` proves only that the geometry knows about them:
+    /// delete the line that draws the ridge and the count is still two. So the
+    /// board is rendered and the foot of the F cap compared with the foot of
+    /// the G cap beside it — same size, same colour, same legend weight, no
+    /// ridge. The control is what makes the measurement mean anything: ink in
+    /// both bands would be the cap's own edge, not a ridge.
+    @MainActor private static func checkHomingRidges() {
+        for shape in SystemKeyboard.Shape.allCases {
+            let ridges = KeyboardGeometry.rows(for: shape)
+                .flatMap { $0 }.filter(\.key.isHoming).count
+            guard ridges == 2 else {
+                print("SELFTEST FAIL: the \(shape) keyboard has \(ridges) homing ridges, not two")
+                exit(1)
+            }
+        }
+
+        let board = KeyboardView()
+        // Pinned to the light appearance so "darker than the cap" means one
+        // thing. Unparented, the view would otherwise inherit whatever the
+        // machine running the check happens to be set to.
+        board.appearance = NSAppearance(named: .aqua)
+        let width: CGFloat = 900
+        board.frame = NSRect(
+            x: 0, y: 0, width: width, height: board.naturalHeight(forWidth: width))
+        guard let rep = board.bitmapImageRepForCachingDisplay(in: board.bounds) else {
+            print("SELFTEST FAIL: the keyboard could not be rendered for the ridge check")
+            exit(1)
+        }
+        board.cacheDisplay(in: board.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / board.bounds.width
+        let layout = board.layout(forWidth: width, height: board.bounds.height)
+
+        /// The foot of a cap, clear of its bottom edge and of the legend above.
+        func foot(of rect: NSRect) -> NSRect {
+            NSRect(
+                x: rect.midX - rect.width * 0.2, y: rect.maxY - layout.unit * 0.28,
+                width: rect.width * 0.4, height: layout.unit * 0.18)
+        }
+        func ink(in rect: NSRect) -> Int {
+            var count = 0
+            for y in stride(from: rect.minY * scale, to: rect.maxY * scale, by: 1) {
+                for x in stride(from: rect.minX * scale, to: rect.maxX * scale, by: 1) {
+                    guard let colour = rep.colorAt(x: Int(x), y: Int(y))?
+                        .usingColorSpace(.sRGB)
+                    else { continue }
+                    let luminance =
+                        0.2126 * colour.redComponent + 0.7152 * colour.greenComponent
+                        + 0.0722 * colour.blueComponent
+                    if luminance < 0.92 { count += 1 }
+                }
+            }
+            return count
+        }
+        // Asked of the geometry rather than named here: the check is that
+        // whatever carries a ridge draws one, not that a particular letter does.
+        // The control is its neighbour along the same row — the nearest cap
+        // that is a letter and has no ridge.
+        guard let ridged = layout.keys.first(where: { $0.key.isHoming }),
+            let plain = layout.keys
+                .filter({
+                    !$0.key.isHoming && $0.key.role == .letter
+                        && abs($0.rect.minY - ridged.rect.minY) < 1
+                })
+                .min(by: {
+                    abs($0.rect.midX - ridged.rect.midX) < abs($1.rect.midX - ridged.rect.midX)
+                })
+        else {
+            print("SELFTEST FAIL: no key with a homing ridge, or none beside it to compare with")
+            exit(1)
+        }
+        let drawn = ink(in: foot(of: ridged.rect))
+        let control = ink(in: foot(of: plain.rect))
+        guard drawn > 8, control == 0 else {
+            print(
+                "SELFTEST FAIL: the ridged cap drew \(drawn) dark pixels at its foot and the cap "
+                    + "beside it \(control) — expected ink on the first and none on the second")
+            exit(1)
+        }
+    }
+
+    /// A capital calls for the ⇧ on the *other* hand, and the character
+    /// reaches the view with its case intact.
+    ///
+    /// Two properties, and they need testing two different ways. The rule about
+    /// hands is tested by construction, on both hands: a passage brings
+    /// whichever capital it happens to bring, and the first version of this
+    /// check — one capital, from whatever passage came up — passed an
+    /// implementation that always answered the left ⇧ whenever that capital
+    /// happened to be a right-hand letter. The wiring is tested by typing into
+    /// the real controller, because the bug it guards against is a caller
+    /// lowercasing the character on the way in, which is where it was until
+    /// this branch.
+    ///
+    /// Play's caller is not covered, and cannot be: its words are lower case,
+    /// so nothing it sends could tell a preserved capital from a flattened one.
+    /// The rule half below is what protects the view itself either way.
+    @MainActor private static func checkShiftIsMarked(_ practice: PracticeViewController) {
+        let board = KeyboardView()
+        board.showsFingerTips = true
+        let layout = board.layout(forWidth: 900, height: 220)
+        let printed = board.printedLegends(layout)
+        func modifiers() -> Set<UInt16> {
+            board.nextKeystroke(layout, printed: printed)?.modifiers ?? []
+        }
+
+        for hand in [FingerTips.Hand.left, .right] {
+            // A cap on this hand that prints a second glyph under ⇧.
+            let candidate = layout.keys.first { placed in
+                guard FingerTips.hand(of: placed.key.code) == hand,
+                    let legends = printed[placed.key.code], let shifted = legends.shifted
+                else { return false }
+                return shifted != legends.plain
+            }
+            guard let candidate, let wanted = printed[candidate.key.code]?.shifted else {
+                print("SELFTEST FAIL: no \(hand)-hand key prints a shifted character to test ⇧ with")
+                exit(1)
+            }
+            board.showWithoutHeat(plan: nil, expected: wanted)
+            let other: FingerTips.Hand = hand == .left ? .right : .left
+            guard modifiers() == [FingerTips.shift(for: other)] else {
+                print(
+                    "SELFTEST FAIL: \(wanted) is typed by the \(hand) hand, so it needs the "
+                        + "\(other) hand's ⇧ (key \(FingerTips.shift(for: other))) — the aid "
+                        + "marked \(modifiers().sorted())")
+                exit(1)
+            }
+            // And the plain glyph on that same cap needs nothing held, which is
+            // the case distinction the whole thing rests on.
+            if let plain = printed[candidate.key.code]?.plain {
+                board.showWithoutHeat(plan: nil, expected: plain)
+                guard modifiers().isEmpty else {
+                    print(
+                        "SELFTEST FAIL: \(plain) needs nothing held and the aid marked "
+                            + "\(modifiers().sorted())")
+                    exit(1)
+                }
+            }
+        }
+
+        // The wiring: a capital typed into the real controller still arrives as
+        // a capital.
+        practice.keyboard = board
+        guard let surface = practice.view.subviews.compactMap({ $0 as? TypingView }).first else {
+            print("SELFTEST FAIL: no typing surface for the shift check")
+            exit(1)
+        }
+        var units: [UInt16] = []
+        var capital: Int?
+        for _ in 0..<50 {
+            practice.startFreshRun()
+            units = Array(practice.currentPassage.utf16).filter { $0 != 0x0A }
+            capital = units.indices.first { $0 > 0 && (0x41...0x5A).contains(units[$0]) }
+            if capital != nil { break }
+        }
+        guard let capital else {
+            print("SELFTEST FAIL: fifty passages in a row had no capital to test ⇧ with")
+            exit(1)
+        }
+        // Typed correctly, every character of it. Typing a deliberately wrong
+        // one to advance would stall against stop-on-error and fail this check
+        // for a reason that has nothing to do with ⇧.
+        for unit in units.prefix(capital) {
+            surface.insertText(
+                String(utf16CodeUnits: [unit], count: 1), replacementRange: NSRange())
+        }
+        let wanted = String(utf16CodeUnits: [units[capital]], count: 1)
+        let held = board.nextKeystroke(
+            board.layout(forWidth: 900, height: 220),
+            printed: board.printedLegends(board.layout(forWidth: 900, height: 220))
+        )?.modifiers ?? []
+        guard held.count == 1, let shift = held.first, FingerTips.digit(of: shift) == 5 else {
+            print(
+                "SELFTEST FAIL: the next character is \(wanted) and the keys held with it came "
+                    + "out as \(held.sorted()) — expected one ⇧, which is a little finger's")
+            exit(1)
+        }
+
+        // Left as it was found: the run below types a whole passage and counts
+        // the characters, which a half-typed one would throw out.
+        practice.keyboard = nil
+        practice.startFreshRun()
+    }
+
     /// A check that failed, and what it has to say.
     struct CheckFailure: Error {
         let message: String
@@ -731,7 +961,7 @@ enum Diagnostics {
             // little, or nothing, or less than nothing. That is what a ragged
             // or overflowing keyboard actually is, and nothing else reports
             // it: the view just draws it.
-            for shape in [SystemKeyboard.Shape.ansi, .iso, .jis] {
+            for shape in SystemKeyboard.Shape.allCases {
                 for (index, row) in KeyboardGeometry.rows(for: shape).enumerated() {
                     guard let narrowest = row.map(\.width).min(), narrowest >= 0.75 else {
                         print(
@@ -741,6 +971,10 @@ enum Diagnostics {
                     }
                 }
             }
+
+            checkFingerChart()
+            checkHomingRidges()
+            checkShiftIsMarked(practice)
 
             // Legends must come from a keyboard, not from an input method.
             //
@@ -1108,6 +1342,27 @@ enum Diagnostics {
                 print(
                     "SELFTEST FAIL: Settings built \(settings.paneCount) panes, expected "
                         + "\(expectedSettingsPanes)")
+                exit(1)
+            }
+
+            // No caption may be wider than the window is designed for.
+            //
+            // Captions are laid out on one line and the pane is sized to hold
+            // them, so the widest caption in the app is what decides how wide
+            // the Settings window is. A caption that overruns does not look
+            // broken — it just makes the window wider, on a screen most people
+            // open once. One did: a hint added on this branch measured 897
+            // points against a design that had never gone past 870, and the
+            // window grew by 37 of them with nothing to say so.
+            let overrun = settings.captions
+                .map { ($0.stringValue, $0.attributedStringValue.size().width) }
+                .filter { $0.1 > SettingsWindowController.captionBudget }
+            guard overrun.isEmpty else {
+                for (text, width) in overrun {
+                    print(
+                        "SELFTEST FAIL: a Settings caption is \(Int(width))pt wide, over the "
+                            + "\(Int(SettingsWindowController.captionBudget))pt budget: \(text)")
+                }
                 exit(1)
             }
 

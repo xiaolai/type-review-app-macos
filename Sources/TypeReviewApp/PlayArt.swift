@@ -30,7 +30,17 @@ struct PlayArt {
     /// `colorSpace`, as the signature compares it. Worked out once per change,
     /// because the signature is read for every item on every frame.
     private var colorSpaceIdentity = PlayArt.identity(of: CGColorSpace(name: CGColorSpace.sRGB)!)
-    var caret = AppPreferences.caretStyle.value
+    /// Play underlines, whatever Settings says.
+    ///
+    /// The preference is about a passage that sits still, where all three
+    /// shapes read the same. Here the word is falling and being typed at once,
+    /// and the other two fight that: the bar stands *between* two letters,
+    /// which on a moving word reads as a gap opening in it, and the block
+    /// tints the very character it is asking you to find. The underline marks
+    /// the place without touching the letter. Room for it is reserved under
+    /// the descender of every item anyway — see `caretRoom` — so this costs
+    /// the layout nothing.
+    let caret = AppPreferences.CaretStyle.horizontal
     var showsWhitespace = AppPreferences.showWhitespace.value
 
     init() {
@@ -45,7 +55,7 @@ struct PlayArt {
     /// Everything that changes how an image looks, so a stale one is redrawn —
     /// the colour space included, since two displays can share a scale.
     var signature: String {
-        "\(appearance.name.rawValue) \(scale) \(colorSpaceIdentity) \(caret.rawValue) \(showsWhitespace)"
+        "\(appearance.name.rawValue) \(scale) \(colorSpaceIdentity) \(showsWhitespace)"
     }
 
     /// A colour space by its profile, not its name. The name is only what the

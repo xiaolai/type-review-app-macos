@@ -52,6 +52,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Each pane and its grid, so a pane can be re-measured when a row is
     /// hidden.
     private var panes: [(controller: NSViewController, grid: NSGridView)] = []
+    /// Every caption in every pane, in build order.
+    ///
+    /// Held for the self-test, which measures them. A caption is laid out on
+    /// one line and the pane is sized to fit it, so the widest caption in the
+    /// app decides how wide the Settings window is — and a caption that
+    /// overruns simply widens the window, silently, on a screen nobody looks
+    /// at twice. `captionBudget` is what that width is allowed to be.
+    private(set) var captions: [NSTextField] = []
+
+    /// The widest a caption may be drawn, in points.
+    ///
+    /// Not a style rule — it is the Settings window's width, stated where it is
+    /// actually decided. The widest caption the app ships with is the keystroke
+    /// counter's at 869.3pt, and this is that with ten points of slack, so the
+    /// check fires on a caption somebody made longer rather than on a system
+    /// font whose metrics moved by a fraction of a point. Raising it is allowed
+    /// and means the window gets wider; doing that by accident is what this
+    /// stops.
+    static let captionBudget: CGFloat = 880
     /// The warning under "Sound in every app", shown only while the setting
     /// is on and the system is not delivering the events it needs.
     private var permissionLabel: NSTextField?
@@ -208,12 +227,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         addPane(title: "Appearance", symbol: "macwindow") { grid in
             self.addRow(
                 grid, "Caret", self.caretPopup(),
-                hint: "The shape of the cursor on the typing surface.")
+                hint: "The shape of the cursor on the typing surface. Play always underlines: "
+                    + "its words are moving, and the other two shapes fight that.")
             self.addRow(
-                grid, "Show invisibles", self.whitespaceToggle(),
+                grid, "Show invisibles", self.flagToggle(AppPreferences.showWhitespace),
                 hint: "space · tab → paragraph ¶")
+            // Latin keyboard layouts only, in the practice window.
             self.addRow(
-                grid, "Latin keyboards only", self.latinInputToggle(),
+                grid, "Latin keyboards only", self.flagToggle(AppPreferences.latinInputOnly),
                 hint: "Input methods such as Pinyin step aside while you type here. "
                     + "Dvorak, Colemak and AZERTY still work.")
             self.addRow(
@@ -221,6 +242,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 hint: "The window is sized to fit exactly this many.")
             self.addRow(
                 grid, "Lines of text", self.preferenceStepper(AppPreferences.rows))
+            self.addRow(
+                grid, "Finger tips", self.flagToggle(AppPreferences.showFingerTips),
+                hint: "The next key shows the finger that presses it — " + FingerTips.legend
+                    + ". A capital marks its ⇧ too.")
             self.addRow(
                 grid, "Keyboard width", self.percentPopup(AppPreferences.drawerWidth, [95, 90, 85, 80, 75]),
                 hint: "The keyboard's width, as a share of the window's.")
@@ -248,15 +273,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             // from here down is about the keystroke click in other
             // applications, and this is not that. The volume it follows is the
             // one immediately above it.
+            // No permission to ask for and no preview to play: this speaks the
+            // passage being typed, and there is nothing to demonstrate without
+            // one.
             self.addRow(
-                grid, "Speak words", self.speakWordsToggle(),
+                grid, "Speak words", self.flagToggle(AppPreferences.speakWords),
                 hint: "A word is read aloud when it is finished and correct. "
                     + "Not in code or generated drills.")
             self.addRow(
                 grid, "Voice", self.speechVoicePopup(),
                 hint: "Automatic follows the language of the text. Picking one says its name.")
+            // Never disabled, unlike the rows above it. Those are system-wide
+            // and mean nothing while the monitor is off; this one belongs to
+            // the practice window and works whatever the monitor is doing,
+            // including with the pack set to Off.
             self.addRow(
-                grid, "Wrong key", self.mistypeSoundToggle(),
+                grid, "Wrong key", self.flagToggle(AppPreferences.mistypeSound, key: "mistypeSound"),
                 hint: "A low note when the letter typed is not the one expected. "
                     + "Here only — nothing outside this window has a text to be wrong against.")
             self.addRow(
@@ -307,11 +339,18 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Start at login", self.loginItemToggle(),
                 hint: "TYPE waits in the menu bar, ready before you type.")
             self.addLoginNoteRow(grid)
+            // Stated positively, matching the preference. A box labelled for
+            // the thing it removes is read wrong by half the people who see it.
             self.addRow(
-                grid, "Start in the menu bar", self.startInMenuBarToggle(),
+                grid, "Start in the menu bar",
+                self.flagToggle(AppPreferences.startInMenuBar, key: "startInMenuBar"),
                 hint: "Only for launches you start. Opening TYPE again brings the window back.")
+            // No work beyond the write: the app delegate watches this preference
+            // and reconciles the activation policy, so the Dock tile appears and
+            // disappears while the window stays where it is.
             self.addRow(
-                grid, "Show in Dock", self.showInDockToggle(),
+                grid, "Show in Dock",
+                self.flagToggle(AppPreferences.showInDock, key: "showInDock"),
                 hint: "Off takes the menu bar with it — macOS ties the two.")
             // Last, and directly under the Dock row, because it answers the
             // question that setting raises: with no Dock tile there is no
@@ -434,9 +473,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             grid.leadingAnchor.constraint(
                 greaterThanOrEqualTo: root.leadingAnchor, constant: Self.paneMargin),
         ])
-        // One width for every pane, so switching tabs changes the height and
-        // nothing else. A window that also changes width on each click reads
-        // as three windows.
+        // One width asked for by every pane, so switching tabs changes the
+        // height and nothing else. A window that also changes width on each
+        // click reads as three windows.
+        //
+        // Asked for, not achieved: a caption is laid out on one line and its
+        // intrinsic width wins, so a pane holding a long one comes out wider
+        // than this and the window follows. Measured, the Sound pane renders
+        // 1044pt wide against the Appearance pane's 804. `captionBudget` caps
+        // how far that can go; closing the gap would mean either captions that
+        // wrap or captions short enough to fit 500pt, and both change how every
+        // pane looks.
         //
         // Laid out first, for the reason `resizePanes` gives: an unlaid-out
         // wrapping label reports a single line's height, so a pane containing
@@ -562,19 +609,21 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return popup
     }
 
-    /// Whether only Latin keyboard layouts may type in the practice window.
-    private func latinInputToggle() -> NSControl {
+    /// A checkbox that shows a flag and writes it back, which is all most of
+    /// them do.
+    ///
+    /// Six hand-written helpers differed only in the preference they named —
+    /// and the seventh, copied from the sixth, is what the audit caught. A
+    /// `key` is passed only by the two whose state `refresh` puts back when the
+    /// window is reopened; the rest are read once and never written to again.
+    private func flagToggle(_ flag: AppPreferences.Flag, key: String? = nil) -> NSControl {
         let toggle = checkbox()
-        toggle.state = AppPreferences.latinInputOnly.value ? .on : .off
-        bind(toggle) { AppPreferences.latinInputOnly.value = toggle.state == .on }
-        return toggle
-    }
-
-    /// Whether spaces and tabs, and the line breaks a passage contains, are marked.
-    private func whitespaceToggle() -> NSControl {
-        let toggle = checkbox()
-        toggle.state = AppPreferences.showWhitespace.value ? .on : .off
-        bind(toggle) { AppPreferences.showWhitespace.value = toggle.state == .on }
+        toggle.state = flag.value ? .on : .off
+        if let key {
+            toggle.identifier = .init(key)
+            controls[key] = toggle
+        }
+        bind(toggle) { flag.value = toggle.state == .on }
         return toggle
     }
 
@@ -617,17 +666,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             if NSApp.currentEvent?.type == .leftMouseUp { self?.previewSound() }
         }
         return slider
-    }
-
-    /// Whether a finished word is read aloud.
-    ///
-    /// No permission to ask for and no preview to play: this speaks the
-    /// passage being typed, and there is nothing to demonstrate without one.
-    private func speakWordsToggle() -> NSControl {
-        let toggle = checkbox()
-        toggle.state = AppPreferences.speakWords.value ? .on : .off
-        bind(toggle) { AppPreferences.speakWords.value = toggle.state == .on }
-        return toggle
     }
 
     /// Rebuilds the voice menu against the voices installed right now, keeping
@@ -786,32 +824,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return StackControl(NSStackView(views: [list]))
     }
 
-    /// Whether TYPE starts with the Mac.
-    ///
-    /// Reads `SMAppService` rather than a preference of its own: the user can
-    /// revoke this in System Settings, and a mirrored copy would go on saying
-    /// the app starts at login after they had turned it off.
-    private func startInMenuBarToggle() -> NSControl {
-        let toggle = checkbox()
-        toggle.identifier = .init("startInMenuBar")
-        controls["startInMenuBar"] = toggle
-        bind(toggle) { AppPreferences.startInMenuBar.value = toggle.state == .on }
-        return toggle
-    }
-
-    /// Stated positively, matching the preference. A box labelled for the
-    /// thing it removes is read wrong by half the people who see it.
-    private func showInDockToggle() -> NSControl {
-        let toggle = checkbox()
-        toggle.identifier = .init("showInDock")
-        controls["showInDock"] = toggle
-        // No work here beyond the write: the app delegate watches this
-        // preference and reconciles the activation policy, so the Dock tile
-        // appears and disappears while the window stays where it is.
-        bind(toggle) { AppPreferences.showInDock.value = toggle.state == .on }
-        return toggle
-    }
-
     /// Whether a key is heard coming back up.
     ///
     /// Not disabled with the scope switch above it, unlike "Modifier keys":
@@ -828,19 +840,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return toggle
     }
 
-    /// Whether a wrong key says so.
-    ///
-    /// Never disabled, unlike the rows above it. Those are system-wide and
-    /// mean nothing while the monitor is off; this one belongs to the practice
-    /// window and works whatever the monitor is doing, including with the pack
-    /// set to Off.
-    private func mistypeSoundToggle() -> NSControl {
-        let toggle = checkbox()
-        toggle.identifier = .init("mistypeSound")
-        controls["mistypeSound"] = toggle
-        bind(toggle) { AppPreferences.mistypeSound.value = toggle.state == .on }
-        return toggle
-    }
 
     private func loginItemToggle() -> NSControl {
         let toggle = checkbox()
@@ -1050,6 +1049,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             // Captions here are short enough to fit; the pane is sized to
             // hold them.
             caption.lineBreakMode = .byTruncatingTail
+            captions.append(caption)
             let captionRow = grid.addRow(with: [NSGridCell.emptyContentView, caption])
             captionRow.topPadding = 1
             captionRow.bottomPadding = 4

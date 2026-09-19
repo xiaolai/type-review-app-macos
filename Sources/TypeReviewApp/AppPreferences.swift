@@ -50,6 +50,15 @@ enum AppPreferences {
     /// the website's, though; `TypingView.drawWhitespaceMarks` says how.
     static let showWhitespace = Flag(key: "ShowWhitespace")
 
+    /// Whether the key that is next shows the number of the finger that
+    /// presses it, in place of its legend.
+    ///
+    /// Off, because it is a teaching aid rather than a feature of the
+    /// keyboard: once the fingering is learnt it is a letter hidden on the one
+    /// key you were about to look at. `FingerTips` holds the chart and what
+    /// the numbers mean.
+    static let showFingerTips = Flag(key: "ShowFingerTips")
+
     /// Whether the practice window takes Latin keyboard layouts only.
     ///
     /// On, because the passages are English and a composing input method has

@@ -680,7 +680,7 @@ final class PracticeViewController: NSViewController {
             .flatMap { $0 == units.endIndex ? nil : String(utf16CodeUnits: [units[$0]], count: 1) }
         keyboard?.update(
             stats: perKeyStats(for: session.profile.results), plan: snapshot.plan,
-            expected: next?.lowercased(), targetWpm: session.profile.settings.targetWpm)
+            expected: next, targetWpm: session.profile.settings.targetWpm)
         wpmLabel.stringValue = String(format: "%.0f wpm", snapshot.liveMetrics.netWpm)
         accuracyLabel.stringValue = String(format: "%.0f%%", snapshot.liveMetrics.accuracy)
         applyMode(snapshot.mode)

@@ -15,12 +15,16 @@ import Carbon.HIToolbox
 /// need no special-casing — they are layouts, and the layout is what we asked
 /// for.
 enum SystemKeyboard {
-    enum Shape: Hashable {
+    /// `CaseIterable` so that anything checking every shape iterates the enum
+    /// rather than repeating its cases. The list was written out four times,
+    /// and a fourth shape added to the enum would have been checked by none of
+    /// them.
+    enum Shape: Hashable, CaseIterable {
         case ansi, iso, jis
         /// Shape sets, for the geometry table. They live here rather than in
         /// `KeyboardGeometry` because that file used to declare a second,
         /// identical `Shape` and convert between the two case by case.
-        static let all: Set<Shape> = [.ansi, .iso, .jis]
+        static let all: Set<Shape> = Set(allCases)
         static let isoOnly: Set<Shape> = [.iso]
         static let jisOnly: Set<Shape> = [.jis]
         static let notISO: Set<Shape> = [.ansi, .jis]
@@ -78,7 +82,9 @@ enum SystemKeyboard {
     /// and the system says what it types. A Dvorak user pressing the key where
     /// QWERTY prints S gets "o", and nothing here needs to know that Dvorak
     /// exists.
-    static func character(forKeyCode keyCode: UInt16, shift: Bool = false) -> String? {
+    static func character(
+        forKeyCode keyCode: UInt16, shift: Bool = false, option: Bool = false
+    ) -> String? {
         guard let source = legendSource,
             let layoutPointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
         else { return nil }
@@ -87,7 +93,13 @@ enum SystemKeyboard {
         var deadKeyState: UInt32 = 0
         var length = 0
         var characters = [UniChar](repeating: 0, count: 4)
-        let modifiers: UInt32 = shift ? UInt32(shiftKey >> 8) : 0
+        // ⌥ is not decoration on a European layout: `@`, `[`, `{`, `\\` and `|`
+        // are all ⌥ chords on the German and Spanish keyboards, and those are
+        // the characters a code drill is made of. Asking only about ⇧ meant the
+        // app could not say which key types them at all.
+        var modifiers: UInt32 = 0
+        if shift { modifiers |= UInt32(shiftKey >> 8) }
+        if option { modifiers |= UInt32(optionKey >> 8) }
 
         let status = layoutData.withUnsafeBytes { buffer -> OSStatus in
             guard let base = buffer.baseAddress else { return OSStatus(paramErr) }

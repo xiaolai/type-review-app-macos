@@ -44,6 +44,11 @@ enum KeyboardGeometry {
         case center, bottom
     }
 
+    /// The Touch ID button, which is not a key and has no virtual key code of
+    /// its own. Named because three places now test for it, and a bare
+    /// `0xFFFF` says nothing about which of them mean the same thing.
+    static let touchIDCode: UInt16 = 0xFFFF
+
     struct Key {
         let code: UInt16
         /// Width in units, or nil for the key that absorbs the row's slack.
@@ -63,6 +68,17 @@ enum KeyboardGeometry {
         /// does — it is a third of English by frequency, and leaving it off the
         /// heatmap hides the key most people are slowest on.
         var types: Bool { role == .letter || role == .space }
+
+        /// Whether the cap carries the small raised ridge the index fingers
+        /// find the home row by.
+        ///
+        /// By key code, like everything else here, because the ridge is
+        /// moulded into the plastic: a Dvorak keyboard relabelled in software
+        /// still has its bumps on the F and J positions, and someone hunting
+        /// for the home row by touch finds them exactly where this draws them.
+        var isHoming: Bool {
+            code == UInt16(kVK_ANSI_F) || code == UInt16(kVK_ANSI_J)
+        }
 
         init(
             _ code: Int, _ width: Double? = 1, label: String? = nil, sub: String? = nil,
@@ -119,7 +135,7 @@ enum KeyboardGeometry {
             Key(kVK_F7, label: "F7", role: .function), Key(kVK_F8, label: "F8", role: .function),
             Key(kVK_F9, label: "F9", role: .function), Key(kVK_F10, label: "F10", role: .function),
             Key(kVK_F11, label: "F11", role: .function), Key(kVK_F12, label: "F12", role: .function),
-            Key(0xFFFF, nil, role: .touchID),
+            Key(Int(touchIDCode), nil, role: .touchID),
         ],
         [
             Key(kVK_ANSI_Grave), Key(kVK_ANSI_1), Key(kVK_ANSI_2), Key(kVK_ANSI_3),

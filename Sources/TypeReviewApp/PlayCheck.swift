@@ -129,9 +129,9 @@ extension Diagnostics {
         guard play.image(forItem: target.id) != nil else {
             throw CheckFailure(message: "the falling word \"\(word)\" is showing no image")
         }
-        // Its letters, drawn without the caret. The block caret alone is
-        // enough ink to pass a count, which is how a word that drew no letters
-        // at all passed this check when it counted the image on screen.
+        // Its letters, drawn without the caret. The caret alone is enough ink
+        // to pass a count, which is how a word that drew no letters at all
+        // passed this check when it counted the image on screen.
         guard let letters = play.imageWithoutCaret(of: target) else {
             throw CheckFailure(message: "the falling word \"\(word)\" could not be drawn")
         }
