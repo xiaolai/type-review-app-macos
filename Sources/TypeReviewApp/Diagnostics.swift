@@ -932,6 +932,43 @@ enum Diagnostics {
                             ? "" : " — " + BundledCorpus.loadFailures.joined(separator: "; ")))
                 exit(1)
             }
+            // Choosing the source already chosen must not restart the run.
+            //
+            // `practice.channel`'s setter calls `startFreshRun()` every time,
+            // so the guard against an unchanged channel is the only thing
+            // standing between a stray click on the ticked menu item and the
+            // passage somebody was halfway through. It was fixed once in the
+            // toolbar and left broken in the View menu, because the two lines
+            // existed in three places; they are one function now, and this is
+            // what keeps them that way.
+            //
+            // Checked after every call, not once after the last one. A fresh
+            // run can draw the passage it just had — about one time in fifteen
+            // — so the id is not a perfect witness to a restart. Comparing
+            // only at the end made the first two calls decorative and left the
+            // odds of missing a broken guard at that same one in fifteen;
+            // comparing each time puts them at one in fifteen cubed.
+            //
+            // It is still an id comparison, so a restart that happens to
+            // redraw the same passage is invisible to it. That is the residual
+            // hole, and it is small rather than absent.
+            if let delegate = NSApp.delegate as? AppDelegate {
+                let channelBefore = practice.channel
+                let passageBefore = practice.currentPassageId
+                for round in 1...3 {
+                    delegate.setChannel(channelBefore)
+                    guard practice.currentPassageId == passageBefore,
+                        practice.channel == channelBefore
+                    else {
+                        print(
+                            "SELFTEST FAIL: re-choosing the current source restarted the run "
+                                + "on round \(round) — passage went from \(passageBefore) "
+                                + "to \(practice.currentPassageId)")
+                        exit(1)
+                    }
+                }
+            }
+
             // The case must sit the same distance from the caps on all four
             // sides. This was wrong until it was measured: the inter-key gap
             // was being applied after the last key too, so the right and

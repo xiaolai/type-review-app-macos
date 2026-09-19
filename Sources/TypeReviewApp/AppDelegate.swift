@@ -116,10 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolbarController.onShowLibrary = { [weak self] in self?.showLibrary(nil) }
         toolbarController.onShowStats = { [weak self] in self?.showStats(nil) }
         toolbarController.currentChannel = { [weak self] in self?.practice?.channel ?? .auto }
-        toolbarController.onChooseSource = { [weak self] channel in
-            self?.practice?.channel = channel
-            self?.markSourceMenu()
-        }
+        toolbarController.onChooseSource = { [weak self] channel in self?.setChannel(channel) }
         toolbarController.onSwitchScreen = { [weak self] screen in self?.show(screen) }
         toolbarController.onNewGame = { [weak self] in self?.play?.newGame() }
         toolbarController.onChoosePlayMode = { [weak self] mode in self?.play?.newGame(mode: mode) }
@@ -520,12 +517,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if remember { AppPreferences.mainScreen.value = screen }
     }
 
+    /// Switches the corpus a run draws from. The one place that does.
+    ///
+    /// The guard is the point. `practice.channel`'s setter calls
+    /// `startFreshRun()` unconditionally, so choosing the source that is
+    /// already ticked threw away the passage the typist was partway through.
+    /// That was found once and fixed in `MainToolbar.sourcePicked`, which left
+    /// the two other copies of these two lines — this one and the toolbar's
+    /// own callback — still doing it. Three copies, one of them guarded, is
+    /// how the same defect survives being fixed.
+    ///
+    /// So both entry points call this, and the guard lives here where neither
+    /// can forget it.
+    func setChannel(_ channel: CorpusChannel) {
+        guard channel != practice?.channel else { return }
+        practice?.channel = channel
+        markSourceMenu()
+    }
+
     @objc func chooseSource(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
             let channel = CorpusChannel(rawValue: raw)
         else { return }
-        practice?.channel = channel
-        markSourceMenu()
+        setChannel(channel)
     }
 
 

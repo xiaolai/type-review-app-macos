@@ -312,11 +312,10 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
         guard let raw = sender.representedObject as? String,
             let channel = CorpusChannel(rawValue: raw)
         else { return }
-        // Choosing the source that is already ticked is not a change. The
-        // handler assigns `practice.channel`, whose setter starts a fresh run
-        // unconditionally — so clicking the current item threw away the
-        // passage the user was partway through.
-        guard channel != currentChannel() else { return }
+        // No guard on the unchanged channel here: `AppDelegate.setChannel` has
+        // it, and both this and the View menu go through that one function. A
+        // second copy here is what let the View menu keep the bug after this
+        // path was fixed.
         // No `refresh()` here: `onChooseSource` marks the source menus, and
         // that path already calls back into this controller. Refreshing again
         // rebuilt the same menu twice for one click.
