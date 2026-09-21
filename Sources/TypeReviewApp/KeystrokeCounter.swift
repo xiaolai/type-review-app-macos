@@ -108,10 +108,24 @@ final class KeystrokeCounter {
     }
 
     /// Forgets everything, on disk and in memory.
-    func erase() {
+    ///
+    /// The file goes first, and the counts in memory are kept when it will not
+    /// go. Swallowing that error cleared the totals on screen over a file
+    /// still on disk, so the next launch loaded them back — an erasure the app
+    /// reported as done and undid by itself. A caller that cannot delete is
+    /// owed the reason, since this is data the user asked to be rid of.
+    func erase() throws {
+        // Attempted, not asked about first. `fileExists` answers false for a
+        // directory that cannot be read as well as for a file that is not
+        // there, and on that answer this skipped the delete, cleared the
+        // screen, and left the counts to come back on the next launch.
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch CocoaError.fileNoSuchFile {
+            // Already gone is the state being asked for.
+        }
         log = KeystrokeLog()
         pending = 0
-        try? FileManager.default.removeItem(at: fileURL)
     }
 
     // MARK: - Disk

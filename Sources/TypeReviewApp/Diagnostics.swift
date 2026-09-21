@@ -255,12 +255,12 @@ enum Diagnostics {
         var lateResolutions = 0
     }
 
-    /// Practice, Appearance, Sound, General, Data, About.
+    /// Practice, Appearance, Sound, Everywhere, General, Data, About.
     ///
     /// Named once rather than written into both the check and its message,
     /// which is how the first version of this reported "built 6 panes, expected
     /// 6" — a failure message that argued with itself.
-    private static let expectedSettingsPanes = 6
+    private static let expectedSettingsPanes = 7
 
     /// Flips Speak Words for the benchmark without touching what is on disk.
     private static func setBenchSpeech(_ on: Bool) {
@@ -1382,23 +1382,50 @@ enum Diagnostics {
                 exit(1)
             }
 
-            // No caption may be wider than the window is designed for.
+            // The window stays the width it was designed to be.
             //
-            // Captions are laid out on one line and the pane is sized to hold
-            // them, so the widest caption in the app is what decides how wide
-            // the Settings window is. A caption that overruns does not look
-            // broken — it just makes the window wider, on a screen most people
-            // open once. One did: a hint added on this branch measured 897
-            // points against a design that had never gone past 870, and the
-            // window grew by 37 of them with nothing to say so.
-            let overrun = settings.captions
-                .map { ($0.stringValue, $0.attributedStringValue.size().width) }
-                .filter { $0.1 > SettingsWindowController.captionBudget }
-            guard overrun.isEmpty else {
-                for (text, width) in overrun {
+            // Captions wrap now, so they can no longer widen it, but a control
+            // can — the voice menu is as wide as the longest voice name the
+            // machine has. A window that grows does not look broken, only
+            // wider, on a screen most people open once. It has happened: a
+            // hint added once measured 897 points against a design that had
+            // never gone past 870, and the window grew by 37 of them with
+            // nothing to say so.
+            // Asked as well as needed. Checking the need alone passes a
+            // window every pane asks 900 points for over content that needs
+            // 546 — the ask is what the window is actually set to.
+            let paneSizes = settings.paneSizes
+            let overBudget = paneSizes.filter {
+                max($0.asked.width, $0.needed.width) > SettingsWindowController.widthBudget
+            }
+            guard overBudget.isEmpty else {
+                for pane in overBudget {
                     print(
-                        "SELFTEST FAIL: a Settings caption is \(Int(width))pt wide, over the "
-                            + "\(Int(SettingsWindowController.captionBudget))pt budget: \(text)")
+                        "SELFTEST FAIL: the \(pane.title) pane asks for "
+                            + "\(Int(pane.asked.width))pt and needs \(Int(pane.needed.width))pt, "
+                            + "over the Settings window's "
+                            + "\(Int(SettingsWindowController.widthBudget))pt budget")
+                }
+                exit(1)
+            }
+
+            // Every pane asks for one width, never less than it needs, and
+            // exactly its height. The tab transition animates to what a pane
+            // asks for and Auto Layout then enforces what it needs; where the
+            // two differ, the window moves twice — see `resizePanes`.
+            let sharedWidth = paneSizes.first?.asked.width ?? 0
+            let misfits = paneSizes.filter {
+                $0.asked.width != sharedWidth
+                    || $0.asked.width < $0.needed.width - 0.5
+                    || abs($0.asked.height - $0.needed.height) > 0.5
+            }
+            guard misfits.isEmpty else {
+                for pane in misfits {
+                    print(
+                        "SELFTEST FAIL: the \(pane.title) pane asks for "
+                            + "\(Int(pane.asked.width))×\(Int(pane.asked.height)) and needs "
+                            + "\(Int(pane.needed.width))×\(Int(pane.needed.height)), and every "
+                            + "pane should ask for \(Int(sharedWidth)) wide")
                 }
                 exit(1)
             }
@@ -1498,7 +1525,12 @@ enum Diagnostics {
                 print("SELFTEST FAIL: the keystroke counts did not survive a save and load")
                 exit(1)
             }
-            reloaded.erase()
+            do {
+                try reloaded.erase()
+            } catch {
+                print("SELFTEST FAIL: erasing the keystroke counts threw: \(error)")
+                exit(1)
+            }
             guard reloaded.isEmpty,
                 !FileManager.default.fileExists(
                     atPath: countDirectory.appendingPathComponent("keystrokes.json").path)
