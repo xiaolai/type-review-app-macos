@@ -52,25 +52,26 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Each pane and its grid, so a pane can be re-measured when a row is
     /// hidden.
     private var panes: [(controller: NSViewController, grid: NSGridView)] = []
-    /// Every caption in every pane, in build order.
-    ///
-    /// Held for the self-test, which measures them. A caption is laid out on
-    /// one line and the pane is sized to fit it, so the widest caption in the
-    /// app decides how wide the Settings window is — and a caption that
-    /// overruns simply widens the window, silently, on a screen nobody looks
-    /// at twice. `captionBudget` is what that width is allowed to be.
-    private(set) var captions: [NSTextField] = []
 
-    /// The widest a caption may be drawn, in points.
+    /// The width every caption wraps at, in points — and so, with the widest
+    /// label, the width of the Settings window.
     ///
-    /// Not a style rule — it is the Settings window's width, stated where it is
-    /// actually decided. The widest caption the app ships with is the keystroke
-    /// counter's at 869.3pt, and this is that with ten points of slack, so the
-    /// check fires on a caption somebody made longer rather than on a system
-    /// font whose metrics moved by a fraction of a point. Raising it is allowed
-    /// and means the window gets wider; doing that by accident is what this
-    /// stops.
-    static let captionBudget: CGFloat = 880
+    /// Captions used to be laid out on one line, which let the longest one
+    /// decide how wide the window was: the keystroke counter's, at 869 points,
+    /// made the Sound pane 1044 wide against Practice's 500. A caption now gets
+    /// another line instead of a wider window. At 360 every caption the app
+    /// ships fits in one line or two, bar the keystroke counter's three, and
+    /// the window comes out 546 wide.
+    static let captionWidth: CGFloat = 360
+
+    /// The widest the Settings window may be, for `--selftest`.
+    ///
+    /// A caption can no longer widen it, but a control still can — the voice
+    /// menu is as wide as the longest voice name on the machine — and a window
+    /// that grows without anyone deciding it should is what this stops. It is
+    /// today's 546 with some slack, so it fires on a new wide control rather
+    /// than on a system font whose metrics moved by a fraction of a point.
+    static let widthBudget: CGFloat = 560
     /// The warning under "Sound in every app", shown only while the setting
     /// is on and the system is not delivering the events it needs.
     private var permissionLabel: NSTextField?
@@ -89,7 +90,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// Where the profile lives, resolved once when the Data pane is built.
     private var profileURL: URL?
     private static let lastPaneKey = "SettingsLastPane"
-    private static let paneWidth: CGFloat = 500
     private static let paneMargin: CGFloat = 22
     private static let pathWidth: CGFloat = 330
 
@@ -131,14 +131,38 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// menu is assembled from whatever voices the machine happens to have.
     var paneCount: Int { panes.count }
 
+    /// For `--selftest`: what each pane asks the window for, against what its content needs.
+    /// `resizePanes` says why the two must agree.
+    ///
+    /// "Needed" is worked out here from the grid directly rather than through `fittedSize`, so a
+    /// change to that helper shows up as a disagreement. It is the same arithmetic, though, so it
+    /// cannot see a change to the constraints `addPane` sets — only measuring the window after a
+    /// transition has finished could.
+    var paneSizes: [(title: String, asked: NSSize, needed: NSSize)] {
+        panes.map { pane in
+            pane.grid.layoutSubtreeIfNeeded()
+            let content = pane.grid.fittingSize
+            let needed = NSSize(
+                width: content.width + 2 * Self.paneMargin,
+                height: content.height + 2 * Self.paneMargin)
+            return (pane.controller.title ?? "?", pane.controller.preferredContentSize, needed)
+        }
+    }
+
     func present() {
         refresh()
-        // Both ends checked. `UserDefaults.integer` happily returns whatever
-        // `defaults write` put there, including a negative number, and
-        // `selectedTabViewItemIndex` traps on one — the same reason every
-        // other read in this window is clamped rather than trusted.
-        let last = UserDefaults.standard.integer(forKey: Self.lastPaneKey)
-        if last >= 0, last < tabs.tabViewItems.count { tabs.selectedTabViewItemIndex = last }
+        // By name, not by number. A stored index is a promise that the panes
+        // are never reordered, and adding Everywhere between Sound and General
+        // broke it: anyone who left Settings on General reopened it on a pane
+        // they had never seen. A name that matches nothing — a pane renamed or
+        // removed, or whatever `defaults write` put there — opens the first
+        // pane, which is the landing this window wants anyway. That is also
+        // why nothing here needs clamping: an index had to be, because
+        // `selectedTabViewItemIndex` traps on a negative one.
+        let last = UserDefaults.standard.string(forKey: Self.lastPaneKey)
+        if let index = panes.firstIndex(where: { $0.controller.title == last }) {
+            tabs.selectedTabViewItemIndex = index
+        }
         showWindow(nil)
         // Only when there is nothing to restore. The window has an autosave
         // name, and centring unconditionally on every presentation meant the
@@ -166,7 +190,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        UserDefaults.standard.set(tabs.selectedTabViewItemIndex, forKey: Self.lastPaneKey)
+        let selected = tabs.selectedTabViewItemIndex
+        guard panes.indices.contains(selected) else { return }
+        UserDefaults.standard.set(panes[selected].controller.title, forKey: Self.lastPaneKey)
     }
 
     // MARK: - Building
@@ -178,9 +204,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         buildPracticePane()
         buildAppearancePane()
         buildSoundPane()
+        buildEverywherePane()
         buildGeneralPane()
         buildDataPane()
         buildAboutPane()
+        // Once every pane exists, because each one's width is the widest's.
+        resizePanes()
     }
 
     private func buildPracticePane() {
@@ -269,10 +298,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Keyboard", self.soundPackPopup(),
                 hint: "Heard on every keystroke. Picking one plays it.")
             self.addRow(grid, "Volume", self.volumeSlider())
-            // Above the system-wide rows rather than below them: everything
-            // from here down is about the keystroke click in other
-            // applications, and this is not that. The volume it follows is the
-            // one immediately above it.
+            // Under the volume it follows, which is the row immediately above.
             // No permission to ask for and no preview to play: this speaks the
             // passage being typed, and there is nothing to demonstrate without
             // one.
@@ -283,14 +309,31 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Voice", self.speechVoicePopup(),
                 hint: "Automatic follows the language of the text. Picking one says its name.")
-            // Never disabled, unlike the rows above it. Those are system-wide
-            // and mean nothing while the monitor is off; this one belongs to
-            // the practice window and works whatever the monitor is doing,
-            // including with the pack set to Off.
+            // Never disabled, unlike Modifier keys in Everywhere: that one is
+            // heard through the system-wide monitor and means nothing while it
+            // is off. This belongs to the practice window and works whatever
+            // the monitor is doing, including with the pack set to Off.
             self.addRow(
                 grid, "Wrong key", self.flagToggle(AppPreferences.mistypeSound, key: "mistypeSound"),
                 hint: "A low note when the letter typed is not the one expected. "
                     + "Here only — nothing outside this window has a text to be wrong against.")
+            self.addRow(
+                grid, "Key release", self.releaseSoundToggle(),
+                hint: "Keys are heard coming back up. Recorded packs have none.")
+        }
+    }
+
+    /// Everything TYPE does while you are typing in some other application.
+    ///
+    /// Split out of Sound, which held thirteen settings and stood 891 points
+    /// tall — more than a 13-inch display has room for once the Dock is
+    /// counted. The seam is the one the rows already had: Sound is what this
+    /// window makes of your typing in it, and this is what TYPE does outside
+    /// it. Everything here needs Input Monitoring and shares one tap, which is
+    /// also why the warning that the permission is missing belongs here and
+    /// can speak for all of them.
+    private func buildEverywherePane() {
+        addPane(title: "Everywhere", symbol: "square.grid.2x2") { grid in
             self.addRow(
                 grid, "Sound in every app", self.globalSoundToggle(),
                 hint: "Clicks wherever you type, not only in this window.")
@@ -298,9 +341,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             self.addRow(
                 grid, "Modifier keys", self.modifierSoundToggle(),
                 hint: "⇧ ⌃ ⌥ ⌘ fn ⇪ click too. A capital stays one sound here.")
-            self.addRow(
-                grid, "Key release", self.releaseSoundToggle(),
-                hint: "Keys are heard coming back up. Recorded packs have none.")
             self.addRow(
                 grid, "Silent in", self.mutedAppsControl(),
                 hint: "Password managers are never watched. Password fields never sound.")
@@ -473,25 +513,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             grid.leadingAnchor.constraint(
                 greaterThanOrEqualTo: root.leadingAnchor, constant: Self.paneMargin),
         ])
-        // One width asked for by every pane, so switching tabs changes the
-        // height and nothing else. A window that also changes width on each
-        // click reads as three windows.
-        //
-        // Asked for, not achieved: a caption is laid out on one line and its
-        // intrinsic width wins, so a pane holding a long one comes out wider
-        // than this and the window follows. Measured, the Sound pane renders
-        // 1044pt wide against the Appearance pane's 804. `captionBudget` caps
-        // how far that can go; closing the gap would mean either captions that
-        // wrap or captions short enough to fit 500pt, and both change how every
-        // pane looks.
-        //
-        // Laid out first, for the reason `resizePanes` gives: an unlaid-out
-        // wrapping label reports a single line's height, so a pane containing
-        // prose is built too short and corrects itself later, visibly.
-        grid.layoutSubtreeIfNeeded()
-        let size = grid.fittingSize
-        root.frame = NSRect(
-            x: 0, y: 0, width: Self.paneWidth, height: size.height + 2 * Self.paneMargin)
+        // A frame to be built into. The width every pane shares is not known
+        // until they all exist, so `build` settles it once they do.
+        root.frame = NSRect(origin: .zero, size: Self.fittedSize(of: grid))
 
         let controller = NSViewController()
         controller.view = root
@@ -795,7 +819,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         alert.addButton(withTitle: "Cancel")
         alert.alertStyle = .warning
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        (NSApp.delegate as? AppDelegate)?.keystrokes?.erase()
+        do {
+            try (NSApp.delegate as? AppDelegate)?.keystrokes?.erase()
+        } catch {
+            // Said out loud. The counts are still there, and a dialog that
+            // closed on silence would have promised otherwise.
+            let failure = NSAlert()
+            failure.messageText = "The keystroke counts could not be erased."
+            failure.informativeText = error.localizedDescription
+            failure.alertStyle = .warning
+            failure.runModal()
+        }
+        // Either way: the button belongs dim once there is nothing to erase,
+        // and it is still live if the deletion failed.
+        refreshSoundScope()
     }
 
     /// Whether the modifier keys click.
@@ -866,18 +903,25 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func addStatusRow(
         _ grid: NSGridView, button title: String, action: Selector
     ) -> (label: NSTextField, button: NSButton, row: NSGridRow) {
-        let label = NSTextField(labelWithString: "")
+        let label = NSTextField(wrappingLabelWithString: "")
         label.font = .preferredFont(forTextStyle: .caption1)
         // The system's own warning colour rather than red: these are settings
         // that are not doing anything yet, not errors.
         label.textColor = .systemOrange
-        label.lineBreakMode = .byTruncatingTail
+        label.isSelectable = false
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
         button.controlSize = .small
         let stack = NSStackView(views: [label, button])
         stack.spacing = 8
         stack.alignment = .centerY
+        // Wrapped, and with its button no wider than a caption. The login note
+        // carries whatever `SMAppService` says when it refuses, which can be
+        // any length, and on one line it would set the window's width the way
+        // the captions once did.
+        label.widthAnchor.constraint(
+            equalToConstant: Self.captionWidth - stack.spacing - button.fittingSize.width
+        ).isActive = true
         let row = grid.addRow(with: [NSGridCell.emptyContentView, stack])
         row.topPadding = 1
         row.bottomPadding = 4
@@ -928,23 +972,49 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         (controls["mistypeSound"] as? NSButton)?.state =
             AppPreferences.mistypeSound.value ? .on : .off
         mutedApps?.reload()
-        // Two reasons the setting can be on while nothing is heard, and one
-        // row to say either. The permission comes first when both apply: it is
-        // the one with a button that fixes it, and the other install being
-        // open is the more obvious of the two to a person looking at their own
-        // screen.
-        let unpermitted = global && !GlobalKeySound.isPermitted
-        let conflicted = global && !unpermitted && Channel.shouldYieldToSibling
+        // Two reasons a setting can be on while nothing happens, and one row
+        // to say either. The permission comes first when both apply: it is the
+        // one with a button that fixes it, and the other install being open is
+        // the more obvious of the two to a person looking at their own screen.
+        //
+        // Either setting is reason enough to show it. The sound and the
+        // counter share one tap and one permission, and the counter used to
+        // fail in silence: switched on without the permission, it recorded
+        // nothing and said nothing, which on the Statistics grid is
+        // indistinguishable from days nobody typed.
+        let wantsTap = global || counting
+        let unpermitted = wantsTap && !GlobalKeySound.isPermitted
+        let conflicted = wantsTap && !unpermitted && Channel.shouldYieldToSibling
+        let loss = Self.tapLoss(global: global, counting: counting)
         if unpermitted {
-            permissionLabel?.stringValue = "Input Monitoring is off — other apps are not heard."
+            permissionLabel?.stringValue = "Input Monitoring is off — \(loss)."
         } else if conflicted {
-            permissionLabel?.stringValue =
-                "Another copy of TYPE started first — only it is heard."
+            permissionLabel?.stringValue = "Another copy of TYPE started first — \(loss)."
         }
         permissionButton?.isHidden = !unpermitted
         for row in permissionRows { row.isHidden = !(unpermitted || conflicted) }
 
         resizePanes()
+    }
+
+    /// What is not happening while the tap is missing or held by another
+    /// copy, named for whichever of the two settings wanted it.
+    ///
+    /// Both on is its own sentence rather than two rows: one warning with one
+    /// button fixes both, and a pane that grew a second warning saying the
+    /// same thing would read as two problems.
+    ///
+    /// One sentence serves both causes, and it says what is not happening here
+    /// rather than what the other copy is doing. `Channel.shouldYieldToSibling`
+    /// knows which copy started first and nothing about that copy's settings,
+    /// so "only it is counting" was a claim this app is in no position to make.
+    private static func tapLoss(global: Bool, counting: Bool) -> String {
+        switch (global, counting) {
+        case (true, true): return "other apps are not heard and their keys are not counted"
+        case (false, true): return "keys pressed in other apps are not counted"
+        // Sound alone, and the row is hidden when neither is on.
+        default: return "other apps are not heard"
+        }
     }
 
     /// The General pane's live state.
@@ -1039,17 +1109,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         var owned = [row]
 
         if let hint {
-            let caption = NSTextField(labelWithString: hint)
+            let caption = NSTextField(wrappingLabelWithString: hint)
             caption.font = .preferredFont(forTextStyle: .caption1)
             caption.textColor = Theme.secondaryText
-            // One line, and no `preferredMaxLayoutWidth`. Setting it makes the
-            // field's intrinsic *height* two lines while the grid still lays
-            // it out wide enough for one — so it draws one line and reserves
-            // two, and the pane grows a band of white under every caption.
-            // Captions here are short enough to fit; the pane is sized to
-            // hold them.
-            caption.lineBreakMode = .byTruncatingTail
-            captions.append(caption)
+            // A wrapping label is selectable by default; a caption is not text
+            // anyone needs to copy.
+            caption.isSelectable = false
+            // Wrapped at `captionWidth`, fixed by a constraint and not by
+            // `preferredMaxLayoutWidth`. Setting that makes the field's
+            // intrinsic *height* two lines while the grid still lays it out
+            // wide enough for one — so it draws one line and reserves two, and
+            // the pane grows a band of white under every caption. A constraint
+            // is the one width the field and the grid both read, which is why
+            // `AboutPane` uses it too.
+            caption.widthAnchor.constraint(equalToConstant: Self.captionWidth).isActive = true
             let captionRow = grid.addRow(with: [NSGridCell.emptyContentView, caption])
             captionRow.topPadding = 1
             captionRow.bottomPadding = 4
@@ -1173,21 +1246,47 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     // MARK: - State
 
+    /// The size a pane's content needs: its grid, and the margin around it.
+    ///
+    /// Laid out first, for the reason `resizePanes` gives: an unlaid-out
+    /// wrapping label reports a single line's height, so a pane containing
+    /// prose would be measured too short and correct itself later, visibly.
+    private static func fittedSize(of grid: NSGridView) -> NSSize {
+        grid.layoutSubtreeIfNeeded()
+        let content = grid.fittingSize
+        return NSSize(
+            width: content.width + 2 * paneMargin,
+            height: content.height + 2 * paneMargin)
+    }
+
     /// Re-measures each pane after rows have been shown or hidden, so the
     /// window is exactly as tall as what it holds. Without it a pane keeps the
     /// height it was built with and the difference shows as empty space.
+    ///
+    /// **One width, the widest pane's.** The tab transition animates the
+    /// window to the size a pane asks for, and Auto Layout then holds it to the
+    /// size the content needs; where the two differ, the window moves twice.
+    /// Every pane used to ask for 500 points wide while three needed more, and
+    /// measured on mbp16 (2026-09-21) Appearance to Sound narrowed the window
+    /// towards 500 and then threw it out to 1044. When every pane asks for the
+    /// widest one's width, none needs more than it asked for, and a tab switch
+    /// changes the height and nothing else — a window that changes width as
+    /// well on each click reads as several windows. `--selftest` fails a pane
+    /// that asks for less than it needs, and a window wider than `widthBudget`.
     private func resizePanes() {
-        for pane in panes {
-            // Lay out before measuring. `fittingSize` asks each subview how
-            // tall it wants to be, and a wrapping label answers "one line"
-            // until layout has told it how wide it is — the About pane
-            // measured 348 points before layout and 461 after, and the window
-            // was sized to the first number and then to the second. That
-            // 113-point correction is the jump.
-            pane.grid.layoutSubtreeIfNeeded()
-            let size = NSSize(
-                width: Self.paneWidth,
-                height: pane.grid.fittingSize.height + 2 * Self.paneMargin)
+        // Lay out before measuring, which `fittedSize` does. `fittingSize`
+        // asks each subview how tall it wants to be, and a wrapping label
+        // answers "one line" until layout has told it how wide it is — the
+        // About pane measured 348 points before layout and 461 after, and the
+        // window was sized to the first number and then to the second. That
+        // 113-point correction is the jump.
+        let fitted = panes.map { Self.fittedSize(of: $0.grid) }
+        // Rounded up to a whole point. A pane measures half a point wider in
+        // the window than out of it — General came out 545.5 and 546 on mbp16
+        // — and asking for the smaller figure leaves that half-point to move.
+        let width = (fitted.map(\.width).max() ?? 0).rounded(.up)
+        for (pane, fit) in zip(panes, fitted) {
+            let size = NSSize(width: width, height: fit.height)
             // Only on a real change. Writing `preferredContentSize` makes the
             // tab controller resize the window immediately and without
             // animation, so an identical value still cost a snap — and this

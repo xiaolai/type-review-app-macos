@@ -255,12 +255,12 @@ enum Diagnostics {
         var lateResolutions = 0
     }
 
-    /// Practice, Appearance, Sound, General, Data, About.
+    /// Practice, Appearance, Sound, Everywhere, General, Data, About.
     ///
     /// Named once rather than written into both the check and its message,
     /// which is how the first version of this reported "built 6 panes, expected
     /// 6" — a failure message that argued with itself.
-    private static let expectedSettingsPanes = 6
+    private static let expectedSettingsPanes = 7
 
     /// Flips Speak Words for the benchmark without touching what is on disk.
     private static func setBenchSpeech(_ on: Bool) {
@@ -850,6 +850,18 @@ enum Diagnostics {
             print("SELFTEST FAIL: no typing surface for the shift check")
             exit(1)
         }
+        // Quotes, for this check only. The passage comes from whichever
+        // source was last chosen, and two of them can never satisfy what is
+        // being looked for: Early is graded lower-case words and Generated is
+        // drills, so against either this fails fifty times and reports a
+        // keyboard fault that is really a setting. The argument domain wins
+        // over the stored value and is never written to disk, so the source
+        // the user picked is read but not touched.
+        let argumentsBefore = UserDefaults.standard.volatileDomain(
+            forName: UserDefaults.argumentDomain)
+        var pinned = argumentsBefore
+        pinned["CorpusChannel"] = CorpusChannel.quotes.rawValue
+        UserDefaults.standard.setVolatileDomain(pinned, forName: UserDefaults.argumentDomain)
         var units: [UInt16] = []
         var capital: Int?
         for _ in 0..<50 {
@@ -882,7 +894,10 @@ enum Diagnostics {
         }
 
         // Left as it was found: the run below types a whole passage and counts
-        // the characters, which a half-typed one would throw out.
+        // the characters, which a half-typed one would throw out — and it
+        // draws from the source the user chose, not this check's.
+        UserDefaults.standard.setVolatileDomain(
+            argumentsBefore, forName: UserDefaults.argumentDomain)
         practice.keyboard = nil
         practice.startFreshRun()
     }
@@ -1191,26 +1206,35 @@ enum Diagnostics {
                 mistyped[8] = .incorrect
                 let edgeView = TypingView(frame: NSRect(x: 0, y: 0, width: column * 40, height: 200))
                 edgeView.showsWhitespace = false
-                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], step: Int)? {
+                // Pixels are found by row and sample, never by dividing
+                // `bytesPerRow` by the width: a row is padded to an alignment,
+                // so that division truncates and a flat walk of the buffer
+                // drifts a little further into the padding on every row.
+                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], rep: NSBitmapImageRep)? {
                     edgeView.setPassage(passage, statuses: statuses, cursor: 0)
                     guard let rep = edgeView.bitmapImageRepForCachingDisplay(in: edgeView.bounds),
                         rep.samplesPerPixel >= 3
                     else { return nil }
                     edgeView.cacheDisplay(in: edgeView.bounds, to: rep)
                     guard let data = rep.bitmapData else { return nil }
-                    return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep.bytesPerRow / rep.pixelsWide)
+                    return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep)
                 }
                 @MainActor func cellPixels(atColumns columns: CGFloat) -> Int? {
                     edgeView.setFrameSize(NSSize(width: column * columns, height: 200))
                     guard let a = render(correct), let b = render(mistyped), a.bytes.count == b.bytes.count
                     else { return nil }
+                    let step = a.rep.samplesPerPixel
+                    let row = a.rep.bytesPerRow
                     var changed = 0
-                    for pixel in stride(from: 0, to: a.bytes.count - a.step + 1, by: a.step) {
-                        var largest = 0
-                        for channel in 0..<min(a.step, 4) {
-                            largest = max(largest, abs(Int(a.bytes[pixel + channel]) - Int(b.bytes[pixel + channel])))
+                    for y in 0..<a.rep.pixelsHigh {
+                        for x in 0..<a.rep.pixelsWide {
+                            let offset = y * row + x * step
+                            var largest = 0
+                            for channel in 0..<min(step, 4) {
+                                largest = max(largest, abs(Int(a.bytes[offset + channel]) - Int(b.bytes[offset + channel])))
+                            }
+                            if largest > 12 { changed += 1 }
                         }
-                        if largest > 12 { changed += 1 }
                     }
                     return changed
                 }
@@ -1382,23 +1406,50 @@ enum Diagnostics {
                 exit(1)
             }
 
-            // No caption may be wider than the window is designed for.
+            // The window stays the width it was designed to be.
             //
-            // Captions are laid out on one line and the pane is sized to hold
-            // them, so the widest caption in the app is what decides how wide
-            // the Settings window is. A caption that overruns does not look
-            // broken — it just makes the window wider, on a screen most people
-            // open once. One did: a hint added on this branch measured 897
-            // points against a design that had never gone past 870, and the
-            // window grew by 37 of them with nothing to say so.
-            let overrun = settings.captions
-                .map { ($0.stringValue, $0.attributedStringValue.size().width) }
-                .filter { $0.1 > SettingsWindowController.captionBudget }
-            guard overrun.isEmpty else {
-                for (text, width) in overrun {
+            // Captions wrap now, so they can no longer widen it, but a control
+            // can — the voice menu is as wide as the longest voice name the
+            // machine has. A window that grows does not look broken, only
+            // wider, on a screen most people open once. It has happened: a
+            // hint added once measured 897 points against a design that had
+            // never gone past 870, and the window grew by 37 of them with
+            // nothing to say so.
+            // Asked as well as needed. Checking the need alone passes a
+            // window every pane asks 900 points for over content that needs
+            // 546 — the ask is what the window is actually set to.
+            let paneSizes = settings.paneSizes
+            let overBudget = paneSizes.filter {
+                max($0.asked.width, $0.needed.width) > SettingsWindowController.widthBudget
+            }
+            guard overBudget.isEmpty else {
+                for pane in overBudget {
                     print(
-                        "SELFTEST FAIL: a Settings caption is \(Int(width))pt wide, over the "
-                            + "\(Int(SettingsWindowController.captionBudget))pt budget: \(text)")
+                        "SELFTEST FAIL: the \(pane.title) pane asks for "
+                            + "\(Int(pane.asked.width))pt and needs \(Int(pane.needed.width))pt, "
+                            + "over the Settings window's "
+                            + "\(Int(SettingsWindowController.widthBudget))pt budget")
+                }
+                exit(1)
+            }
+
+            // Every pane asks for one width, never less than it needs, and
+            // exactly its height. The tab transition animates to what a pane
+            // asks for and Auto Layout then enforces what it needs; where the
+            // two differ, the window moves twice — see `resizePanes`.
+            let sharedWidth = paneSizes.first?.asked.width ?? 0
+            let misfits = paneSizes.filter {
+                $0.asked.width != sharedWidth
+                    || $0.asked.width < $0.needed.width - 0.5
+                    || abs($0.asked.height - $0.needed.height) > 0.5
+            }
+            guard misfits.isEmpty else {
+                for pane in misfits {
+                    print(
+                        "SELFTEST FAIL: the \(pane.title) pane asks for "
+                            + "\(Int(pane.asked.width))×\(Int(pane.asked.height)) and needs "
+                            + "\(Int(pane.needed.width))×\(Int(pane.needed.height)), and every "
+                            + "pane should ask for \(Int(sharedWidth)) wide")
                 }
                 exit(1)
             }
@@ -1498,7 +1549,12 @@ enum Diagnostics {
                 print("SELFTEST FAIL: the keystroke counts did not survive a save and load")
                 exit(1)
             }
-            reloaded.erase()
+            do {
+                try reloaded.erase()
+            } catch {
+                print("SELFTEST FAIL: erasing the keystroke counts threw: \(error)")
+                exit(1)
+            }
             guard reloaded.isEmpty,
                 !FileManager.default.fileExists(
                     atPath: countDirectory.appendingPathComponent("keystrokes.json").path)

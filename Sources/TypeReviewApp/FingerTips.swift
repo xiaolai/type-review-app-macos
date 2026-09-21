@@ -100,5 +100,9 @@ enum FingerTips {
     )
 
     /// What the digits mean, for Settings and anywhere else that has to say it.
-    static let legend = "1 thumb · 2 index · 3 middle · 4 ring · 5 little"
+    ///
+    /// Each digit is held to its finger by a no-break space, because a caption
+    /// that wraps would otherwise end one line on "3" and start the next on
+    /// "middle".
+    static let legend = "1\u{A0}thumb · 2\u{A0}index · 3\u{A0}middle · 4\u{A0}ring · 5\u{A0}little"
 }

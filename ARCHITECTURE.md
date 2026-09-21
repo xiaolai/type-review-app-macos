@@ -262,8 +262,23 @@ and each has a rule behind it worth keeping:
   two-digit target-speed field ended up 330 points across. Text fields carry a
   width *constraint*; setting `frame.size.width` inside an autolayout grid is
   overwritten on the next pass.
-- **Every pane is the same width.** A window that changes width on each
-  toolbar click reads as three windows.
+- **Every pane is the same width, and captions are what decide it.** A window
+  that changes width on each toolbar click reads as three windows. Two things
+  make it one width, and both are load-bearing. Captions wrap at a fixed 360
+  points instead of being laid out on one line, where the longest one sets the
+  window's width by itself — the keystroke counter's, at 869 points, made the
+  Sound pane 1044 wide against Practice's 500. And every pane asks the window
+  for the *widest* pane's width, because a pane that asks for less than its
+  content needs moves the window twice on every tab switch: the transition
+  animates to what was asked for, and Auto Layout then enforces what is
+  needed. `--selftest` fails a pane that asks for less than it needs, and a
+  window over 560 points wide.
+- **Sound is two panes.** What TYPE makes of typing in its own window, and
+  what it does while you are typing in some other application — the second is
+  the Everywhere pane, and everything in it needs Input Monitoring and shares
+  one tap, which is why one warning there can speak for all of it. As one
+  pane it held thirteen settings and stood 891 points tall, more than a
+  13-inch display has room for once the Dock is counted.
 - **The grid is not pinned to the pane's bottom.** Pinned to both edges it
   stretches to whatever height the pane was built with — and panes are
   measured with every row visible, before the ones that do not apply are

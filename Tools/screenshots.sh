@@ -40,7 +40,8 @@ out=${out:A}
 #
 # Two arguments go to the app's argument domain, which nothing persists: the
 # caret held still, since a blinking one may be caught off; and Settings opened
-# on its Sound pane, the third.
+# on its Sound pane, named rather than numbered because the panes can be
+# reordered.
 # The display awake for the run. With it asleep, a locked Mac leaves the lock
 # screen in front and nothing else may be — so every window rendered inactive,
 # while the same run minutes earlier, display still on, came out right.
@@ -48,7 +49,7 @@ out=${out:A}
 caffeinate -u -t 900 & awake=$!
 log="$work/screenshots.log"
 open -W -n --env CFFIXED_USER_HOME="$work/home" --stdout "$log" --stderr "$log" "$work/TYPE.app" \
-  --args --screenshots "$out" -NSTextInsertionPointBlinkPeriod 0 -SettingsLastPane 2
+  --args --screenshots "$out" -NSTextInsertionPointBlinkPeriod 0 -SettingsLastPane Sound
 cat "$log"
 grep -q '^SCREENSHOTS OK' "$log" || { print -u2 "screenshots: the app did not finish; see above"; exit 1; }
 xcrun swiftc -O -o "$work/compose" "${0:A:h}/compose-screenshots.swift"
