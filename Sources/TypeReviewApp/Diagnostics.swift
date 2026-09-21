@@ -850,6 +850,18 @@ enum Diagnostics {
             print("SELFTEST FAIL: no typing surface for the shift check")
             exit(1)
         }
+        // Quotes, for this check only. The passage comes from whichever
+        // source was last chosen, and two of them can never satisfy what is
+        // being looked for: Early is graded lower-case words and Generated is
+        // drills, so against either this fails fifty times and reports a
+        // keyboard fault that is really a setting. The argument domain wins
+        // over the stored value and is never written to disk, so the source
+        // the user picked is read but not touched.
+        let argumentsBefore = UserDefaults.standard.volatileDomain(
+            forName: UserDefaults.argumentDomain)
+        var pinned = argumentsBefore
+        pinned["CorpusChannel"] = CorpusChannel.quotes.rawValue
+        UserDefaults.standard.setVolatileDomain(pinned, forName: UserDefaults.argumentDomain)
         var units: [UInt16] = []
         var capital: Int?
         for _ in 0..<50 {
@@ -882,7 +894,10 @@ enum Diagnostics {
         }
 
         // Left as it was found: the run below types a whole passage and counts
-        // the characters, which a half-typed one would throw out.
+        // the characters, which a half-typed one would throw out — and it
+        // draws from the source the user chose, not this check's.
+        UserDefaults.standard.setVolatileDomain(
+            argumentsBefore, forName: UserDefaults.argumentDomain)
         practice.keyboard = nil
         practice.startFreshRun()
     }
@@ -1191,26 +1206,35 @@ enum Diagnostics {
                 mistyped[8] = .incorrect
                 let edgeView = TypingView(frame: NSRect(x: 0, y: 0, width: column * 40, height: 200))
                 edgeView.showsWhitespace = false
-                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], step: Int)? {
+                // Pixels are found by row and sample, never by dividing
+                // `bytesPerRow` by the width: a row is padded to an alignment,
+                // so that division truncates and a flat walk of the buffer
+                // drifts a little further into the padding on every row.
+                @MainActor func render(_ statuses: [CharStatus]) -> (bytes: [UInt8], rep: NSBitmapImageRep)? {
                     edgeView.setPassage(passage, statuses: statuses, cursor: 0)
                     guard let rep = edgeView.bitmapImageRepForCachingDisplay(in: edgeView.bounds),
                         rep.samplesPerPixel >= 3
                     else { return nil }
                     edgeView.cacheDisplay(in: edgeView.bounds, to: rep)
                     guard let data = rep.bitmapData else { return nil }
-                    return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep.bytesPerRow / rep.pixelsWide)
+                    return (Array(UnsafeBufferPointer(start: data, count: rep.bytesPerRow * rep.pixelsHigh)), rep)
                 }
                 @MainActor func cellPixels(atColumns columns: CGFloat) -> Int? {
                     edgeView.setFrameSize(NSSize(width: column * columns, height: 200))
                     guard let a = render(correct), let b = render(mistyped), a.bytes.count == b.bytes.count
                     else { return nil }
+                    let step = a.rep.samplesPerPixel
+                    let row = a.rep.bytesPerRow
                     var changed = 0
-                    for pixel in stride(from: 0, to: a.bytes.count - a.step + 1, by: a.step) {
-                        var largest = 0
-                        for channel in 0..<min(a.step, 4) {
-                            largest = max(largest, abs(Int(a.bytes[pixel + channel]) - Int(b.bytes[pixel + channel])))
+                    for y in 0..<a.rep.pixelsHigh {
+                        for x in 0..<a.rep.pixelsWide {
+                            let offset = y * row + x * step
+                            var largest = 0
+                            for channel in 0..<min(step, 4) {
+                                largest = max(largest, abs(Int(a.bytes[offset + channel]) - Int(b.bytes[offset + channel])))
+                            }
+                            if largest > 12 { changed += 1 }
                         }
-                        if largest > 12 { changed += 1 }
                     }
                     return changed
                 }
