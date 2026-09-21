@@ -65,10 +65,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// a file that may not exist. It shares `ProfileFileStore`'s directory, so
     /// the self-test's redirect to a scratch folder covers this file too and a
     /// check cannot inflate the user's real totals.
-    private(set) lazy var keystrokes: KeystrokeCounter? = {
+    /// Built on demand rather than by `lazy`, which caches the failure as
+    /// well as the counter: one unreadable directory at the wrong moment and
+    /// counting could not start again for the rest of the run, while the
+    /// preference went on saying it was on and the grid filled with days that
+    /// look exactly like days nobody typed.
+    var keystrokes: KeystrokeCounter? {
+        if let builtCounter { return builtCounter }
         guard let directory = try? ProfileFileStore.standard().directory else { return nil }
-        return KeystrokeCounter(directory: directory)
-    }()
+        let counter = KeystrokeCounter(directory: directory)
+        builtCounter = counter
+        // Started here when counting is on, because this may be the first
+        // successful build — reached from a keystroke rather than from
+        // `applySoundPreferences`, which is where `start()` normally happens.
+        // Without it there is no flush timer and no quit or sleep observer,
+        // so the day's keys are counted in memory and lost on quit. `start()`
+        // is idempotent, so the ordinary path is unaffected.
+        if AppPreferences.countKeystrokes.value { counter.start() }
+        return counter
+    }
+    private var builtCounter: KeystrokeCounter?
 
     lazy var globalSound = GlobalKeySound { [weak self] code, stroke in
         self?.playKey(code, stroke)
@@ -257,6 +273,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // is actually using — and the summon shortcut activates this app, which
         // is the one thing a check must never do.
         if !runningCheck { registerShortcuts() }
+        // The tap comes and goes without being asked — it is taken down while
+        // a password manager is in front and put back afterwards — and which
+        // path sounds a key depends on whether it is up. Routing is therefore
+        // recomputed whenever it moves, not only when a setting changes.
+        globalSound.onListeningChanged = { [weak self] in self?.applySoundPreferences() }
         // Pack, volume and — the new part — scope. This is what starts the
         // system-wide monitor when the setting says so, and what decides
         // whether the typing surface makes its own sound or leaves it to the
@@ -670,13 +691,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let permitted = GlobalKeySound.isPermitted
         guard permitted != soundWasPermitted else { return }
         soundWasPermitted = permitted
-        // Both directions relabel the menu. Only one of them reinstalls: a
-        // grant needs new monitors, a revocation needs the menu to stop
-        // claiming the setting is doing something. Guarding both behind the
-        // grant left "Sound in Every App" without its warning until some
-        // unrelated preference happened to change.
-        if permitted, AppPreferences.globalSound.value {
-            globalSound.reinstall()
+        // Both directions relabel the menu, and both settle the sound again.
+        // Only a grant reinstalls the monitors — a tap made before it is not
+        // fed afterwards — but a revocation has work of its own: routing was
+        // decided when the tap was live, so the practice window is still
+        // holding its own click back for a tap that now delivers nothing, and
+        // typing goes silent in both places at once. Guarding the menu behind
+        // the grant, too, left "Sound in Every App" without its warning until
+        // some unrelated preference happened to change.
+        //
+        // The counter counts too. It shares the tap, and watching only the
+        // sound setting here meant a grant made for counting alone was never
+        // acted on: the tap stayed as it was, the counter recorded nothing
+        // until the next launch, and the Statistics grid showed days that look
+        // exactly like days nobody typed.
+        if AppPreferences.globalSound.value || AppPreferences.countKeystrokes.value {
+            if permitted { globalSound.reinstall() }
             // And re-decide who makes the sound. The practice window keeps its
             // own callbacks while the monitor is not listening, so the moment
             // the monitor recovers both would fire and every keystroke in this

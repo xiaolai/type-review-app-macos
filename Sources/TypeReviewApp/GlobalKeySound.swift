@@ -133,7 +133,13 @@ final class GlobalKeySound {
     /// Whether a tap is actually installed and hearing keys. What the caller
     /// of `setRunning` wants to know: "on" and "heard" are not the same thing
     /// while the permission is missing or another copy holds the tap.
-    var isListening: Bool { tap != nil }
+    /// The permission as well as the port. Revoking Input Monitoring does not
+    /// take the tap handle away — `handleGlobal` simply stops letting anything
+    /// through — so a handle-only answer reported a live monitor over a deaf
+    /// one, and the practice window went on holding its own click back for it.
+    /// Typing was then silent in both places at once, which is the one outcome
+    /// the routing exists to prevent.
+    var isListening: Bool { tap != nil && Self.isPermitted }
 
     func start() {
         guard !isRunning else { return }
@@ -204,16 +210,32 @@ final class GlobalKeySound {
         KeySoundMonitors.shared = self
     }
 
+    /// Told when the tap comes or goes for a reason of its own, so whoever
+    /// routes the keystroke sound can decide again who makes it.
+    ///
+    /// Not called for `setRunning`: that caller already knows, and it is what
+    /// `isListening` is reported back to.
+    var onListeningChanged: (() -> Void)?
+
     /// Puts the tap up or takes it down to match the current reasons.
     ///
     /// Called for anything that can change the answer: a different application
     /// coming to the front, and the other install starting or quitting.
+    ///
+    /// The change is announced, because routing was decided when the setting
+    /// last changed and is wrong the moment this moves. Switch the sound on by
+    /// its shortcut while a password manager is in front and the tap cannot be
+    /// installed, so the practice window keeps its own click; come back to
+    /// TYPE and the tap goes up beneath it, and every key in that window is
+    /// heard twice.
     private func reconsider() {
+        let was = isListening
         if shouldNotListen {
             removeGlobalMonitor()
         } else {
             installGlobalMonitor()
         }
+        if isListening != was { onListeningChanged?() }
     }
 
     /// Installs the monitor on other applications' keys, unless something says
@@ -458,7 +480,19 @@ final class GlobalKeySound {
         // registers nothing. Without this, someone who had switched the
         // setting on and never opened Settings again got silence, no prompt,
         // and no entry in the list to switch on.
-        if wanted, !hasAskedForPermission, !Self.isPermitted {
+        // `counting` as well as `wanted`. The counter needs the same
+        // permission, and asking only for the sound meant ticking Count
+        // keystrokes put up no prompt at all: the box went on, nothing was
+        // recorded, and the only sign was a warning in a pane the user had
+        // just left.
+        // Never from a check. `--selftest` switches counting on to prove the
+        // preference reaches the tap, and it pinned the *sound* off so that
+        // nothing could prompt — which stopped being enough the moment
+        // counting learned to ask. A TCC prompt in a check stops the run and
+        // demands a permission from whoever owns the machine.
+        if !Diagnostics.isRunningCheck, wanted || counting, !hasAskedForPermission,
+            !Self.isPermitted
+        {
             hasAskedForPermission = true
             Self.requestPermission()
         }
