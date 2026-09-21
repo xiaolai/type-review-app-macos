@@ -9,9 +9,23 @@ TypeReview.app/
 # Per-developer Claude Code config, including which plugins are enabled here.
 # Ignored in the web repo too; it is a choice about tooling, not about the app.
 .claude/
+# The same class: cc-suite's config, for whoever is holding the tools. Kept out
+# here rather than inside the cc-suite block below, which cc-suite rewrites —
+# it was in there once, and a schema bump deleted it.
+.cc-suite.md
+
+# Working notes and scratch output. Kept out of the repo on purpose:
+# they are for whoever is mid-task, not for whoever clones this.
+dev-docs/
+
+# Release archives.
+dist/
+
+.env
+.env.*
 
 # >>> cc-suite >>>
-# cc-suite-schema: 7
+# cc-suite-schema: 8
 # AI assistant local state
 .claude/settings.local.json
 .claude/CLAUDE.local.md
@@ -47,9 +61,6 @@ CLAUDE.local.md
 # Audit findings files written by /cc-suite:audit and the audit-fix loop —
 # per-run working state (findings + fix statuses), not authored content.
 .cc-suite/audits/
-# The same class: tool configuration for whoever is holding the tools, not
-# something a clone of this repository needs.
-.cc-suite.md
 
 # cc-suite: PRIVATE mode — bridge artifacts not shared
 AGENTS.md
@@ -59,13 +70,3 @@ CLAUDE.md
 .codex/
 .mcp.json
 # <<< cc-suite <<<
-
-# Working notes and scratch output. Kept out of the repo on purpose:
-# they are for whoever is mid-task, not for whoever clones this.
-dev-docs/
-
-# Release archives.
-dist/
-
-.env
-.env.*
