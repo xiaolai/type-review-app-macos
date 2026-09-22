@@ -500,13 +500,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 // borderless and cannot become main, which is exactly the test
                 // for "a window the user thinks of as a window".
                 DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.release(closed: closing)
                     let remaining = NSApp.windows.contains {
                         $0 !== closing && $0.isVisible && $0.canBecomeMain
                     }
-                    if !remaining { self?.retreatToMenuBar() }
+                    if !remaining { self.retreatToMenuBar() }
                 }
             }
         }
+    }
+
+    /// Lets go of Settings, Statistics or Library once it has closed.
+    ///
+    /// Each was kept for the life of the app and rebuilt never: the first
+    /// click built it, and closing it took it off screen and nothing else.
+    /// Settings is seven panes of controls and a 200-item voice menu, and
+    /// Statistics a table, a grid and their bitmaps — all of it held by an app
+    /// that lives in the menu bar for days. Over ten hours of use the live heap
+    /// doubled, and these were part of it. Built again on the next click, from
+    /// the same state they read the first time.
+    ///
+    /// After the close rather than during it — this runs from the turn after
+    /// `willClose` — so the window is not deallocated under the close that is
+    /// still handling it. Only the three that are rebuilt on demand: the main
+    /// window is ordered out, not closed, and never goes away.
+    private func release(closed window: NSWindow?) {
+        guard let window else { return }
+        if window === statsWindow {
+            statsWindow = nil
+            stats = nil
+        }
+        if window === settings?.window { settings = nil }
+        if window === libraryWindow?.window { libraryWindow = nil }
     }
 
     /// Clicking the Dock icon with no window open brings it back.
