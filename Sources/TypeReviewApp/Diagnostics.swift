@@ -1025,6 +1025,39 @@ enum Diagnostics {
                 }
             }
 
+            // The keyboard has not been drawn open, because nothing has shown
+            // it.
+            //
+            // A launch into the menu bar opened the drawer under a window no
+            // one had seen, and held 9.5 MB of keyboard bitmap for it. A check
+            // never shows the main window, so this launch is that one, and
+            // what has been drawn since launch is the measure: the drawing
+            // happens on the first display pass, and opening the drawer again
+            // afterwards does not redraw a bitmap that is still valid — a check
+            // that watched only its own re-opening passed with the bug in
+            // place.
+            //
+            // It bites when the keyboard preference is on, which is the
+            // default and so every fresh runner. With it off the launch never
+            // opens the drawer, and this passes without having tested it.
+            if let delegate = NSApp.delegate as? AppDelegate, let drawer = delegate.drawer {
+                // The premise, stated: with the window on screen the drawer
+                // would draw legitimately and this would prove nothing.
+                guard delegate.window?.isVisible == false else {
+                    print("SELFTEST FAIL: the main window is on screen during a check")
+                    exit(1)
+                }
+                let hanging = NSApp.windows.filter { $0.parent.map { !$0.isVisible } ?? false }
+                let tallest = drawer.keyboard.tallestDraw
+                guard tallest <= KeyboardDrawer.shutHeight, hanging.isEmpty else {
+                    print(
+                        "SELFTEST FAIL: the keyboard was drawn \(Int(tallest)) points tall with "
+                            + "no window on screen, and \(hanging.count) window(s) hang from a "
+                            + "parent that is not on screen — AppKit renders both")
+                    exit(1)
+                }
+            }
+
             // The case must sit the same distance from the caps on all four
             // sides. This was wrong until it was measured: the inter-key gap
             // was being applied after the last key too, so the right and

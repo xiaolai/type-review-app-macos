@@ -243,7 +243,18 @@ final class KeyboardView: NSView {
         return Layout(caseRect: caseRect, unit: unit, keys: placed)
     }
 
+    /// The tallest the keyboard has been drawn. Read by `--selftest`, which
+    /// never shows a window and so requires it to be no taller than a shut
+    /// drawer: a keyboard drawn open where nothing could see it cost 9.5 MB of
+    /// bitmap, and leaves no other trace a check could find.
+    ///
+    /// A height, not a count of draws. AppKit draws the drawer once at its
+    /// shut size, 100 by 1 points, whether or not anything opens it — a few
+    /// hundred bytes, and a count cannot tell that from the open keyboard.
+    private(set) var tallestDraw: CGFloat = 0
+
     override func draw(_ dirtyRect: NSRect) {
+        tallestDraw = max(tallestDraw, bounds.height)
         let layout = layout(forWidth: bounds.width, height: bounds.height)
 
         let radius = layout.unit * Self.caseRadiusScale

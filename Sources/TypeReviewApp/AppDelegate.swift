@@ -13,8 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var screens: MainScreenController?
     // Built in applicationDidFinishLaunching, for the same reason the stats
     // controller is: a main-actor default value cannot be initialised from
-    // AppDelegate's nonisolated init.
-    private var drawer: KeyboardDrawer?
+    // AppDelegate's nonisolated init. Readable so the self-test can check that
+    // nothing drew it while no window was on screen.
+    private(set) var drawer: KeyboardDrawer?
     private var statsWindow: NSWindow?
     // Built on demand: a main-actor default value cannot be initialised from
     // AppDelegate's nonisolated init.

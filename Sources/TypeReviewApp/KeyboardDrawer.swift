@@ -33,7 +33,10 @@ final class KeyboardDrawer {
     private var gap: CGFloat { CGFloat(AppPreferences.drawerGap.value) }
     /// A window cannot have zero height, so "shut" is one point tall and
     /// ordered out once it gets there.
-    private static let shutHeight: CGFloat = 1
+    ///
+    /// Not private: `--selftest` reads it as the one height at which drawing
+    /// the keyboard costs nothing.
+    static let shutHeight: CGFloat = 1
 
     init() {
         window = NSWindow(
@@ -128,6 +131,17 @@ final class KeyboardDrawer {
                     self.present()
                 }
             })
+        // A drawer is attached only to a window on screen — see `attach()` —
+        // so something has to attach it when the window arrives. Here rather
+        // than at each place that shows the window: there are three, and the
+        // screenshot run's is not `showMainWindow`, so a drawer that waited to
+        // be told would have dropped out of the App Store pictures unnoticed.
+        observers.append(
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification, object: parent, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.restoreIfOpen() }
+            })
     }
 
     /// The keyboard is sized from the drawer's width, so the drawer's width has
@@ -164,8 +178,15 @@ final class KeyboardDrawer {
     ///
     /// The full-screen test lives here rather than at each call site, so
     /// nothing can attach a drawer to a window that has no room below it.
+    ///
+    /// Nor to a window that is not on screen. AppKit renders a child window
+    /// hung from a hidden parent — measured in a bare app — and nothing can
+    /// see it there. `setOpen` and `reframe` stop short of this for the same
+    /// reason; the guard here is for any path that does not.
+    /// `restoreIfOpen` attaches it when the window is shown, which is the only
+    /// moment it can be seen.
     private func attach() {
-        guard let parent, !isFullScreen, window.parent == nil else { return }
+        guard let parent, parent.isVisible, !isFullScreen, window.parent == nil else { return }
         parent.addChildWindow(window, ordered: .above)
     }
 
@@ -181,6 +202,9 @@ final class KeyboardDrawer {
     func reframe() {
         keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
         guard isOpen, !isFullScreen else { return }
+        // Not under a window that is not on screen: sizing the drawer with
+        // `display: true` and asking for its shadow renders it. See `setOpen`.
+        guard parent?.isVisible == true else { return }
         // Not while an animation is running. `reframe` is called from the
         // parent's move and resize notifications, and moving the window is
         // exactly what `makeRoomBelow` does at the start of an opening — so
@@ -217,6 +241,21 @@ final class KeyboardDrawer {
     func setOpen(_ open: Bool, animated: Bool) {
         guard let parent, open != isOpen else { return }
         isOpen = open
+
+        // Under a window that is not on screen, opening is only remembered.
+        // `restoreIfOpen` does the rest when the window is shown — the one
+        // moment the drawer can be seen.
+        //
+        // Remembered and nothing more, because everything below draws. The
+        // drawer's shadow follows what it draws, so sizing it with
+        // `display: true` and invalidating that shadow renders the keyboard
+        // whether or not anything will ever show it. A launch into the menu
+        // bar opened the drawer this way under a window nobody had seen, and
+        // held 9.5 MB of keyboard bitmap for it — a fifth of its footprint.
+        guard parent.isVisible else {
+            if !open { dismiss(from: parent) }
+            return
+        }
 
         if open {
             keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
