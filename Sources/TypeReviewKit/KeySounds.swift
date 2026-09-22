@@ -684,7 +684,7 @@ public func nextSoundPack(current: KeySoundPack, remembered: KeySoundPack?) -> K
 /// Here rather than in the app because it is the part worth testing: finding
 /// strike onsets in a recording and shaping a slice's edges are ordinary
 /// numeric problems, and neither needs an audio device. The app keeps the
-/// AVFoundation buffer handling and hands these plain arrays.
+/// AVFoundation buffer handling and hands these plain samples.
 public enum SampleSlicing {
     /// The start of each strike in a recording.
     ///
@@ -694,6 +694,22 @@ public enum SampleSlicing {
     /// up slightly so the slice starts before the attack rather than on it.
     public static func onsets(
         in samples: [Float], sampleRate: Double, threshold: Float = 0.3,
+        minGapSeconds: Double = 0.100, preRollSeconds: Double = 0.002
+    ) -> [Int] {
+        samples.withUnsafeBufferPointer {
+            onsets(
+                in: $0, sampleRate: sampleRate, threshold: threshold,
+                minGapSeconds: minGapSeconds, preRollSeconds: preRollSeconds)
+        }
+    }
+
+    /// The same scan over memory the caller already holds.
+    ///
+    /// The app's recording is 3.7 million samples in an audio buffer, and
+    /// handing the array version a copy of it cost 14 MB for as long as the
+    /// scan ran — memory the allocator then kept after it was freed.
+    public static func onsets(
+        in samples: UnsafeBufferPointer<Float>, sampleRate: Double, threshold: Float = 0.3,
         minGapSeconds: Double = 0.100, preRollSeconds: Double = 0.002
     ) -> [Int] {
         guard sampleRate > 0, !samples.isEmpty else { return [] }

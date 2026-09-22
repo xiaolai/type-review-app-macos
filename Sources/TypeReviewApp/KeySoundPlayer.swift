@@ -56,18 +56,20 @@ final class KeySoundPlayer {
     /// it — so the fix is the class rather than the case. Replacing the whole
     /// value makes forgetting a piece impossible rather than unlikely.
     private struct PackState {
-        /// Rendered audio per category and stroke, built lazily.
+        /// Rendered audio per category and stroke, built lazily — except a
+        /// recording's slices, which all arrive together when it has decoded.
         var rendered: [Rendered: AVAudioPCMBuffer] = [:]
-        /// The decoded recording, and which resource it came from.
+        /// Which recording the slices in `rendered` were cut from.
         ///
-        /// Keyed rather than held bare. A bare buffer was correct, but only
-        /// because `setPack` cleared it — and a cache whose correctness lives
-        /// in another method stops being correct the moment somebody adds a
-        /// path that forgets. With the resource beside it, "is this the
-        /// recording I was asked for" is answered where it is asked.
-        var sample: (resource: String, buffer: AVAudioPCMBuffer)?
-        /// Where the strikes begin in that recording.
-        var onsets: [Int] = []
+        /// Only the slices are kept, never the recording. It used to be held
+        /// whole for as long as its pack was chosen — 83 seconds resampled to
+        /// 44.1 kHz stereo, 28 MB, in a player that only ever reads five cuts of
+        /// at most 130 ms from it. Measured with the app's own decode path.
+        ///
+        /// Named by resource rather than a flag, for the reason the recording
+        /// was: "is this the recording I was asked for" is answered where it is
+        /// asked, instead of relying on `setPack` to have cleared a bare flag.
+        var slicedFrom: String?
         /// Why the recording could not be loaded, if it could not. Also stops
         /// the load being retried on every keystroke.
         var loadFailure: String?
@@ -90,7 +92,16 @@ final class KeySoundPlayer {
     /// recording actually shipped inside the built app.
     var loadFailure: String? { state.loadFailure }
 
-    /// Resamples a decoded recording into the engine's format.
+    /// Frames of audio this player is holding, across every buffer it keeps.
+    /// `--soundcheck` bounds it, so a change that starts keeping the whole
+    /// recording again fails a check instead of quietly costing 28 MB.
+    var heldFrames: Int {
+        state.rendered.values.reduce(Int(mistypeBuffer?.frameLength ?? 0)) {
+            $0 + Int($1.frameLength)
+        }
+    }
+
+    /// Resamples a decoded recording to the given format.
     private nonisolated static func converted(
         _ input: AVAudioPCMBuffer, to format: AVAudioFormat
     ) -> AVAudioPCMBuffer? {
@@ -249,11 +260,12 @@ final class KeySoundPlayer {
             // reason that is the right default rather than a gap: a typebar
             // returns almost silently, and the strike is the event. A release
             // slice would be a quieter copy of a sound that does not happen.
-            built = stroke == .release
-                ? nil
-                : loadSample(resource, ext).flatMap { _ in
-                    pack.sliceMs(for: category).flatMap(slice)
-                }
+            //
+            // Nothing is built here even for a press. Every slice is cut when
+            // the recording lands and put straight into `rendered`, which the
+            // lookup above answers from; until then this pack is silent.
+            if stroke == .press { loadSample(resource, ext) }
+            built = nil
         }
         if let built { state.rendered[key] = built }
         return built
@@ -342,15 +354,14 @@ final class KeySoundPlayer {
 
     // MARK: - Sample pack
 
-    /// Loads the recording and finds its keystroke onsets.
+    /// Decodes the recording and cuts every slice the pack plays from it.
     ///
     /// Playing from random positions in the clip is what the site started
     /// with and had to abandon: most of an 83-second recording is the gap
     /// between keystrokes, so a random slice usually lands in dead air. The
     /// onsets are scanned once, and every slice starts on one.
-    @discardableResult
-    private func loadSample(_ resource: String, _ ext: String) -> AVAudioPCMBuffer? {
-        if let sample = state.sample, sample.resource == resource { return sample.buffer }
+    private func loadSample(_ resource: String, _ ext: String) {
+        guard state.slicedFrom != resource else { return }
         // One attempt, and it does not happen here. Decoding the recording is
         // 83 seconds of audio and about four million samples to scan, and it
         // used to run synchronously on the main actor at the first typewriter
@@ -359,11 +370,15 @@ final class KeySoundPlayer {
         //
         // Started once and installed when it lands. Until then this pack is
         // silent, which is a far better failure than a stalled app.
-        guard state.loadFailure == nil, !state.isLoading else { return nil }
+        guard state.loadFailure == nil, !state.isLoading else { return }
         state.isLoading = true
         let wanted = pack
+        // Read here, where the pack is, so the task is handed plain numbers.
+        let lengths = SoundCategory.allCases.compactMap { category in
+            pack.sliceMs(for: category).map { (category, $0) }
+        }
         Task.detached(priority: .userInitiated) {
-            let loaded = Self.decodeSample(resource: resource, ext: ext)
+            let loaded = Self.decodeSample(resource: resource, ext: ext, sliceMs: lengths)
             await MainActor.run {
                 self.state.isLoading = false
                 // Only if it is still the pack the user has chosen. Switching
@@ -372,40 +387,43 @@ final class KeySoundPlayer {
                 guard self.pack == wanted else { return }
                 switch loaded {
                 case .loaded(let box):
-                    self.state.sample = (resource, box.buffer)
-                    self.state.onsets = box.onsets
-                    self.state.rendered.removeAll()
+                    for (category, slice) in box.slices {
+                        self.state.rendered[Rendered(category: category, stroke: .press)] = slice
+                    }
+                    self.state.slicedFrom = resource
                 case .failed(let reason):
                     self.state.loadFailure = reason
                 }
             }
         }
-        return nil
     }
 
     /// What a decode attempt produced.
     private enum LoadOutcome: Sendable {
-        case loaded(LoadedSample)
+        case loaded(LoadedSlices)
         case failed(String)
     }
 
-    /// The decoded, resampled recording and where its strikes begin.
+    /// The slices cut from the recording, per category.
     ///
     /// `@unchecked Sendable` because `AVAudioPCMBuffer` is not `Sendable` and
-    /// this one is handed across exactly once, from the task that made it to
+    /// these are handed across exactly once, from the task that made them to
     /// the main actor, and never touched again by the sender.
-    private final class LoadedSample: @unchecked Sendable {
-        let buffer: AVAudioPCMBuffer
-        let onsets: [Int]
-        init(buffer: AVAudioPCMBuffer, onsets: [Int]) {
-            self.buffer = buffer
-            self.onsets = onsets
-        }
+    private final class LoadedSlices: @unchecked Sendable {
+        let slices: [SoundCategory: AVAudioPCMBuffer]
+        init(_ slices: [SoundCategory: AVAudioPCMBuffer]) { self.slices = slices }
     }
 
-    /// Reads, converts and scans the recording. No actor, no shared state.
+    /// Reads, converts, scans and cuts the recording, and returns only the
+    /// cuts. No actor, no shared state.
+    ///
+    /// Everything else is released when this returns, and that is the point
+    /// of cutting here rather than on first use: a lazy cut needs the
+    /// recording kept until the last category has been asked for, which for
+    /// a key like Esc can be never. Measured with this decode path, the pack
+    /// held 28 MB that way and holds 0.1 MB this way.
     private nonisolated static func decodeSample(
-        resource: String, ext: String
+        resource: String, ext: String, sliceMs: [(SoundCategory, Double)]
     ) -> LoadOutcome {
         guard let url = Bundle.main.url(forResource: resource, withExtension: ext),
             let file = try? AVAudioFile(forReading: url),
@@ -414,37 +432,51 @@ final class KeySoundPlayer {
                 frameCapacity: AVAudioFrameCount(file.length)),
             (try? file.read(into: decoded)) != nil
         else { return .failed("could not read \(resource).\(ext)") }
-        // Converted to the engine's format before anything is measured or
+        // Converted to the engine's rate before anything is measured or
         // sliced. The recording is 48 kHz and the engine runs at 44.1 kHz, and
         // the slicing below copies sample for sample — so every typewriter
         // click played 8.8% too long and about 1.5 semitones flat, which is
         // audible as a duller, slower typewriter than the one on the site.
-        guard let raw = converted(decoded, to: format), let data = raw.floatChannelData?[0]
-        else { return .failed("could not convert \(resource).\(ext) to the engine's format") }
-        let samples = Array(UnsafeBufferPointer(start: data, count: Int(raw.frameLength)))
-        let found = SampleSlicing.onsets(in: samples, sampleRate: format.sampleRate)
+        //
+        // To one channel, not the engine's two. A slice reads channel 0 alone
+        // and writes it to both, and converting this mono recording to stereo
+        // gave a right channel identical to the left — compared sample for
+        // sample, as was the left against a mono conversion — that nothing
+        // read. It cost 14 MB for the length of every decode.
+        guard let mono = AVAudioFormat(standardFormatWithSampleRate: format.sampleRate, channels: 1),
+            let raw = converted(decoded, to: mono), let data = raw.floatChannelData?[0]
+        else { return .failed("could not convert \(resource).\(ext) to the engine's rate") }
+        // Scanned where it lies. Copying it into an array for the scan was
+        // another 14 MB, which the allocator kept after it was freed.
+        let samples = UnsafeBufferPointer(start: data, count: Int(raw.frameLength))
+        let found = SampleSlicing.onsets(in: samples, sampleRate: mono.sampleRate)
         guard !found.isEmpty else { return .failed("\(resource).\(ext) has no detectable strikes") }
-        return .loaded(LoadedSample(buffer: raw, onsets: found))
+        var slices: [SoundCategory: AVAudioPCMBuffer] = [:]
+        for (category, ms) in sliceMs {
+            guard let onset = found.randomElement(),
+                let cut = slice(samples, at: onset, ms: ms, rate: mono.sampleRate)
+            else { continue }
+            slices[category] = cut
+        }
+        return .loaded(LoadedSlices(slices))
     }
 
-    /// Cuts one slice at a random onset, with the short fades that stop the
-    /// cut edges from popping.
+    /// Cuts one slice at an onset, with the short fades that stop the cut
+    /// edges from popping.
     ///
-    /// The slice is chosen once and cached per category rather than per
-    /// keystroke. The site re-randomises every keystroke; caching costs some
-    /// of that variation and buys a keystroke that is a single buffer
-    /// schedule, which is what keeps fast typing from stuttering. The onset
-    /// is still random per app run, so two sessions do not sound identical.
-    private func slice(_ sliceMs: Double) -> AVAudioPCMBuffer? {
-        guard let sample = state.sample?.buffer, let source = sample.floatChannelData?[0],
-            !state.onsets.isEmpty
-        else { return nil }
-        let rate = sample.format.sampleRate
-        let frames = min(Int((sliceMs / 1000) * rate), Int(sample.frameLength))
+    /// The onset is drawn once per category, when the recording is cut,
+    /// rather than per keystroke. The site re-randomises every keystroke;
+    /// fixing it costs some of that variation and buys a keystroke that is a
+    /// single buffer schedule, which is what keeps fast typing from
+    /// stuttering. It is still drawn afresh on every load, so two sessions do
+    /// not sound identical.
+    private nonisolated static func slice(
+        _ source: UnsafeBufferPointer<Float>, at start: Int, ms sliceMs: Double, rate: Double
+    ) -> AVAudioPCMBuffer? {
+        let frames = min(Int((sliceMs / 1000) * rate), source.count)
         guard frames > 0,
-            let start = state.onsets.randomElement(),
             let buffer = AVAudioPCMBuffer(
-                pcmFormat: Self.format, frameCapacity: AVAudioFrameCount(frames))
+                pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))
         else { return nil }
         buffer.frameLength = AVAudioFrameCount(frames)
         guard let channels = buffer.floatChannelData else { return nil }
@@ -453,7 +485,7 @@ final class KeySoundPlayer {
         let fadeOut = max(1, Int(0.008 * rate))
         for i in 0..<frames {
             let index = start + i
-            let raw = index < Int(sample.frameLength) ? source[index] : 0
+            let raw = index < source.count ? source[index] : 0
             // The envelope lives in the engine, where it is tested. See
             // `SampleSlicing.gain`.
             let value = raw * SampleSlicing.gain(

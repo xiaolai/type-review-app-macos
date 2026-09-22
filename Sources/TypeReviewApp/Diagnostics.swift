@@ -88,6 +88,16 @@ enum Diagnostics {
                     }
                     print("SOUNDCHECK \(pack.name)/\(category.rawValue) peak \(peak)")
                 }
+                // The slices, not the recording. Keeping the recording whole
+                // cost 28 MB for as long as the pack was chosen, and sounded
+                // exactly the same, so only a bound can tell the two apart. A
+                // second of audio is room for every slice several times over;
+                // the recording is 3.7 million frames.
+                if case .sample = pack.kind, player.heldFrames > 44_100 {
+                    failures.append(
+                        "\(pack.name): holding \(player.heldFrames) frames of audio — "
+                            + "the recording is being kept, not just its slices")
+                }
             }
             // The one voice no pack describes, and therefore the one the loop
             // above cannot reach. A tone that renders silence looks exactly

@@ -27,6 +27,24 @@ final class SampleSlicingTests: XCTestCase {
         XCTAssertTrue(SampleSlicing.onsets(in: samples, sampleRate: 44_100).isEmpty)
     }
 
+    func testScanningHeldMemoryMatchesTheArray() {
+        var samples = [Float](repeating: 0, count: 44_100)
+        for index in 1000..<1200 { samples[index] = 0.8 }
+        for index in 12_000..<12_200 { samples[index] = -0.8 }
+        let fromArray = SampleSlicing.onsets(in: samples, sampleRate: 44_100)
+        let inPlace = samples.withUnsafeBufferPointer {
+            SampleSlicing.onsets(in: $0, sampleRate: 44_100)
+        }
+        XCTAssertEqual(inPlace, fromArray)
+        // Positions are counted from the start of the memory handed over, not
+        // from wherever that memory happens to sit.
+        let offset = samples.withUnsafeBufferPointer {
+            SampleSlicing.onsets(
+                in: UnsafeBufferPointer(rebasing: $0[500...]), sampleRate: 44_100)
+        }
+        XCTAssertEqual(offset, fromArray.map { $0 - 500 })
+    }
+
     func testEmptyInputAndZeroRateAreHandled() {
         XCTAssertTrue(SampleSlicing.onsets(in: [], sampleRate: 44_100).isEmpty)
         XCTAssertTrue(SampleSlicing.onsets(in: [1, 1, 1], sampleRate: 0).isEmpty)
