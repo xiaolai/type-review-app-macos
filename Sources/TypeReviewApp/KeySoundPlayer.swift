@@ -18,8 +18,9 @@ import TypeReviewKit
 /// biquads implement, at the same cutoffs, so the packs sound like their
 /// counterparts on the site.
 ///
-/// Nothing here is created until the first audible keystroke: while the pack
-/// is `off` there is no engine, no file read and no audio device held open.
+/// Nothing here is created until it is needed — the first audible keystroke,
+/// or the mistype tone being switched on — and the audio device is let go
+/// again after half a minute of silence. See `idleSeconds`.
 @MainActor
 final class KeySoundPlayer {
     private var engine: AVAudioEngine?
@@ -33,6 +34,41 @@ final class KeySoundPlayer {
     private var voices: [AVAudioPlayerNode] = []
     private var nextVoice = 0
     private static let voiceCount = 8
+
+    /// How long the engine may sit silent before it lets go of the audio
+    /// hardware.
+    ///
+    /// A running `AVAudioEngine` is a running output device whether or not
+    /// anything is scheduled on it, and coreaudiod holds a
+    /// `PreventUserIdleSystemSleep` assertion for every process running one.
+    /// This player used to start the engine and never stop it — and
+    /// `prepareMistype` starts it at launch, with the mistype tone shipping on
+    /// — so a Mac with TYPE in its menu bar could not idle-sleep. Measured: TYPE
+    /// was the only process on the machine running output, silent, with the
+    /// assertion held, and a fresh install did the same eight seconds after
+    /// launch with no window and no keystroke.
+    ///
+    /// Paused rather than stopped. Both release the device and the assertion;
+    /// measured, `pause()` starts again in 9–24 ms and `stop()` in 16–163 ms,
+    /// because a pause keeps what `prepare` allocated. That restart is the whole
+    /// price: the first click after this long a silence is heard about a
+    /// hundredth of a second late. The global monitor's tap is listen-only, so
+    /// the keystroke itself is never held.
+    private let idleSeconds: TimeInterval
+    private var idleTimer: Timer?
+    /// When the last sound was scheduled, on the uptime clock.
+    private var lastSound: TimeInterval = 0
+    /// The engine is built and paused *here*, for silence — as opposed to
+    /// stopped by the system, which is what an output-device change does. The
+    /// difference decides what `start()` does with it: resume one, rebuild the
+    /// other.
+    private var isPausedForSilence = false
+
+    /// `idleSeconds` is a parameter so `--soundcheck` can watch the engine let
+    /// go without waiting the real interval out.
+    init(idleSeconds: TimeInterval = 30) {
+        self.idleSeconds = idleSeconds
+    }
 
     /// What a rendered buffer belongs to.
     ///
@@ -100,6 +136,10 @@ final class KeySoundPlayer {
             $0 + Int($1.frameLength)
         }
     }
+
+    /// Whether the audio device is held right now. `--soundcheck` asserts it
+    /// goes false after the idle interval and true again on the next sound.
+    var isEngineRunning: Bool { engine?.isRunning ?? false }
 
     /// Resamples a decoded recording to the given format.
     private nonisolated static func converted(
@@ -186,6 +226,7 @@ final class KeySoundPlayer {
         // tail.
         node.scheduleBuffer(buffer, at: nil, options: .interrupts)
         node.play()
+        noteSound()
     }
 
     /// Plays the error tone, whatever pack is selected.
@@ -206,6 +247,7 @@ final class KeySoundPlayer {
         node.pan = 0
         node.scheduleBuffer(buffer, at: nil, options: .interrupts)
         node.play()
+        noteSound()
     }
 
     /// Renders the error tone and brings the audio engine up, so the first
@@ -217,12 +259,22 @@ final class KeySoundPlayer {
     /// key would build eight player nodes and an `AVAudioEngine` on the
     /// keystroke path — a hitch exactly once, on the keystroke a beginner is
     /// most likely to be paying attention to.
+    ///
+    /// The engine it brings up does not stay up: like any other start, this
+    /// arms the idle pause. What survives the pause is the built graph, so the
+    /// first mistake after it pays a resume, not a build.
     @discardableResult
     func prepareMistype() -> AVAudioPCMBuffer? {
         if mistypeBuffer == nil { mistypeBuffer = render(SynthVoice.mistype) }
         // Only if there is something to play. Starting the engine for a voice
         // that failed to render would be a cost with nothing to show for it.
-        if mistypeBuffer != nil { _ = start() }
+        //
+        // And only if there is no engine yet. Building it is the cost this
+        // saves the keystroke; an engine that exists, paused or not, has
+        // already paid it. Every preference change calls this, and resuming
+        // here would hold the audio device for another idle interval each time
+        // an unrelated setting moved.
+        if mistypeBuffer != nil, engine == nil { _ = start() }
         return mistypeBuffer
     }
 
@@ -296,6 +348,17 @@ final class KeySoundPlayer {
         // something that would never play them: sound stopped for the rest of
         // the session with nothing to indicate why.
         if let engine, engine.isRunning { return engine }
+        // Resumed rather than rebuilt when it was this class that paused it —
+        // rebuilding costs up to 420 ms, resuming about 10. If the device
+        // changed while it was paused and the resume fails, it is rebuilt like
+        // any engine the system stopped.
+        if let engine, isPausedForSilence {
+            isPausedForSilence = false
+            if (try? engine.start()) != nil, engine.isRunning {
+                armIdlePause()
+                return engine
+            }
+        }
         if engine != nil { teardown() }
         let engine = AVAudioEngine()
         for _ in 0..<Self.voiceCount {
@@ -315,14 +378,60 @@ final class KeySoundPlayer {
             return nil
         }
         self.engine = engine
+        armIdlePause()
         return engine
     }
 
     private func teardown() {
+        idleTimer?.invalidate()
+        idleTimer = nil
+        isPausedForSilence = false
         engine?.stop()
         voices.removeAll()
         nextVoice = 0
         engine = nil
+    }
+
+    /// A sound was just scheduled: the silence starts again from now.
+    ///
+    /// A clock read, not a timer. The one timer is rescheduled only when it
+    /// fires and finds the silence was broken, so typing costs nothing here.
+    private func noteSound() {
+        lastSound = ProcessInfo.processInfo.systemUptime
+    }
+
+    /// Starts the silence clock for an engine that has just started.
+    ///
+    /// On every start, not only on a sound: `prepareMistype` starts the engine
+    /// with nothing to play, and an engine started that way would otherwise
+    /// run until the first mistake, which may be never.
+    private func armIdlePause() {
+        noteSound()
+        guard idleTimer == nil else { return }
+        scheduleIdleCheck(after: idleSeconds)
+    }
+
+    private func scheduleIdleCheck(after seconds: TimeInterval) {
+        let timer = Timer(timeInterval: seconds, repeats: false) { [weak self] _ in
+            // Added to the main run loop below, so this runs on the main
+            // thread; the block is `@Sendable` and cannot say so itself.
+            MainActor.assumeIsolated { self?.pauseIfSilent() }
+        }
+        // `.common`, so a menu held open does not hold the device with it.
+        RunLoop.main.add(timer, forMode: .common)
+        idleTimer = timer
+    }
+
+    private func pauseIfSilent() {
+        idleTimer = nil
+        let silent = ProcessInfo.processInfo.systemUptime - lastSound
+        guard silent >= idleSeconds else {
+            scheduleIdleCheck(after: idleSeconds - silent)
+            return
+        }
+        guard let engine, engine.isRunning else { return }
+        engine.pause()
+        isPausedForSilence = true
     }
 
     // MARK: - Synthesis

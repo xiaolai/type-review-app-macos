@@ -221,7 +221,7 @@ GOALS      := $(or $(MAKECMDGOALS),all)
 # the inner invocation does its own invalidation with the right signature.
 # Listing it here ran the check in the *outer* process, where VARIANT is still
 # `direct` — so `make appstore` deleted the direct bundle on its way past.
-BUILDS_APP := $(filter all run selftest zip notarize $(APP),$(GOALS))
+BUILDS_APP := $(filter all run selftest soundcheck speechbench zip notarize $(APP),$(GOALS))
 DRY_RUN    := $(findstring n,$(firstword -$(MAKEFLAGS)))
 ifneq ($(BUILDS_APP),)
 ifeq ($(DRY_RUN),)
@@ -243,7 +243,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest speechbench quit-running test remote runner-test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest soundcheck speechbench quit-running test remote runner-test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -436,6 +436,18 @@ quit-running:
 
 selftest: $(APP) quit-running
 	@./$(APP)/Contents/MacOS/$(BIN) --selftest
+
+# Proves every sound pack makes audio in the built app, and that the audio
+# device is let go when nothing plays.
+#
+# Only the built bundle can say whether the typewriter recording shipped and
+# decodes; the unit tests cover the arithmetic. It also bounds what the player
+# keeps — the slices, never the 28 MB recording they are cut from — and watches
+# the engine pause after silence and resume, because a running engine keeps the
+# Mac from idle-sleeping. The flag came with the sound packs, and until this
+# target nothing ran it.
+soundcheck: $(APP) quit-running
+	@./$(APP)/Contents/MacOS/$(BIN) --soundcheck
 
 # Times the keystroke path with word speech off and then on.
 #

@@ -112,6 +112,37 @@ enum Diagnostics {
             } else {
                 failures.append("mistype: no buffer")
             }
+            // The audio device is let go after silence and taken back for the
+            // next sound. A running engine holds the output device whether or
+            // not it plays, and coreaudiod keeps the Mac from idle-sleeping for
+            // as long as it does — which this app did all day, from launch.
+            // A short interval so the check can watch it happen; the sound
+            // that brings it back plays 60 dB down.
+            let resting = KeySoundPlayer(idleSeconds: 0.3)
+            resting.setVolume(0.001)
+            resting.prepareMistype()
+            if resting.isEngineRunning {
+                try? await Task.sleep(for: .seconds(1))
+                if resting.isEngineRunning {
+                    failures.append(
+                        "idle: the engine was still running after a second of silence, "
+                            + "holding the audio device and keeping the Mac awake")
+                }
+                resting.playMistype()
+                if !resting.isEngineRunning {
+                    failures.append("idle: the engine did not come back for the next sound")
+                }
+                try? await Task.sleep(for: .seconds(1))
+                if resting.isEngineRunning {
+                    failures.append("idle: the engine did not let go again after a sound")
+                } else {
+                    print("SOUNDCHECK idle: the engine let go, came back, and let go again")
+                }
+            } else {
+                // Said, not skipped quietly: without an output device there is
+                // no engine to let go of, and so nothing here was checked.
+                print("SOUNDCHECK SKIP idle: no audio output device, so the idle pause is unchecked")
+            }
             if failures.isEmpty {
                 print("SOUNDCHECK OK: every pack produces audio, and the mistype tone does too")
                 exit(0)

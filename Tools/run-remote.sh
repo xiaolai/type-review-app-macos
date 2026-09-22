@@ -14,9 +14,9 @@
 # renders with `cacheDisplay`, so nothing here activates a window. That part
 # needs no help. Three other things still land on whoever is at the keyboard:
 #
-#   - `selftest` and `speechbench` both depend on `quit-running`, which kills
-#     any TYPE already running. On this desk that is the menu-bar app someone
-#     is using, and it dies once per check.
+#   - `selftest`, `soundcheck` and `speechbench` all depend on `quit-running`,
+#     which kills any TYPE already running. On this desk that is the menu-bar
+#     app someone is using, and it dies once per check.
 #   - `speechbench` speaks through the speakers. There is no quiet mode; the
 #     measurement is of real utterances.
 #   - `speechbench` reports microseconds, and a machine compiling something
@@ -76,7 +76,7 @@ fi
 refuse() { print -u2 "run-remote: $1"; exit 9; }
 REMOTE_DIR="${TYPE_E2E_DIR:-ci/type-review-app-macos}"
 while [[ $REMOTE_DIR == */ ]]; do REMOTE_DIR=${REMOTE_DIR%/}; done
-CHECKS="${TYPE_E2E_CHECKS:-test selftest speechbench}"
+CHECKS="${TYPE_E2E_CHECKS:-test selftest soundcheck speechbench}"
 # What to bring back, for a check that makes something: a folder under dist/,
 # which is gitignored output. Nothing else, so a fetch can never write over
 # the sources here with the far end's copy of them.
