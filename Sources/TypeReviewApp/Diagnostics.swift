@@ -1547,6 +1547,34 @@ enum Diagnostics {
                 exit(1)
             }
 
+            // Every window this app makes is backed in sRGB — see
+            // `useSRGBBacking` for what the display's own colour space costs.
+            // All five are in hand here: the main window and its drawer from
+            // launch, Settings above, and Statistics and Library built now and
+            // never shown. Asked of `NSApp.windows` rather than of the five by
+            // name, so a sixth window is held to it too, whatever it is —
+            // but only windows of this app's making, which are all plain
+            // `NSWindow`s: AppKit puts its own in the list too, a text-input
+            // panel among them, and those are not ours to back.
+            let statsWindow = AppDelegate.makeStatsWindow(for: StatsViewController())
+            let libraryWindow = LibraryWindowController(store: practice.library)
+            withExtendedLifetime((settings, statsWindow, libraryWindow)) {
+                let windows = NSApp.windows.filter { $0.isMember(of: NSWindow.self) }
+                guard windows.count >= 5 else {
+                    print("SELFTEST FAIL: expected the app's five windows, found \(windows.count)")
+                    exit(1)
+                }
+                let wideGamut = windows.filter { !$0.isBackedInSRGB }
+                guard wideGamut.isEmpty else {
+                    print(
+                        "SELFTEST FAIL: \(wideGamut.count) window(s) are backed in the display's "
+                            + "colour space rather than sRGB: "
+                            + wideGamut.map { $0.title.isEmpty ? "(untitled)" : $0.title }
+                            .joined(separator: ", "))
+                    exit(1)
+                }
+            }
+
             // The practice grid, both ways round. `refresh` above ran on an
             // empty history, which is the state that hides it.
             guard statsController.calendarState == (hidden: true, cells: 0) else {

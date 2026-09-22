@@ -120,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self.screens = screens
 
         let window = NSWindow(contentViewController: screens)
+        window.useSRGBBacking()
         window.title = "TYPE"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         // The toolbar, and the unified style, are what give this window the
@@ -943,49 +944,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return self?.keystrokes?.snapshot()
         }
         controller.refresh()
-        if statsWindow == nil {
-            let window = NSWindow(contentViewController: controller)
-            window.title = "Statistics"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            // The unified toolbar, which this window was the only one in the
-            // app without — see the note on `StatsViewController`'s toolbar.
-            window.toolbar = controller.makeToolbar()
-            window.toolbarStyle = .unified
-            window.setContentSize(NSSize(width: 560, height: 560))
-            // A floor, not a preference. The grid shrinks its cells to fit,
-            // so it no longer sets the width — but below about this the cells
-            // are too small to read as days, and the header plus grid leave
-            // the table showing a row or two. The saved frame is restored
-            // after this is set, so it applies to windows sized before the
-            // grid existed as well as to new ones.
-            window.contentMinSize = NSSize(width: 480, height: 400)
-            window.setFrameAutosaveName("TypeReviewStats")
-            // Or closing Statistics deallocates the window while `statsWindow`
-            // still points at it, and reopening from the menu reaches freed
-            // memory. The default is true for a programmatically created
-            // window; the practice window sets this and this one was missed.
-            window.isReleasedWhenClosed = false
-            // The same two lines the Settings and Library windows carry, and
-            // for the same reasons: without `.auxiliary` this displaces the
-            // practice window in Stage Manager, and `.automatic` tabbing lets
-            // it be absorbed into another window's tab bar. This window was
-            // simply missed when the other two were fixed.
-            window.collectionBehavior = [.auxiliary, .fullScreenNone]
-            window.tabbingMode = .disallowed
-            window.titlebarSeparatorStyle = .none
-            window.titlebarAppearsTransparent = true
-            // Only when there is nothing to restore. `setFrameAutosaveName`
-            // reloads the saved frame, and centring unconditionally threw it
-            // away — so a window the user had moved came back centred on
-            // every launch, and the position was never remembered at all.
-            if !window.setFrameUsingName("TypeReviewStats") { window.center() }
-            statsWindow = window
-        }
+        if statsWindow == nil { statsWindow = Self.makeStatsWindow(for: controller) }
         statsWindow?.makeKeyAndOrderFront(nil)
         // Like Library and Settings. Ordering forward without activating
         // leaves the window on screen but not focused when it is opened from
         // the status menu while another app is in front.
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// The Statistics window around its controller.
+    ///
+    /// Static, and not private, so `--selftest` can build one without showing
+    /// it: this window is made when somebody clicks, and a window that is
+    /// built wrong ships green otherwise.
+    static func makeStatsWindow(for controller: StatsViewController) -> NSWindow {
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Statistics"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        // The unified toolbar, which this window was the only one in the
+        // app without — see the note on `StatsViewController`'s toolbar.
+        window.toolbar = controller.makeToolbar()
+        window.toolbarStyle = .unified
+        window.setContentSize(NSSize(width: 560, height: 560))
+        // A floor, not a preference. The grid shrinks its cells to fit,
+        // so it no longer sets the width — but below about this the cells
+        // are too small to read as days, and the header plus grid leave
+        // the table showing a row or two. The saved frame is restored
+        // after this is set, so it applies to windows sized before the
+        // grid existed as well as to new ones.
+        window.contentMinSize = NSSize(width: 480, height: 400)
+        window.setFrameAutosaveName("TypeReviewStats")
+        // Or closing Statistics deallocates the window while `statsWindow`
+        // still points at it, and reopening from the menu reaches freed
+        // memory. The default is true for a programmatically created
+        // window; the practice window sets this and this one was missed.
+        window.isReleasedWhenClosed = false
+        // The same two lines the Settings and Library windows carry, and
+        // for the same reasons: without `.auxiliary` this displaces the
+        // practice window in Stage Manager, and `.automatic` tabbing lets
+        // it be absorbed into another window's tab bar. This window was
+        // simply missed when the other two were fixed.
+        window.collectionBehavior = [.auxiliary, .fullScreenNone]
+        window.tabbingMode = .disallowed
+        window.useSRGBBacking()
+        window.titlebarSeparatorStyle = .none
+        window.titlebarAppearsTransparent = true
+        // Only when there is nothing to restore. `setFrameAutosaveName`
+        // reloads the saved frame, and centring unconditionally threw it
+        // away — so a window the user had moved came back centred on
+        // every launch, and the position was never remembered at all.
+        if !window.setFrameUsingName("TypeReviewStats") { window.center() }
+        return window
     }
 
 }

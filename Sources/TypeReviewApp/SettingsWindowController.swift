@@ -107,6 +107,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // restored, which the HIG asks for.
         window.collectionBehavior = [.auxiliary, .fullScreenNone]
         window.tabbingMode = .disallowed
+        window.useSRGBBacking()
         // No transition options, deliberately. `SettingsTabViewController`
         // swaps the panes with no animation and then fades the arriving one
         // itself, in the same animation group as the height — see the note

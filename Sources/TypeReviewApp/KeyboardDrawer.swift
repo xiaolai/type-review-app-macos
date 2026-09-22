@@ -42,6 +42,9 @@ final class KeyboardDrawer {
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 100, height: Self.shutHeight),
             styleMask: [.borderless], backing: .buffered, defer: false)
+        // In sRGB, or the keyboard's coloured glazes cost twice per pixel.
+        // See `useSRGBBacking`.
+        window.useSRGBBacking()
         // No background, and a shadow anyway.
         //
         // This carried a `hasShadow = false` and the reason "macOS derives a

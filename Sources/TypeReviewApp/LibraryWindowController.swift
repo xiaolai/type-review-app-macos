@@ -38,6 +38,7 @@ final class LibraryWindowController: NSWindowController, NSTableViewDataSource,
         // tabbing lets it be absorbed into another window's tab bar.
         window.collectionBehavior = [.auxiliary, .fullScreenNone]
         window.tabbingMode = .disallowed
+        window.useSRGBBacking()
         super.init(window: window)
         build()
     }
