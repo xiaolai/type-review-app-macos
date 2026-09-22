@@ -1056,6 +1056,23 @@ enum Diagnostics {
                             + "parent that is not on screen — AppKit renders both")
                     exit(1)
                 }
+                // Nor has the passage. The main window is created deferred so
+                // that nothing under it is drawn until it is shown — see where
+                // it is made — and a window made the ordinary way draws its
+                // content on the first display pass, shown or not: 8.9 MB of
+                // passage under a window nobody had seen. Checked here, before
+                // anything below renders the surface on purpose.
+                guard let surface = practice.view.subviews.compactMap({ $0 as? TypingView }).first
+                else {
+                    print("SELFTEST FAIL: no typing view in the practice window")
+                    exit(1)
+                }
+                guard surface.drawCount == 0 else {
+                    print(
+                        "SELFTEST FAIL: the typing surface was drawn \(surface.drawCount) time(s) "
+                            + "with no window on screen — the main window renders before it is shown")
+                    exit(1)
+                }
             }
 
             // The case must sit the same distance from the caps on all four

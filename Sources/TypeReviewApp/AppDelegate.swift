@@ -119,10 +119,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let screens = MainScreenController(practice: practice, play: play)
         self.screens = screens
 
-        let window = NSWindow(contentViewController: screens)
+        // `defer: true`, and it is the whole reason this is not
+        // `NSWindow(contentViewController:)`. That initialiser creates the
+        // window device at once, and a window with a device is drawn on the
+        // first display pass whether or not anything ever orders it on
+        // screen: a launch into the menu bar rendered the passage and the
+        // toolbar under this window, 8.9 MB and 4.3 MB of bitmap that nobody
+        // could see, and held them until the window was shown and drew them
+        // again. Deferred, the device is made when the window first comes on
+        // screen, and until then nothing under it is drawn — measured in a
+        // bare app, a never-shown deferred window draws its view zero times
+        // and allocates nothing, where the same window undeferred draws it
+        // once and pays for every pixel. `--selftest` holds this: it never
+        // shows the window, and fails if the typing surface has been drawn.
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: screens.view.frame.size),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: true)
+        window.contentViewController = screens
         window.useSRGBBacking()
         window.title = "TYPE"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         // The toolbar, and the unified style, are what give this window the
         // current Mac silhouette: one material band holding the title, the
         // controls and the traffic lights, instead of the short opaque strip a

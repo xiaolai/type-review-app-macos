@@ -248,9 +248,11 @@ final class KeyboardView: NSView {
     /// drawer: a keyboard drawn open where nothing could see it cost 9.5 MB of
     /// bitmap, and leaves no other trace a check could find.
     ///
-    /// A height, not a count of draws. AppKit draws the drawer once at its
-    /// shut size, 100 by 1 points, whether or not anything opens it — a few
-    /// hundred bytes, and a count cannot tell that from the open keyboard.
+    /// A height, not a count of draws. Until the drawer was created deferred,
+    /// AppKit drew it once at its shut size, 100 by 1 points, whether or not
+    /// anything opened it — a few hundred bytes, and a count could not tell
+    /// that from the open keyboard. A height cannot be fooled by that draw
+    /// coming back.
     private(set) var tallestDraw: CGFloat = 0
 
     override func draw(_ dirtyRect: NSRect) {

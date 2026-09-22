@@ -39,9 +39,11 @@ final class KeyboardDrawer {
     static let shutHeight: CGFloat = 1
 
     init() {
+        // `defer: true` for the reason the main window gives: a window made
+        // with its device draws on the first display pass, shown or not.
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 100, height: Self.shutHeight),
-            styleMask: [.borderless], backing: .buffered, defer: false)
+            styleMask: [.borderless], backing: .buffered, defer: true)
         // In sRGB, or the keyboard's coloured glazes cost twice per pixel.
         // See `useSRGBBacking`.
         window.useSRGBBacking()

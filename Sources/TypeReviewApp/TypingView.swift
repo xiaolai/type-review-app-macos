@@ -389,7 +389,15 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
 
     // MARK: - Drawing
 
+    /// How many times this view has been drawn. Read by `--selftest`, which
+    /// never shows a window and so requires it to still be zero when it looks:
+    /// the main window is created deferred so that nothing under it is drawn
+    /// before it is shown, and a passage drawn where nothing could see it cost
+    /// 8.9 MB of bitmap and left no other trace a check could find.
+    private(set) var drawCount = 0
+
     override func draw(_ dirtyRect: NSRect) {
+        drawCount += 1
         Theme.background.setFill()
         // `bounds`, not `dirtyRect`. AppKit is free to hand a view a dirty
         // rect larger than its own bounds — it passes the union of what needs
