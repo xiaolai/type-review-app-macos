@@ -121,12 +121,22 @@ final class KeyboardDrawer {
         }
         // A drawer hanging below a full-screen window is off the display
         // entirely. Put it away and bring it back with the window.
-        observers.append(
-            NotificationCenter.default.addObserver(
-                forName: NSWindow.willEnterFullScreenNotification, object: parent, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.window.orderOut(nil) }
-            })
+        //
+        // And again once the window is full screen. On macOS 27 the style mask
+        // turned full screen only some time after `willEnterFullScreen`; a
+        // keyboard turned on in between was put out against the window as it
+        // was, and stayed over the full-screen window at its old place. This
+        // puts away whatever was opened during the transition; it cannot stop
+        // it showing until then. Not a flag set here and cleared at
+        // `didEnter`: see `isFullScreen`.
+        for name in [NSWindow.willEnterFullScreenNotification, NSWindow.didEnterFullScreenNotification] {
+            observers.append(
+                NotificationCenter.default.addObserver(
+                    forName: name, object: parent, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.window.orderOut(nil) }
+                })
+        }
         observers.append(
             NotificationCenter.default.addObserver(
                 forName: NSWindow.didExitFullScreenNotification, object: parent, queue: .main
@@ -261,6 +271,19 @@ final class KeyboardDrawer {
             if !open { dismiss(from: parent) }
             return
         }
+        // Under a full-screen window, the same: remembered, and put out by
+        // `didExitFullScreen` when there is room below the window again.
+        //
+        // Everything else here already asked — `attach`, `present`, `reframe`
+        // — but this did not, and `makeRoomBelow` could not tell a full screen
+        // from a tall window. Turning the keyboard off and on in full screen
+        // shortened the window to the visible frame less a keyboard — 848
+        // points to 366 on a 900-point display — and then `attach` refused the
+        // drawer, so the rest of the screen was left black with nothing in it.
+        guard !isFullScreen else {
+            if !open { dismiss(from: parent) }
+            return
+        }
 
         if open {
             keyboardHeight.constant = keyboard.naturalHeight(forWidth: drawerWidth)
@@ -324,7 +347,10 @@ final class KeyboardDrawer {
     private func makeRoomBelow(_ parent: NSWindow, animated: Bool) {
         // Moving or resizing the parent is exactly what the observers in
         // `attach(to:)` listen for, and they call `reframe`, which calls this.
-        guard !isMakingRoom, let screen = parent.screen else { return }
+        // Nor under a full-screen window, whose frame is the system's to keep.
+        // Both callers already stop short of this; this is the one place that
+        // resizes the window, so it asks as well.
+        guard !isMakingRoom, !isFullScreen, let screen = parent.screen else { return }
         isMakingRoom = true
         defer { isMakingRoom = false }
         let drawerHeight = keyboard.naturalHeight(forWidth: drawerWidth)
