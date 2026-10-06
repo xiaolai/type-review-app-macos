@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var newTextMenuItem: NSMenuItem?
     private var preferencesObserver: NSObjectProtocol?
     private var windowCloseObserver: NSObjectProtocol?
+    private var fullScreenExitObserver: NSObjectProtocol?
     var statusItem: NSStatusItem?
     var statusKeyboardItem: NSMenuItem?
     /// The status menu's "Open TYPE", kept so the summon shortcut can be
@@ -194,6 +195,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         applyWindowSize(to: window)
         if window.frame.origin == .zero { window.center() }
         self.window = window
+        // A shape changed in Settings while the window was full screen was
+        // left unapplied; this applies it once there is a window to size.
+        fullScreenExitObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main
+        ) { [weak self, weak window] _ in
+            MainActor.assumeIsolated {
+                guard let self, let window else { return }
+                self.applyWindowSize(to: window)
+            }
+        }
 
         NSApp.mainMenu = makeMenu()
         // Before the drawer's state is applied: both menus that offer the
@@ -449,6 +460,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // window the user had resized by hand back to the computed size.
         // Nothing about the window changed unless these two numbers did.
         guard shape != appliedShape else { return }
+        // Not a full-screen window, whose frame is the system's to keep:
+        // `setContentSize` shrinks it in place and leaves the rest of the
+        // screen black, as `makeRoomBelow` in the drawer did. Left unapplied,
+        // so `didExitFullScreen` sizes the window when there is one to size.
+        guard !window.styleMask.contains(.fullScreen) else { return }
         appliedShape = shape
         let size = PracticeWindowMetrics.contentSize(columns: shape.columns, rows: shape.rows)
         // `contentMinSize`, not `minSize`. The old line set a *frame* minimum
