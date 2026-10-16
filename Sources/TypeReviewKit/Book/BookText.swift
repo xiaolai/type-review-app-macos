@@ -254,9 +254,28 @@ private func hasLetterOrDigit(_ text: String) -> Bool {
 }
 
 /// Cleans one raw unit and adds what survives to `split`.
+/// `sanitize` on a piece, halved and cleaned again for as long as cleaning
+/// would cut it.
+///
+/// `cutForCleaning`'s bound assumes cleaning never makes text longer, and it
+/// can: `€` folds to `EUR`, and NFKD expands ligatures. The corpus run found
+/// a Chinese book double-encoded as Windows-1252 whose 3,972-unit piece held
+/// 2,046 `€` and grew past `sanitize`'s 5,000 cap, losing its end. Halving at
+/// the space nearest the middle — or at the middle character when there is
+/// none — always ends, because a piece of one character cannot overflow.
+func sanitizeWithoutTruncating(_ piece: String) -> [(raw: String, cleaned: SanitizeResult)] {
+    let cleaned = sanitize(piece)
+    guard cleaned.truncated, piece.count > 1 else { return [(piece, cleaned)] }
+    let characters = Array(piece)
+    let middle = characters.count / 2
+    let spaces = characters.indices.filter { characters[$0] == " " && $0 > 0 }
+    let cut = spaces.min { abs($0 - middle) < abs($1 - middle) } ?? middle
+    return sanitizeWithoutTruncating(String(characters[..<cut]))
+        + sanitizeWithoutTruncating(String(characters[cut...]))
+}
+
 private func addCleaned(_ raw: String, to split: inout SentenceSplit) {
-    for piece in cutForCleaning(raw) {
-        let cleaned = sanitize(piece)
+    for (piece, cleaned) in cutForCleaning(raw).flatMap(sanitizeWithoutTruncating) {
         split.droppedChars += cleaned.droppedChars
         if cleaned.truncated { split.truncatedPieces += 1 }
         guard !cleaned.text.isEmpty else { continue }

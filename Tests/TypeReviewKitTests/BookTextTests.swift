@@ -122,6 +122,20 @@ final class BookTextTests: XCTestCase {
         XCTAssertGreaterThan(split.droppedChars, 0)
     }
 
+    func testTextThatGrowsWhenCleanedIsNeverCut() {
+        // "€" folds to "EUR": 3,949 units become 7,899, past sanitize's
+        // 5,000-character cap, though they are under cutForCleaning's 4,000.
+        let paragraph = Array(repeating: "\u{20AC}\u{20AC}\u{20AC}x", count: 790).joined(separator: " ")
+        XCTAssertLessThan(paragraph.utf16.count, 4_000)
+        XCTAssertTrue(sanitize(paragraph).truncated, "the case this guards against")
+        let split = splitIntoSentences([.paragraph(paragraph)])
+        XCTAssertEqual(split.truncatedPieces, 0)
+        assertTypeable(split)
+        XCTAssertEqual(
+            split.sentences.joined(separator: " ").components(separatedBy: "EUREUREURx").count - 1, 790,
+            "every group survives")
+    }
+
     func testAnOrnamentIsDroppedWithoutCountingAsLost() {
         let split = splitIntoSentences([
             .paragraph("The end."), .paragraph("*      *      *      *"), .paragraph("...\""),
