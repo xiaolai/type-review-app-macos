@@ -2,11 +2,10 @@ import Foundation
 
 // MARK: - XML helpers
 
-/// Parses XML with external entities off: an EPUB is untrusted input, and
-/// nothing in one needs a DTD loaded. Whitespace is preserved, or the space
-/// between `<i>word</i> <b>next</b>` is dropped and the two words join.
+/// A package file — container, OPF, NCX, `encryption.xml` — as strict XML,
+/// through the same guards as a chapter. See `parseDocument`.
 func xmlDocument(_ data: Data) throws -> XMLDocument {
-    try XMLDocument(data: data, options: [.nodeLoadExternalEntitiesNever, .nodePreserveWhitespace])
+    try parseDocument(data, tidyFallback: false)
 }
 
 func localName(_ node: XMLNode) -> String { (node.localName ?? node.name ?? "").lowercased() }
@@ -90,10 +89,22 @@ func textOf(_ node: XMLNode) -> String {
 public enum MarkupError: Error, Equatable {
     /// An entity the pre-pass does not know. Named, so it can be added.
     case unknownEntity(String)
+    /// The file declares entities or carries an internal DTD subset. No
+    /// book needs either, and both are how a parser is attacked: an entity
+    /// that expands a billion times, or one that reads a file off the disk.
+    case entityDeclaration
     case unparseable
 }
 
-private let namedEntity = try! NSRegularExpression(pattern: "&([A-Za-z][A-Za-z0-9]{0,31});")
+/// A reference to any name XML would accept — the Name production, with no
+/// length cap — so no named reference reaches the parser unseen: each is
+/// mapped to a number or refused.
+private let namedEntity = try! NSRegularExpression(
+    pattern: "&([:A-Z_a-z\\x{C0}-\\x{D6}\\x{D8}-\\x{F6}\\x{F8}-\\x{2FF}\\x{370}-\\x{37D}\\x{37F}-\\x{1FFF}"
+        + "\\x{200C}-\\x{200D}\\x{2070}-\\x{218F}\\x{2C00}-\\x{2FEF}\\x{3001}-\\x{D7FF}\\x{F900}-\\x{FDCF}"
+        + "\\x{FDF0}-\\x{FFFD}\\x{10000}-\\x{EFFFF}][-.0-9:A-Z_a-z\\x{B7}\\x{C0}-\\x{D6}\\x{D8}-\\x{F6}"
+        + "\\x{F8}-\\x{37D}\\x{37F}-\\x{1FFF}\\x{200C}-\\x{200D}\\x{203F}-\\x{2040}\\x{2070}-\\x{218F}"
+        + "\\x{2C00}-\\x{2FEF}\\x{3001}-\\x{D7FF}\\x{F900}-\\x{FDCF}\\x{FDF0}-\\x{FFFD}\\x{10000}-\\x{EFFFF}]*);")
 private let xmlPredefinedEntities: Set<String> = ["amp", "lt", "gt", "quot", "apos"]
 
 /// Replaces HTML named entities with numeric references before parsing.
@@ -137,21 +148,85 @@ func entityPrePass(_ text: String) throws -> String {
 /// for files that are HTML rather than XHTML. Ten measured books needed the
 /// fallback; nine had files that parsed neither way, and those throw.
 func parseMarkup(_ data: Data) throws -> XMLDocument {
-    guard let text = String(data: data, encoding: .utf8) else {
-        // Not UTF-8: let the parser honour the declared encoding. Two
-        // measured books; no pre-pass is possible without decoding first.
-        if let document = try? xmlDocument(data) { return document }
-        if let document = try? XMLDocument(data: data, options: [.documentTidyHTML, .nodePreserveWhitespace]) {
-            return document
-        }
+    try parseDocument(data, tidyFallback: true)
+}
+
+private let internalSubset = try! NSRegularExpression(pattern: "<!DOCTYPE[^>\\[]*\\[", options: [.caseInsensitive])
+private let encodingDeclaration = try! NSRegularExpression(
+    pattern: "^(\\s*<\\?xml[^>]*?encoding\\s*=\\s*)([\"'])([A-Za-z0-9._:-]+)\\2")
+
+/// A markup file's bytes as text: UTF-8; UTF-16 by its byte-order mark or
+/// its first `<`; the encoding its XML declaration names; Windows-1252.
+///
+/// Decoded here rather than by the parser so that the declaration check and
+/// the entity pre-pass see every file, whatever its encoding. The XML
+/// declaration is rewritten to say UTF-8, which is what the parser is given.
+func decodeMarkup(_ data: Data) throws -> String {
+    var text: String?
+    let head = [UInt8](data.prefix(2))
+    // UTF-16 first: without a mark, its NULs are valid UTF-8.
+    if head.count == 2, (head[0] == 0xFF && head[1] == 0xFE) || (head[0] == 0xFE && head[1] == 0xFF) {
+        text = String(data: data, encoding: .utf16)
+    } else if head == [0x3C, 0x00] {
+        text = String(data: data, encoding: .utf16LittleEndian)
+    } else if head == [0x00, 0x3C] {
+        text = String(data: data, encoding: .utf16BigEndian)
+    } else if data.contains(0) {
+        // UTF-32, or not text at all. No measured book used UTF-32, and a
+        // NUL can end the parser's reading where this check's did not.
         throw MarkupError.unparseable
+    } else if let utf8 = String(data: data, encoding: .utf8) {
+        text = utf8
+    } else {
+        let start = String(decoding: data.prefix(256).map { $0 < 0x80 ? $0 : 0x3F }, as: UTF8.self)
+        let range = NSRange(location: 0, length: (start as NSString).length)
+        if let match = encodingDeclaration.firstMatch(in: start, range: range) {
+            let name = (start as NSString).substring(with: match.range(at: 3)) as CFString
+            let encoding = CFStringConvertIANACharSetNameToEncoding(name)
+            if encoding != kCFStringEncodingInvalidId {
+                text = String(
+                    data: data, encoding: String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(encoding)))
+            }
+        }
+        if text == nil { text = String(data: data, encoding: .windowsCP1252) }
     }
+    guard var decoded = text else { throw MarkupError.unparseable }
+    if decoded.hasPrefix("\u{FEFF}") { decoded.removeFirst() }
+    return encodingDeclaration.stringByReplacingMatches(
+        in: decoded, range: NSRange(location: 0, length: (decoded as NSString).length), withTemplate: "$1$2UTF-8$2")
+}
+
+/// Refuses a file that declares entities or has an internal DTD subset.
+///
+/// The XHTML DTD named by its public identifier — the normal EPUB 2 header —
+/// is allowed: it declares nothing in the file, and with external loading
+/// off it is never read. Checked case-blind and anywhere in the file, a
+/// comment included, so nothing the parser might honour is passed over.
+func refuseEntityDeclarations(_ text: String) throws {
+    if text.range(of: "<!ENTITY", options: .caseInsensitive) != nil || matches(internalSubset, text) {
+        throw MarkupError.entityDeclaration
+    }
+}
+
+/// The one place a document is parsed. Every file goes through all of it:
+/// decoded, refused if it declares entities, the pre-pass, the kept spaces,
+/// and a parser with external entities off — in the tidy fallback too.
+func parseDocument(_ data: Data, tidyFallback: Bool) throws -> XMLDocument {
+    let text = try decodeMarkup(data)
+    try refuseEntityDeclarations(text)
     let fixed = Data(keepSpaces(try entityPrePass(text)).utf8)
-    if let document = try? xmlDocument(fixed) { return document }
-    if let document = try? XMLDocument(data: fixed, options: [.documentTidyHTML, .nodePreserveWhitespace]) {
-        return document
-    }
+    if let document = try? makeDocument(fixed, tidy: false) { return document }
+    if tidyFallback, let document = try? makeDocument(fixed, tidy: true) { return document }
     throw MarkupError.unparseable
+}
+
+/// Never loads an external entity or DTD: an EPUB is untrusted input, and
+/// nothing in one needs either. Whitespace is preserved, which `keepSpaces`
+/// relies on.
+func makeDocument(_ data: Data, tidy: Bool) throws -> XMLDocument {
+    var options: XMLNode.Options = [.nodeLoadExternalEntitiesNever, .nodePreserveWhitespace]
+    if tidy { options.insert(.documentTidyHTML) }
+    return try XMLDocument(data: data, options: options)
 }
 
 // MARK: - Blocks

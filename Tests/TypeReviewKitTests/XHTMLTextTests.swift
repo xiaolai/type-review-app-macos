@@ -31,7 +31,7 @@ final class XHTMLTextTests: XCTestCase {
     /// parser changed and the comment on `entityPrePass` needs revisiting —
     /// the pre-pass is still right either way.
     func testWithoutThePrePassTheParserDeletesEntitiesSilently() throws {
-        let document = try xmlDocument(Data(epub2File.utf8))
+        let document = try makeDocument(Data(epub2File.utf8), tidy: false)
         let text = chapterText(document)
         XCTAssertTrue(blockTexts(text).first?.contains("TomSawyerthen") ?? false, "\(blockTexts(text))")
     }

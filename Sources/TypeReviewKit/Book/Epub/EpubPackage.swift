@@ -7,6 +7,7 @@ public enum EpubPackageError: Error, Equatable, CustomStringConvertible {
     case packageUnreadable
     case noSpine
     case hrefEscapes(String)
+    case unsafeMarkup(String)
 
     public var description: String {
         switch self {
@@ -15,6 +16,7 @@ public enum EpubPackageError: Error, Equatable, CustomStringConvertible {
         case .packageUnreadable: return "its package file cannot be read"
         case .noSpine: return "it lists no reading order"
         case .hrefEscapes(let href): return "it points outside itself: \(href)"
+        case .unsafeMarkup(let path): return "\(path) declares entities, which no book needs"
         }
     }
 }
@@ -91,20 +93,31 @@ private func trimmedText(_ element: XMLElement?) -> String {
     collapseWhitespace(element?.stringValue ?? "")
 }
 
+/// A package-level file as a tree, or nil when it is missing or does not
+/// parse. One that declares entities refuses the whole book: these files
+/// decide what the book is, and such a file is built to attack a parser.
+private func packageDocument(_ archive: BookArchive, _ path: String, markup: Bool = false) throws -> XMLDocument? {
+    guard archive.contains(path), let data = try? archive.read(path) else { return nil }
+    do {
+        return markup ? try parseMarkup(data) : try xmlDocument(data)
+    } catch MarkupError.entityDeclaration {
+        throw EpubPackageError.unsafeMarkup(path)
+    } catch {
+        return nil
+    }
+}
+
 func readPackage(_ archive: BookArchive) throws -> EpubPackage {
-    guard archive.contains("META-INF/container.xml"),
-        let containerData = try? archive.read("META-INF/container.xml"),
-        let container = try? xmlDocument(containerData)
-    else { throw EpubPackageError.noContainer }
+    guard let container = try packageDocument(archive, "META-INF/container.xml") else {
+        throw EpubPackageError.noContainer
+    }
     let rootfiles = descendants(container, named: "rootfile")
     guard
         let rootfile = rootfiles.first(where: { attribute($0, "media-type") == "application/oebps-package+xml" })
             ?? rootfiles.first,
         let packagePath = attribute(rootfile, "full-path"), isSafeArchiveName(packagePath)
     else { throw EpubPackageError.noPackageFile }
-    guard let packageData = try? archive.read(packagePath), let opf = try? xmlDocument(packageData) else {
-        throw EpubPackageError.packageUnreadable
-    }
+    guard let opf = try packageDocument(archive, packagePath) else { throw EpubPackageError.packageUnreadable }
     let base = folder(of: packagePath)
 
     var package = EpubPackage()
@@ -157,9 +170,7 @@ func readPackage(_ archive: BookArchive) throws -> EpubPackage {
     }
 
     // EPUB 3 navigation: chapter names and landmarks. Never typed.
-    if let navigation = package.navigationPath, let data = try? archive.read(navigation),
-        let document = try? parseMarkup(data)
-    {
+    if let navigation = package.navigationPath, let document = try packageDocument(archive, navigation, markup: true) {
         let navigationBase = folder(of: navigation)
         for nav in descendants(document, named: "nav") {
             let types = structuralTypes(nav)
@@ -178,7 +189,7 @@ func readPackage(_ archive: BookArchive) throws -> EpubPackage {
         }
     }
     // EPUB 2 navigation, for the names the EPUB 3 nav did not give.
-    if let ncx = package.ncxPath, let data = try? archive.read(ncx), let document = try? xmlDocument(data) {
+    if let ncx = package.ncxPath, let document = try packageDocument(archive, ncx) {
         let ncxBase = folder(of: ncx)
         for point in descendants(document, named: "navpoint") {
             guard let content = descendants(point, named: "content").first, let source = attribute(content, "src"),
@@ -194,7 +205,7 @@ func readPackage(_ archive: BookArchive) throws -> EpubPackage {
     if archive.contains("META-INF/sinf.xml") || archive.contains("META-INF/rights.xml") {
         package.copyProtected = true
     }
-    if let data = try? archive.read("META-INF/encryption.xml"), let document = try? xmlDocument(data) {
+    if let document = try packageDocument(archive, "META-INF/encryption.xml") {
         let spinePaths = Set(package.spine.map(\.path))
         for encrypted in descendants(document, named: "encrypteddata") {
             let algorithm = descendants(encrypted, named: "encryptionmethod").first
