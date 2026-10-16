@@ -60,8 +60,9 @@ public struct SentenceSplit: Sendable, Equatable {
 
     public init() {}
 
+    /// Adds another split's counts to this one's. The sentences are not
+    /// gathered: the only aggregate is the draft's loss report.
     mutating func absorb(_ other: SentenceSplit) {
-        sentences += other.sentences
         droppedChars += other.droppedChars
         invisibleRemoved += other.invisibleRemoved
         punctuationOnlyDropped += other.punctuationOnlyDropped
@@ -179,23 +180,63 @@ func matches(_ expression: NSRegularExpression, _ text: String) -> Bool {
 /// a closing `?"` is that quotation's tag; a piece ending `Mr.` runs on; and
 /// while a quotation is open the next piece joins it, as long as the result
 /// still fits in one unit.
+///
+/// A unit is gathered as its pieces and joined once, with its length and
+/// quotation marks kept as running counts: joining as it went copied and
+/// rescanned the unit so far for every piece, and a long paragraph of lower-
+/// case pieces made that quadratic. Each test needs only the last piece, the
+/// length, or the counts.
 func mergeSentencePieces(_ pieces: [String]) -> [String] {
     var units: [String] = []
+    var current: [String] = []
+    var length = 0
+    var quotes = QuoteCount()
+    func flush() {
+        if !current.isEmpty { units.append(current.joined(separator: " ")) }
+        current = []
+        length = 0
+        quotes = QuoteCount()
+    }
     for piece in pieces {
-        guard let previous = units.last else {
-            units.append(piece)
-            continue
+        let pieceLength = piece.utf16.count
+        if let previous = current.last {
+            let fits = length + 1 + pieceLength <= maxBookSentenceChars
+            if startsLowercase(piece) || endsWithAbbreviation(previous) || isDialogueTag(piece, after: previous)
+                || (quotes.unclosed > 0 && fits)
+            {
+                current.append(piece)
+                length += 1 + pieceLength
+                quotes.add(piece)
+                continue
+            }
+            flush()
         }
-        let joined = previous + " " + piece
-        if startsLowercase(piece) || endsWithAbbreviation(previous) || isDialogueTag(piece, after: previous) {
-            units[units.count - 1] = joined
-        } else if unclosedQuotes(previous) > 0, joined.utf16.count <= maxBookSentenceChars {
-            units[units.count - 1] = joined
-        } else {
-            units.append(piece)
+        current = [piece]
+        length = pieceLength
+        quotes.add(piece)
+    }
+    flush()
+    return units
+}
+
+/// `unclosedQuotes`, kept as running counts so a text can be added to piece by
+/// piece.
+private struct QuoteCount {
+    var curly = 0
+    var straight = 0
+
+    mutating func add(_ text: String) {
+        for scalar in text.unicodeScalars {
+            switch scalar.value {
+            case 0x201C: curly += 1
+            case 0x201D: curly -= 1
+            case 0x22: straight += 1
+            default: break
+            }
         }
     }
-    return units
+
+    var unclosed: Int { max(curly, 0) + straight % 2 }
 }
 
 /// Cuts raw text at spaces so that no piece reaches `sanitize`'s cap.
@@ -278,16 +319,18 @@ private func addCleaned(_ raw: String, to split: inout SentenceSplit) {
     for (piece, cleaned) in cutForCleaning(raw).flatMap(sanitizeWithoutTruncating) {
         split.droppedChars += cleaned.droppedChars
         if cleaned.truncated { split.truncatedPieces += 1 }
-        guard !cleaned.text.isEmpty else { continue }
         guard hasLetterOrDigit(cleaned.text) else {
-            // Counted only when cleaning took the letters. Alice's
-            // `*  *  *` lines were reported as "part of this book is in
-            // another language", which sends a parent looking for a
+            // Counted only when cleaning took the letters — all of them, as
+            // with a line in another script, which cleans to nothing at all.
+            // Alice's `*  *  *` lines were reported as "part of this book is
+            // in another language", which sends a parent looking for a
             // language that is not there.
             if hasLetterOrDigit(piece) { split.punctuationOnlyDropped += 1 }
             continue
         }
-        split.sentences += splitLongSentence(cleaned.text)
+        // A cut can leave a piece of only punctuation — a run of "!" past
+        // the limit. Its letters are in the piece before, so nothing is lost.
+        split.sentences += splitLongSentence(cleaned.text).filter(hasLetterOrDigit)
     }
 }
 
@@ -328,16 +371,31 @@ public func splitIntoSentences(_ blocks: [BookBlock]) -> SentenceSplit {
 /// sentence with no word in it.
 public func word(in text: String, atUTF16Offset offset: Int) -> String? {
     let units = Array(text.utf16)
-    func isWordUnit(_ index: Int) -> Bool {
+    func isLetterUnit(_ index: Int) -> Bool {
         guard let scalar = Unicode.Scalar(units[index]) else { return false }
-        return scalar == "'" || CharacterSet.alphanumerics.contains(scalar)
+        return CharacterSet.alphanumerics.contains(scalar)
+    }
+    func isWordUnit(_ index: Int) -> Bool {
+        units[index] == 0x27 || isLetterUnit(index)
     }
     guard !units.isEmpty else { return nil }
     var at = min(max(0, offset), units.count - 1)
-    if !isWordUnit(at) {
-        if let next = (at..<units.count).first(where: isWordUnit) {
+    // Anchored on a letter, never an apostrophe: in "'Go,' said Toto." the
+    // closing quote alone is not a word, and Hear Word said nothing.
+    // On apostrophes, the word they touch: the one before — "dogs' tails",
+    // "'dogs'' tails" — then the one after.
+    var before = at
+    while before >= 0, !isLetterUnit(before), isWordUnit(before) { before -= 1 }
+    var after = at
+    while after < units.count, !isLetterUnit(after), isWordUnit(after) { after += 1 }
+    if !isLetterUnit(at), isWordUnit(at), before >= 0, isLetterUnit(before) {
+        at = before
+    } else if !isLetterUnit(at), isWordUnit(at), after < units.count, isLetterUnit(after) {
+        at = after
+    } else if !isLetterUnit(at) {
+        if let next = (at..<units.count).first(where: isLetterUnit) {
             at = next
-        } else if let previous = (0..<at).last(where: isWordUnit) {
+        } else if let previous = (0..<at).last(where: isLetterUnit) {
             at = previous
         } else {
             return nil

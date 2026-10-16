@@ -148,12 +148,41 @@ public func makeDraft(
     title: String, author: String, sources: [ChapterSource], tablesDropped: Int = 0,
     unreadableFiles: [String] = [], imagesSeen: Int = 0
 ) throws -> BookDraft {
+    try makeDraft(
+        title: title, author: author, sources: sources, blockSplits: sources.map { splitBlocks($0.blocks) },
+        tablesDropped: tablesDropped, unreadableFiles: unreadableFiles, imagesSeen: imagesSeen)
+}
+
+/// Each block of a part split on its own. Splitting never looks across a
+/// block's edge, so these joined are exactly what `splitIntoSentences` gives
+/// for the whole part.
+public func splitBlocks(_ blocks: [BookBlock]) -> [SentenceSplit] {
+    blocks.map { splitIntoSentences([$0]) }
+}
+
+/// `makeDraft` over splits already made, one `splitBlocks` per source, so a
+/// caller that measures each block — `make epub-corpus` — splits the text
+/// once rather than twice.
+public func makeDraft(
+    title: String, author: String, sources: [ChapterSource], blockSplits: [[SentenceSplit]],
+    tablesDropped: Int = 0, unreadableFiles: [String] = [], imagesSeen: Int = 0
+) throws -> BookDraft {
+    precondition(
+        blockSplits.count == sources.count
+            && zip(sources, blockSplits).allSatisfy { $0.blocks.count == $1.count },
+        "one split per block of every source")
     var chapters: [DraftChapter] = []
     var total = SentenceSplit()
-    for source in sources {
-        let split = splitIntoSentences(source.blocks)
-        guard !split.sentences.isEmpty else { continue }
+    for (source, splits) in zip(sources, blockSplits) {
+        var split = SentenceSplit()
+        for block in splits {
+            split.absorb(block)
+            split.sentences += block.sentences
+        }
+        // Counted before the empty check: a story chapter that cleaning
+        // emptied is the loss most worth reporting.
         if source.kind == .story { total.absorb(split) }
+        guard !split.sentences.isEmpty else { continue }
         chapters.append(
             DraftChapter(
                 title: source.title, kind: source.kind, reason: source.reason,
@@ -184,7 +213,8 @@ public func makeDraft(
 /// and 15 is assumed — a fair pace for a young typist, and a pessimistic
 /// estimate is the kinder surprise.
 public func estimatedSittings(words: Int, wpm: Double?, minutesPerSitting: Double = 20) -> Int {
-    let speed = max(wpm ?? 15, 1)
-    let minutes = Double(words) / speed
-    return max(1, Int((minutes / minutesPerSitting).rounded(.up)))
+    let speed = wpm.flatMap { $0.isFinite ? max($0, 1) : nil } ?? 15
+    let sitting = minutesPerSitting.isFinite && minutesPerSitting > 0 ? minutesPerSitting : 20
+    let sittings = (Double(max(words, 0)) / speed / sitting).rounded(.up)
+    return max(1, Int(min(sittings, Double(Int32.max))))
 }

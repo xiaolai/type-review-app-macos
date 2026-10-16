@@ -122,6 +122,26 @@ final class BookTextTests: XCTestCase {
         XCTAssertGreaterThan(split.droppedChars, 0)
     }
 
+    func testACutNeverLeavesAUnitOfOnlyPunctuation() {
+        let line = String(repeating: "a", count: 299) + String(repeating: "!", count: 20)
+        let split = splitIntoSentences([BookBlock(kind: .verse, lines: [line])])
+        XCTAssertFalse(split.sentences.isEmpty)
+        for sentence in split.sentences {
+            XCTAssertTrue(sentence.contains { $0.isLetter || $0.isNumber }, sentence)
+        }
+    }
+
+    func testALineInAnotherScriptIsCountedAsLeftOut() {
+        let split = splitIntoSentences([.paragraph("\u{4F60}\u{597D}")])
+        XCTAssertEqual(split.sentences, [])
+        XCTAssertEqual(split.punctuationOnlyDropped, 1)
+    }
+
+    func testLowerCasePiecesMergeIntoOneUnit() {
+        XCTAssertEqual(
+            mergeSentencePieces(["it began", "and went on", "and on."]), ["it began and went on and on."])
+    }
+
     func testTextThatGrowsWhenCleanedIsNeverCut() {
         // "€" folds to "EUR": 3,949 units become 7,899, past sanitize's
         // 5,000-character cap, though they are under cutForCleaning's 4,000.
@@ -234,6 +254,38 @@ final class BookRepairTests: XCTestCase {
         ])
         XCTAssertEqual(blocks, [.paragraph("All children, except one, grow up.")])
         XCTAssertEqual(report.gutenbergCuts, 2)
+    }
+
+    func testMojibakeIsRepairedWhateverItsLeadByte() {
+        XCTAssertEqual(repairMojibake("Å“uvre"), "\u{0153}uvre")
+        XCTAssertEqual(repairMojibake("5 â‚¬"), "5 \u{20AC}")
+    }
+
+    func testProseAtTheTopOfAFileIsNotTakenForALabel() {
+        for line in ["Part of me wanted to leave.", "HELP!", "Book one was the best."] {
+            let (blocks, report) = repairBlocks([.paragraph(line), .paragraph("Then it rained.")])
+            XCTAssertEqual(blocks.first?.kind, .paragraph, line)
+            XCTAssertEqual(report.labelsMadeHeadings, 0, line)
+        }
+    }
+
+    func testAPrintedLineThatContinuesIsNotALabel() {
+        let (blocks, report) = repairBlocks([.paragraph("Book One Was the Best"), .paragraph("of all the summers.")])
+        XCTAssertEqual(blocks, [.paragraph("Book One Was the Best of all the summers.")])
+        XCTAssertEqual(report.labelsMadeHeadings, 0)
+    }
+
+    func testAChapterNumberStaysALabelWhateverFollows() {
+        let (blocks, _) = repairBlocks([.paragraph("Chapter 1"), .paragraph("once upon a time there was a fox.")])
+        XCTAssertEqual(blocks, [.heading("Chapter 1"), .paragraph("once upon a time there was a fox.")])
+    }
+
+    func testALongRunOfFragmentsJoinsIntoOneParagraph() {
+        let fragments = (0..<5_000).map { BookBlock.paragraph("word\($0)") }
+        let (blocks, report) = repairBlocks([.paragraph("It began")] + fragments)
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(report.joinedParagraphs, 5_000)
+        XCTAssertTrue(blocks[0].lines[0].hasSuffix("word4998 word4999"))
     }
 
     func testOrdinaryProseIsLeftAlone() {

@@ -22,10 +22,6 @@ public func decodeBookText(_ data: Data) -> String? {
     return String(data: data, encoding: .windowsCP1252)
 }
 
-private let chapterHeading = try! NSRegularExpression(
-    pattern: "^(chapter|book|part|volume|prologue|epilogue)\\b[^\\n]{0,80}$|^[ivxlcdm]{1,8}\\.?$",
-    options: [.caseInsensitive])
-
 private let illustrationMarker = try! NSRegularExpression(pattern: "^\\[(illustration|picture|image)[^\\]]*\\]$", options: [.caseInsensitive])
 
 /// `_took a watch_`: how Project Gutenberg's plain text marks italics. Kept
@@ -41,27 +37,6 @@ func removingEmphasisMarks(_ text: String) -> String {
     guard text.contains("_") else { return text }
     return underscoreEmphasis.stringByReplacingMatches(
         in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
-}
-
-/// "CHAPTER IV", "Chapter 4.", "BOOK TWO", a Roman numeral alone.
-func isChapterHeading(_ line: String) -> Bool {
-    let trimmed = line.trimmingCharacters(in: .whitespaces)
-    guard !trimmed.isEmpty, trimmed.count <= 80 else { return false }
-    return matches(chapterHeading, trimmed)
-}
-
-/// A short line in capitals: a chapter's title under its number, or a title
-/// standing alone.
-func isCapitalTitle(_ line: String) -> Bool {
-    let trimmed = line.trimmingCharacters(in: .whitespaces)
-    guard trimmed.count <= 60 else { return false }
-    let letters = trimmed.unicodeScalars.filter { CharacterSet.letters.contains($0) }
-    guard letters.count >= 3, letters.allSatisfy({ !CharacterSet.lowercaseLetters.contains($0) }) else {
-        return false
-    }
-    // "HELP!" alone is somebody shouting, not a title. A title may end in a
-    // full stop, which is why that one mark is not counted.
-    return !(trimmed.hasSuffix("!") || trimmed.hasSuffix("?"))
 }
 
 /// The book's text between Project Gutenberg's own markers, and the title and
@@ -95,19 +70,33 @@ func stripGutenberg(_ lines: [Substring]) -> (body: ArraySlice<Substring>, title
     return (lines[start..<end], title, author)
 }
 
-/// A plain-text book: paragraphs separated by blank lines, line wrapping
-/// joined, chapters found by their headings.
+/// A plain-text book read from a file, with the byte limit enforced on what
+/// is actually read rather than on what the file's size said.
 ///
-/// Text before the first chapter heading is front matter — a title page, a
-/// contents list, a preface — and is offered unticked. A book with no headings
-/// at all is one chapter of story.
-public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> BookDraft {
-    let normalised = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
-    let all = normalised.split(separator: "\n", omittingEmptySubsequences: false)
-    let (body, gutenbergTitle, gutenbergAuthor) = stripGutenberg(all)
+/// One open file, read to at most one byte past the limit: asking for the
+/// size first and then reading the whole file let a file that grew in
+/// between — or whose size could not be asked — be read without a bound.
+public func readPlainTextBook(at url: URL) throws -> BookDraft {
+    let data: Data
+    do {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        data = try handle.read(upToCount: maxPlainTextBookBytes + 1) ?? Data()
+    } catch {
+        throw BookImportError.unreadable(error.localizedDescription)
+    }
+    guard data.count <= maxPlainTextBookBytes else {
+        throw BookImportError.tooLarge("over \(maxPlainTextBookBytes >> 20) MB of text")
+    }
+    guard let text = decodeBookText(data) else {
+        throw BookImportError.unreadable("the text encoding is not one this app reads")
+    }
+    return try readPlainTextBook(text, fallbackTitle: url.deletingPathExtension().lastPathComponent)
+}
 
-    // Paragraphs, each kept as its lines so a contents list can be seen for
-    // what it is before the lines are joined.
+/// Paragraphs, each kept as its lines so a contents list can be seen for what
+/// it is before the lines are joined.
+private func collectParagraphs(_ body: ArraySlice<Substring>) -> [[String]] {
     var paragraphs: [[String]] = []
     var current: [String] = []
     for line in body {
@@ -120,13 +109,24 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
         }
     }
     if !current.isEmpty { paragraphs.append(current) }
+    return paragraphs
+}
 
-    struct Pending {
-        var title: String
-        var blocks: [BookBlock] = []
-        var front: Bool
-    }
-    var chapters: [Pending] = [Pending(title: "Beginning", front: true)]
+private struct PendingChapter {
+    var title: String
+    var blocks: [BookBlock] = []
+    var front: Bool
+}
+
+/// A paragraph's printed lines as one line of text.
+private func paragraphText(_ lines: some Sequence<String>) -> String {
+    removingEmphasisMarks(lines.reduce("") { $0.isEmpty ? $1 : joinWrapped($0, $1) })
+}
+
+/// The paragraphs sorted into chapters by their headings. The first chapter
+/// is what comes before any heading.
+private func findChapters(in paragraphs: [[String]]) -> [PendingChapter] {
+    var chapters = [PendingChapter(title: "Beginning", front: true)]
     var lastWasHeading = false
     // Whether chapters are numbered ("Chapter I", "XII"). In a book that
     // numbers them, a line in capitals on its own is a title only straight
@@ -134,8 +134,9 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
     // CITY OF EMERALDS" written on a slate mid-chapter, and Alice prints
     // "THE MILLENNIUM FULCRUM EDITION 3.0" above its contents: both became
     // chapters. A book with no numbers at all may title its chapters in
-    // capitals alone, and there the rule still applies.
-    let numbersChapters = paragraphs.contains { $0.count <= 3 && isChapterHeading($0[0]) }
+    // capitals alone, and there the rule still applies — and a Prologue does
+    // not number anything, so it does not turn the rule off.
+    let numbersChapters = paragraphs.contains { $0.count <= 3 && isNumberedChapterHeading($0[0]) }
     for lines in paragraphs {
         // A contents list: several lines, most of them chapter headings.
         if lines.count >= 3, lines.filter(isChapterHeading).count * 2 > lines.count {
@@ -148,10 +149,22 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
             continue
         }
         // A heading, and the title printed under it: "Chapter I" then
-        // "The Cyclone", one paragraph of two short lines.
-        if lines.count <= 3, isChapterHeading(lines[0]), lines.allSatisfy({ $0.count <= 80 }) {
-            chapters.append(Pending(title: lines.joined(separator: " "), front: false))
-            lastWasHeading = true
+        // "The Cyclone", one paragraph of two short lines. A line under the
+        // heading that reads as prose is the chapter's first sentence.
+        if lines.count <= 3, isChapterHeading(lines[0]) {
+            // A title line the next line continues in lower case is prose:
+            // "Mary and I" / "went home."
+            var titleLines = 1
+            while titleLines < lines.count, isTitleLine(lines[titleLines]),
+                titleLines + 1 == lines.count || !startsLowercase(lines[titleLines + 1])
+            {
+                titleLines += 1
+            }
+            chapters.append(PendingChapter(title: lines.prefix(titleLines).joined(separator: " "), front: false))
+            lastWasHeading = titleLines == lines.count
+            if titleLines < lines.count {
+                chapters[chapters.count - 1].blocks.append(.paragraph(paragraphText(lines.dropFirst(titleLines))))
+            }
             continue
         }
         if lines.count == 1, let line = lines.first {
@@ -161,20 +174,34 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
                     chapter.title += " " + line
                     chapters.append(chapter)
                 } else {
-                    chapters.append(Pending(title: line, front: false))
+                    chapters.append(PendingChapter(title: line, front: false))
                 }
                 lastWasHeading = true
                 continue
             }
         }
         lastWasHeading = false
-        chapters[chapters.count - 1].blocks.append(.paragraph(removingEmphasisMarks(lines.joined(separator: " "))))
+        chapters[chapters.count - 1].blocks.append(.paragraph(paragraphText(lines)))
     }
+    return chapters
+}
 
+/// A plain-text book: paragraphs separated by blank lines, line wrapping
+/// joined, chapters found by their headings.
+///
+/// Text before the first chapter heading is front matter — a title page, a
+/// contents list, a preface — and is offered unticked. A book with no headings
+/// at all is one chapter of story.
+public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> BookDraft {
+    let normalised = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+    let all = normalised.split(separator: "\n", omittingEmptySubsequences: false)
+    let (body, gutenbergTitle, gutenbergAuthor) = stripGutenberg(all)
+
+    let chapters = findChapters(in: collectParagraphs(body))
     let hasChapters = chapters.count > 1
     var sources: [ChapterSource] = []
     for chapter in chapters {
-        let (blocks, _) = repairBlocks(chapter.blocks, label: chapter.title)
+        let (blocks, _) = repairBlocks(chapter.blocks, findLabels: false)
         if chapter.front {
             sources.append(
                 ChapterSource(

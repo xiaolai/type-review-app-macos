@@ -90,6 +90,15 @@ final class BookModelTests: XCTestCase {
         XCTAssertEqual(try decodeBook(try encodeBook(book)), book)
     }
 
+    func testALongChapterTitleIsCutSoTheBookStillOpens() throws {
+        let long = String(repeating: "A very long chapter title ", count: 20)
+        let book = try makeBook(
+            from: draft([DraftChapter(title: long, kind: .story, reason: "", sentences: ["a."], included: true)]),
+            id: "b-3", importedAt: 1)
+        XCTAssertLessThanOrEqual(book.chapters[0].title.utf16.count, 200)
+        XCTAssertEqual(try decodeBook(try encodeBook(book)), book)
+    }
+
     func testMakingABookChecksItsLimitsWithAMessage() {
         XCTAssertThrowsError(
             try makeBook(

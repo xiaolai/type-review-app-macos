@@ -46,4 +46,13 @@ final class WordAtCursorTests: XCTestCase {
         XCTAssertNil(word(in: "...", atUTF16Offset: 1))
         XCTAssertNil(word(in: "", atUTF16Offset: 0))
     }
+
+    func testAQuoteAloneIsNeverTheWord() {
+        let sentence = "'Go,' said Toto."
+        XCTAssertEqual(word(in: sentence, atUTF16Offset: 3), "said", "on the comma")
+        XCTAssertEqual(word(in: sentence, atUTF16Offset: 4), "said", "on the closing quote")
+        XCTAssertEqual(word(in: "Toto's '", atUTF16Offset: 7), "Toto's", "a quote after the last word")
+        XCTAssertEqual(word(in: "the dogs' tails", atUTF16Offset: 8), "dogs", "a plural's apostrophe is its word's")
+        XCTAssertEqual(word(in: "'dogs'' tails", atUTF16Offset: 6), "dogs", "a run of apostrophes")
+    }
 }

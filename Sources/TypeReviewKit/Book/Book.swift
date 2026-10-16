@@ -103,24 +103,27 @@ public func makeBook(from draft: BookDraft, id: String, importedAt: Double) thro
     var chapters: [BookChapter] = []
     var sentences: [String] = []
     for chapter in draft.chapters where chapter.included && !chapter.sentences.isEmpty {
-        chapters.append(BookChapter(title: chapter.title, start: sentences.count))
+        // Cut to the length the codec accepts: a longer title saved fine and
+        // then refused the book every time it was opened.
+        let title = prefixByCodeUnits(chapter.title.trimmingCharacters(in: .whitespacesAndNewlines), maxBookTitleLength)
+        chapters.append(BookChapter(title: title, start: sentences.count))
         sentences += chapter.sentences
     }
     guard !sentences.isEmpty else { throw BookImportError.nothingIncluded }
     guard sentences.count <= maxBookSentences else {
         throw BookImportError.tooLarge("more than \(maxBookSentences) sentences")
     }
-    let characters = sentences.reduce(0) { $0 + $1.utf16.count }
-    guard characters <= maxBookCharacters else {
-        throw BookImportError.tooLarge("more than \(maxBookCharacters) characters")
-    }
     let title = prefixByCodeUnits(
         draft.title.trimmingCharacters(in: .whitespacesAndNewlines), maxBookTitleLength)
     let author = prefixByCodeUnits(
         draft.author.trimmingCharacters(in: .whitespacesAndNewlines), maxBookTitleLength)
-    return Book(
+    let book = Book(
         id: id, title: title.isEmpty ? "Untitled" : title, author: author, importedAt: importedAt,
         chapters: chapters, sentences: sentences)
+    guard book.characterCount <= maxBookCharacters else {
+        throw BookImportError.tooLarge("more than \(maxBookCharacters) characters")
+    }
+    return book
 }
 
 // MARK: - Codecs

@@ -34,7 +34,10 @@ private let windows1252: [UInt32: UInt8] = [
 ///
 /// Nil when there was nothing to repair.
 public func repairMojibake(_ text: String) -> String? {
-    guard text.contains("â€") || text.contains("Ã") || text.contains("Â") else { return nil }
+    // A run can only start at a lead byte read as Latin-1, so text without
+    // one has nothing to repair. Checking a few lead bytes by name missed
+    // "Å“" and "â‚¬", which the decoder below handles.
+    guard text.unicodeScalars.contains(where: { (0xC2...0xF4).contains($0.value) }) else { return nil }
     func byte(_ scalar: Unicode.Scalar) -> UInt8? {
         if let mapped = windows1252[scalar.value] { return mapped }
         return scalar.value < 256 ? UInt8(scalar.value) : nil
@@ -88,8 +91,6 @@ func endsSentence(_ text: String) -> Bool {
     return !endsWithAbbreviation(String(trimmed))
 }
 
-private let chapterLabel = try! NSRegularExpression(
-    pattern: "(?i)^(chapter|part|book|volume|prologue|epilogue)\\b|^[0-9ivxlcdm]{1,6}\\.?$")
 private let numberOnly = try! NSRegularExpression(pattern: "^[\\[(]?\\d{1,4}[\\])]?\\.?$")
 
 private func containsGutenberg(_ text: String) -> Bool {
@@ -100,17 +101,32 @@ private func containsGutenberg(_ text: String) -> Bool {
 ///
 /// - `label` is what the table of contents calls the file, if anything. A
 ///   short paragraph at the top that says exactly that is its title.
-public func repairBlocks(_ input: [BookBlock], label: String = "") -> (blocks: [BookBlock], report: RepairReport) {
+/// - `findLabels` is false when the reader has already decided what is a
+///   heading. The plain-text reader has: it keeps "LET DOROTHY GO TO THE
+///   CITY OF EMERALDS" as prose on purpose, and taking a second guess here
+///   removed it.
+public func repairBlocks(
+    _ input: [BookBlock], label: String = "", findLabels: Bool = true
+) -> (blocks: [BookBlock], report: RepairReport) {
     var report = RepairReport()
+    var blocks = repairEncoding(input, &report)
+    cutGutenbergMatter(&blocks, &report)
+    dropNumberParagraphs(&blocks, &report)
+    if findLabels { markLeadingLabels(&blocks, label: label, &report) }
+    return (joinBrokenParagraphs(blocks, &report), report)
+}
 
-    var blocks = input.map { block -> BookBlock in
+private func repairEncoding(_ blocks: [BookBlock], _ report: inout RepairReport) -> [BookBlock] {
+    blocks.map { block -> BookBlock in
         let fixed = block.lines.map(repairMojibake)
         guard fixed.contains(where: { $0 != nil }) else { return block }
         report.mojibakeBlocks += 1
         return BookBlock(kind: block.kind, lines: zip(block.lines, fixed).map { $1 ?? $0 })
     }
+}
 
-    // Project Gutenberg's own matter, when it sits inside a chapter file.
+/// Project Gutenberg's own matter, when it sits inside a chapter file.
+private func cutGutenbergMatter(_ blocks: inout [BookBlock], _ report: inout RepairReport) {
     if let start = blocks.lastIndex(where: {
         let text = $0.lines.joined(separator: " ")
         return containsGutenberg(text) && text.range(of: "START OF TH", options: .caseInsensitive) != nil
@@ -126,19 +142,23 @@ public func repairBlocks(_ input: [BookBlock], label: String = "") -> (blocks: [
         blocks.removeSubrange(end...)
         report.gutenbergCuts += 1
     }
+}
 
-    // Paragraphs that are only a number: page numbers, or a chapter's number.
-    blocks = blocks.filter { block in
-        guard block.kind == .paragraph else { return true }
-        let text = block.lines[0].trimmingCharacters(in: .whitespaces)
-        if matches(numberOnly, text) {
-            report.numberParagraphsDropped += 1
-            return false
-        }
+/// Paragraphs that are only a number: page numbers, or a chapter's number.
+private func dropNumberParagraphs(_ blocks: inout [BookBlock], _ report: inout RepairReport) {
+    blocks.removeAll { block in
+        guard block.kind == .paragraph,
+            matches(numberOnly, block.lines[0].trimmingCharacters(in: .whitespaces))
+        else { return false }
+        report.numberParagraphsDropped += 1
         return true
     }
+}
 
-    // A short label at the top of a file is a title, not a sentence.
+/// A short label at the top of a file is a title, not a sentence. What counts
+/// as one is the plain-text reader's policy, so a line it kept as prose —
+/// "HELP!", "Part of me wanted to leave." — is not removed here.
+private func markLeadingLabels(_ blocks: inout [BookBlock], label: String, _ report: inout RepairReport) {
     var looked = 0
     for index in blocks.indices where looked < 3 {
         if blocks[index].kind == .heading { continue }
@@ -146,39 +166,59 @@ public func repairBlocks(_ input: [BookBlock], label: String = "") -> (blocks: [
         guard blocks[index].kind == .paragraph else { continue }
         let text = blocks[index].lines[0].trimmingCharacters(in: .whitespaces)
         guard text.count <= 60 else { break }
-        let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }
-        let allCapitals = letters.count >= 3 && letters.allSatisfy { !CharacterSet.lowercaseLetters.contains($0) }
-        let isLabel = matches(chapterLabel, text) || allCapitals
-            || (!label.isEmpty && text.caseInsensitiveCompare(label) == .orderedSame)
+        let tocLabel = !label.isEmpty && text.caseInsensitiveCompare(label) == .orderedSame
+        let shape = chapterHeadingShape(text)
+        // A label is its own paragraph. A run-on title or a line in capitals
+        // that the next paragraph continues in lower case is a printed line of
+        // prose: "Book One Was the Best" / "of all the summers". "Chapter 1"
+        // stays a label whatever follows it.
+        let continues = blocks[(index + 1)...].first(where: { $0.kind == .paragraph }).map {
+            startsLowercase($0.lines[0].trimmingCharacters(in: .whitespaces))
+        } ?? false
+        let isLabel = tocLabel || shape == .complete || (!continues && (shape == .runOn || isCapitalTitle(text)))
         guard isLabel else { break }
         blocks[index] = .heading(text)
         report.labelsMadeHeadings += 1
     }
+}
 
-    // A paragraph that starts lower case continues the one before it: the
-    // source put each printed line in a paragraph of its own. When most of a
-    // file's paragraphs end mid-sentence, the whole file is like that, and a
-    // paragraph joins its predecessor until one ends a sentence.
+/// A paragraph that starts lower case continues the one before it: the
+/// source put each printed line in a paragraph of its own. When most of a
+/// file's paragraphs end mid-sentence, the whole file is like that, and a
+/// paragraph joins its predecessor until one ends a sentence.
+///
+/// The pieces of one paragraph are gathered and joined once: joining as it
+/// went copied the paragraph so far for every line, which a long run of
+/// fragments made quadratic.
+private func joinBrokenParagraphs(_ blocks: [BookBlock], _ report: inout RepairReport) -> [BookBlock] {
     let paragraphs = blocks.filter { $0.kind == .paragraph }.map { $0.lines[0] }
     let open = paragraphs.filter { !endsSentence($0) }.count
     report.lineMode = paragraphs.count >= 10 && open * 10 > paragraphs.count * 4
     var out: [BookBlock] = []
-    for block in blocks {
-        if block.kind == .paragraph, let previous = out.last, previous.kind == .paragraph {
-            let before = previous.lines[0].trimmingCharacters(in: .whitespaces)
-            let after = block.lines[0].trimmingCharacters(in: .whitespaces)
-            if endsWithAbbreviation(before) || startsLowercase(after)
-                || (report.lineMode && !endsSentence(before))
-            {
-                // A word broken across printed lines keeps its hyphen and loses
-                // the space; a dash ("--") is not a broken word.
-                let glue = before.hasSuffix("-") && !before.hasSuffix("--") ? "" : " "
-                out[out.count - 1] = .paragraph(before + glue + after)
-                report.joinedParagraphs += 1
-                continue
-            }
-        }
-        out.append(block)
+    var pieces: [String] = []
+    func flush() {
+        guard !pieces.isEmpty else { return }
+        out.append(.paragraph(pieces.joined()))
+        pieces = []
     }
-    return (out, report)
+    for block in blocks {
+        guard block.kind == .paragraph else {
+            flush()
+            out.append(block)
+            continue
+        }
+        let after = block.lines[0].trimmingCharacters(in: .whitespaces)
+        if let before = pieces.last,
+            endsWithAbbreviation(before) || startsLowercase(after) || (report.lineMode && !endsSentence(before))
+        {
+            pieces.append(wrapGlue(after: before))
+            pieces.append(after)
+            report.joinedParagraphs += 1
+            continue
+        }
+        flush()
+        pieces = [after]
+    }
+    flush()
+    return out
 }
