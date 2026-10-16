@@ -362,9 +362,9 @@ final class PracticeViewController: NSViewController {
     /// hears is one keystroke that sounds wrong, not a click and then a
     /// verdict arriving to comment on it.
     private func soundMistype(at cursorBefore: Int) {
-        guard soundsMistypes, let typing = lastTyping else { return }
-        guard mistypeJustHappened(statuses: typing.statuses, at: cursorBefore) else { return }
-        guard mistypeGate.admit(nowMs: clock()) else { return }
+        guard soundsMistypes, let typing = lastTyping,
+            mistypeGate.admitMistype(statuses: typing.statuses, at: cursorBefore, nowMs: clock())
+        else { return }
         onMistype?()
     }
 
@@ -691,9 +691,7 @@ extension PracticeViewController {
     /// Caret shape, whitespace marks, and which keyboards may type. None of
     /// them changes the run, so they apply live rather than at the next passage.
     func applyTypingPreferences() {
-        typingView.caretStyle = AppPreferences.caretStyle.value
-        typingView.showsWhitespace = AppPreferences.showWhitespace.value
-        typingView.latinInputOnly = AppPreferences.latinInputOnly.value
+        typingView.applyTypingPreferences()
         // Speech rides the same notification. Switching it on mid-passage has
         // to build the synthesizer and resolve the voice here, or the first
         // word after the switch would pay for both on the typing path.

@@ -65,6 +65,13 @@ struct MistypeGate {
         lastSoundedMs = nil
     }
 
+    /// Whether a keystroke that has just landed should sound the tone: it
+    /// was a mistype, and the gate admits it. The question both screens that
+    /// take typing ask after every key.
+    mutating func admitMistype(statuses: [CharStatus], at position: Int, nowMs: Double) -> Bool {
+        mistypeJustHappened(statuses: statuses, at: position) && admit(nowMs: nowMs)
+    }
+
     /// Whether the tone may play now, recording that it did if so.
     mutating func admit(nowMs: Double) -> Bool {
         guard !soundedThisCommit, mistypeMaySound(lastSoundedMs: lastSoundedMs, nowMs: nowMs)

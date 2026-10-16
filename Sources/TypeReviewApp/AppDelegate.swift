@@ -179,6 +179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolbarController.onChoosePlayRules = { [weak self] gentle in self?.play?.newGame(gentle: gentle) }
         toolbarController.onShowBooks = { [weak self] in self?.showBooks(nil) }
         toolbarController.onSpeakSentence = { [weak self] in self?.book?.speakSentence() }
+        toolbarController.canSpeakSentence = { [weak self] in
+            self?.screens?.current == .book && self?.book?.canSpeak == true
+        }
         toolbarController.currentPlay = { [weak self] in
             (self?.play?.mode ?? .words, self?.play?.gentle ?? true)
         }

@@ -73,7 +73,11 @@ final class BookViewController: NSViewController {
 
     private let speech = SpeechPlayer()
     private var tracker = SpokenWordTracker()
-    private var passageGeneration = 0
+    /// Bumped when what is on screen changes by choice — a book opened, the
+    /// screen left, the shelf emptied — and not when a finished sentence moves
+    /// on by itself. Speech queued under an older value is dropped; the last
+    /// word of a sentence, queued on the keystroke that finished it, is not.
+    private var speechGeneration = 0
     private var speaksWords = false
     private var soundsMistypes = true
     private var mistypeGate = MistypeGate()
@@ -212,6 +216,7 @@ final class BookViewController: NSViewController {
             self.book = book
             remember(id)
             pendingError = nil
+            speechGeneration += 1
             if case .unreadable = store.progress(id) {
                 pendingError = BookStoreError.unreadable(store.progressURL(id).lastPathComponent)
                     .errorDescription
@@ -243,6 +248,8 @@ final class BookViewController: NSViewController {
     }
 
     private func showEmpty(_ message: String?) {
+        speechGeneration += 1
+        speech.stop()
         book = nil
         session = nil
         emptyLabel.stringValue = message ?? "No book yet.\nImport a book, or start one from the shelf."
@@ -259,7 +266,8 @@ final class BookViewController: NSViewController {
 
     // MARK: - Sentences
 
-    private func show(sentence index: Int) {
+    /// `continuing` when the sentence before it has just been finished.
+    private func show(sentence index: Int, continuing: Bool = false) {
         guard let book else { return }
         sentence = index
         heardThisSentence = false
@@ -278,25 +286,44 @@ final class BookViewController: NSViewController {
             return
         }
         nextLabel.stringValue = index + 1 < book.sentences.count ? book.sentences[index + 1] : ""
+        guard startSession(book.sentences[index], passageId: passageId(index)) else { return }
+        refresh(resetPassage: true, continuing: continuing)
+        scheduleReadFirst()
+    }
+
+    /// The practice settings a sentence runs under, never timed. A timed
+    /// benchmark ends a run when its clock does, and here that ended a
+    /// sentence half typed and saved the place past the rest of it.
+    private func sentenceSettings() -> ProfileSettings {
+        var settings = settings()
+        settings.testMode = .words
+        return settings
+    }
+
+    /// A run over one sentence, on the screen's scratch session.
+    private func startSession(_ text: String, passageId: String) -> Bool {
         do {
-            let session = try self.session ?? Session(profile: Profile(settings: settings()))
-            session.stageSettings(settings())
-            try session.startWithText(book.sentences[index], passageId: passageId(index))
+            let session = try self.session ?? Session(profile: Profile(settings: sentenceSettings()))
+            session.stageSettings(sentenceSettings())
+            try session.startWithText(text, passageId: passageId)
             self.session = session
+            return true
         } catch {
             hintLabel.stringValue = "could not start the sentence: \(error.localizedDescription)"
-            return
+            return false
         }
-        refresh(resetPassage: true)
+    }
+
+    /// Read Each Sentence First, on the next turn rather than here. This
+    /// runs inside the keystroke that finished the last sentence, and Practice
+    /// measured what speech on that stack costs: an input stream that
+    /// desyncs. A sentence that has been replaced by then is not read.
+    private func scheduleReadFirst() {
         guard AppPreferences.readSentencesFirst.value else { return }
-        // On the next turn, not here. This runs inside the keystroke that
-        // finished the last sentence, and Practice measured what speech on
-        // that stack costs: an input stream that desyncs. A sentence that
-        // has been replaced by then is not read.
-        let generation = passageGeneration
+        let (generation, index) = (speechGeneration, sentence)
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.passageGeneration == generation else { return }
-            self.speakSentence()
+            guard let self, self.speechGeneration == generation, self.sentence == index else { return }
+            self.speakSentence(interrupting: false)
         }
     }
 
@@ -338,19 +365,17 @@ final class BookViewController: NSViewController {
         let now = clock()
         let startsSitting = lastFinishedAt.map { now - $0 > Self.sittingGapMs } ?? true
         lastFinishedAt = now
-        store.record(
-            SentenceRecord(
-                bookId: book.id, chapter: book.chapterIndex(ofSentence: sentence),
-                metrics: result.metrics, keystrokes: session.keystrokes, errors: session.typos,
-                histogram: result.histogram, startsSitting: startsSitting))
+        let record = SentenceRecord(
+            bookId: book.id, chapter: book.chapterIndex(ofSentence: sentence),
+            metrics: result.metrics, keystrokes: session.keystrokes, errors: session.typos,
+            histogram: result.histogram, startsSitting: startsSitting)
         do {
-            try store.saveProgress(sentence + 1, for: book.id)
+            try store.finish(record, next: sentence + 1)
             pendingError = nil
         } catch {
             pendingError = "place not saved: \(error.localizedDescription)"
         }
-        NotificationCenter.default.post(name: PracticeViewController.runCompleted, object: nil)
-        show(sentence: sentence + 1)
+        show(sentence: sentence + 1, continuing: true)
     }
 
     // MARK: - Speech
@@ -358,9 +383,13 @@ final class BookViewController: NSViewController {
     /// Speak Sentence: the sentence on screen, read aloud. Counted in the
     /// reading log once per sentence, so a parent can see whether the child is
     /// reading or listening.
-    func speakSentence() {
+    func speakSentence() { speakSentence(interrupting: true) }
+
+    /// `interrupting: false` for a sentence read as it arrives, so the last
+    /// word of the one before is still heard.
+    private func speakSentence(interrupting: Bool) {
         guard let book, sentence < book.sentences.count else { return }
-        speech.speak(sentence: book.sentences[sentence])
+        speech.speak(sentence: book.sentences[sentence], interrupting: interrupting)
         noteHeard()
     }
 
@@ -381,7 +410,6 @@ final class BookViewController: NSViewController {
 
     /// Sentences actually handed to the synthesizer, for `--speechbench`.
     var spokenSentenceCount: Int { speech.sentencesSpoken }
-    var spokenWordCount: Int { speech.wordsSpoken }
     /// Told when an utterance begins, so `--speechbench` can see the
     /// sentence was actually heard rather than merely handed over.
     var onUtteranceStarted: (() -> Void)? {
@@ -397,28 +425,28 @@ final class BookViewController: NSViewController {
         else { return }
         // Off the keystroke's stack, for the reason Practice gives.
         let text = word.text
-        let generation = passageGeneration
+        let generation = speechGeneration
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.passageGeneration == generation, self.speaksWords else { return }
+            guard let self, self.speechGeneration == generation, self.speaksWords else { return }
             self.speech.speak(word: text)
         }
     }
 
     private func soundMistype(at cursorBefore: Int) {
         guard soundsMistypes, let typing = lastTyping,
-            mistypeJustHappened(statuses: typing.statuses, at: cursorBefore),
-            mistypeGate.admit(nowMs: clock())
+            mistypeGate.admitMistype(statuses: typing.statuses, at: cursorBefore, nowMs: clock())
         else { return }
         onMistype?()
     }
 
-    /// Leaving the screen: nothing more is said.
-    func leave() { speech.stop() }
+    /// Leaving the screen: nothing more is said, including what was queued.
+    func leave() {
+        speechGeneration += 1
+        speech.stop()
+    }
 
     func applyTypingPreferences() {
-        typingView.caretStyle = AppPreferences.caretStyle.value
-        typingView.showsWhitespace = AppPreferences.showWhitespace.value
-        typingView.latinInputOnly = AppPreferences.latinInputOnly.value
+        typingView.applyTypingPreferences()
         speaksWords = AppPreferences.speakWords.value
         soundsMistypes = AppPreferences.mistypeSound.value
         if speaksWords || AppPreferences.readSentencesFirst.value { speech.prepare() }
@@ -426,14 +454,15 @@ final class BookViewController: NSViewController {
 
     // MARK: - Drawing
 
-    private func refresh(resetPassage: Bool = false) {
+    private func refresh(resetPassage: Bool = false, continuing: Bool = false) {
         guard let session, let snapshot = try? session.snapshot() else { return }
         lastTyping = snapshot.typing
         if resetPassage {
             mistypeGate.reset()
-            passageGeneration += 1
             tracker.startPassage()
-            speech.setPassage(snapshot.typing.expected)
+            // A sentence that follows the one just finished lets its last
+            // word finish; anything else is a change of page.
+            speech.setPassage(snapshot.typing.expected, interrupting: !continuing)
             if speaksWords || AppPreferences.readSentencesFirst.value { speech.prepare() }
             typingView.setPassage(
                 snapshot.typing.expected, statuses: snapshot.typing.statuses,

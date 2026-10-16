@@ -32,6 +32,12 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
     private var rows: [Row] = []
     private var review: BookReviewController?
     private var onDismiss: () -> Void = {}
+    /// A file being read for import. Import stays off until it is done, so
+    /// two reads can never race to own the review sheet.
+    private var isReading = false
+    /// Bumped when the sheet is dismissed, so a read that finishes after
+    /// Close or Continue shows nothing.
+    private var readGeneration = 0
 
     init(store: BookStore) {
         self.store = store
@@ -56,41 +62,12 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
     }
 
     private func build() {
+        configureTable()
         let content = NSView()
-        table.style = .inset
-        table.rowHeight = 30
-        table.dataSource = self
-        table.delegate = self
-        table.doubleAction = #selector(continuePressed)
-        table.target = self
-        for (id, title, width) in [
-            ("title", "Book", 300.0), ("place", "Read", 90.0), ("sentences", "Sentences", 90.0),
-        ] {
-            let column = NSTableColumn(identifier: .init(id))
-            column.title = title
-            column.width = width
-            table.addTableColumn(column)
-        }
-        let scroll = NSScrollView()
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .noBorder
+        let scroll = SheetTable.scrollView(for: table)
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = .secondaryLabelColor
-        progress.style = .spinning
-        progress.controlSize = .small
-        progress.isDisplayedWhenStopped = false
-        importButton.target = self
-        importButton.action = #selector(importPressed)
-        removeButton.target = self
-        removeButton.action = #selector(removePressed)
-        let close = NSButton(title: "Close", target: self, action: #selector(closePressed))
-        close.keyEquivalent = "\u{1b}"
-        continueButton.target = self
-        continueButton.action = #selector(continuePressed)
-        continueButton.keyEquivalent = "\r"
-        let buttons = NSStackView(views: [importButton, removeButton, progress, NSView(), close, continueButton])
-        buttons.spacing = 8
+        let buttons = makeButtons()
         for subview in [scroll, statusLabel, buttons] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(subview)
@@ -110,6 +87,37 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
             content.heightAnchor.constraint(greaterThanOrEqualToConstant: 300),
         ])
         window?.contentView = content
+    }
+
+    private func configureTable() {
+        table.style = .inset
+        table.rowHeight = 30
+        table.dataSource = self
+        table.delegate = self
+        table.doubleAction = #selector(continuePressed)
+        table.target = self
+        SheetTable.addColumns(
+            to: table, [("title", "Book", 300), ("place", "Read", 90), ("sentences", "Sentences", 90)])
+    }
+
+    /// Import, Remove and the spinner at the leading edge; Close and Continue
+    /// at the trailing one, Continue the default.
+    private func makeButtons() -> NSStackView {
+        progress.style = .spinning
+        progress.controlSize = .small
+        progress.isDisplayedWhenStopped = false
+        importButton.target = self
+        importButton.action = #selector(importPressed)
+        removeButton.target = self
+        removeButton.action = #selector(removePressed)
+        let close = NSButton(title: "Close", target: self, action: #selector(closePressed))
+        close.keyEquivalent = "\u{1b}"
+        continueButton.target = self
+        continueButton.action = #selector(continuePressed)
+        continueButton.keyEquivalent = "\r"
+        let buttons = NSStackView(views: [importButton, removeButton, progress, NSView(), close, continueButton])
+        buttons.spacing = 8
+        return buttons
     }
 
     private func reload() {
@@ -138,7 +146,7 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
         } else {
             removeButton.isEnabled = false
         }
-        importButton.isEnabled = !store.indexIsUnreadable && review == nil
+        importButton.isEnabled = !store.indexIsUnreadable && review == nil && !isReading
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) { updateButtons() }
@@ -230,6 +238,9 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
     @objc private func closePressed() { dismiss() }
 
     private func dismiss() {
+        readGeneration += 1
+        isReading = false
+        progress.stopAnimation(nil)
         guard let window else { return }
         window.sheetParent?.endSheet(window)
         onDismiss()
@@ -255,18 +266,25 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
 
     /// Reads off the main thread, then shows the review sheet.
     func read(_ url: URL) {
+        guard !isReading else { return }
+        isReading = true
         statusLabel.stringValue = "Reading \u{201C}\(url.lastPathComponent)\u{201D}…"
         progress.startAnimation(nil)
-        importButton.isEnabled = false
-        Task.detached(priority: .userInitiated) {
+        updateButtons()
+        let generation = readGeneration
+        // Holds the sheet weakly: reading a long book takes seconds, and the
+        // sheet may be closed meanwhile.
+        Task.detached(priority: .userInitiated) { [weak self] in
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             let result = Result { try BookImport.draft(from: url) }
-            await MainActor.run { [weak self] in self?.readFinished(result) }
+            await MainActor.run { self?.readFinished(result, generation: generation) }
         }
     }
 
-    private func readFinished(_ result: Result<BookDraft, Error>) {
+    private func readFinished(_ result: Result<BookDraft, Error>, generation: Int) {
+        guard generation == readGeneration else { return }
+        isReading = false
         progress.stopAnimation(nil)
         switch result {
         case .failure(let error):
@@ -320,7 +338,6 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
             }
         }
     }
-    var reviewSheet: BookReviewController? { review }
     var status: String { statusLabel.stringValue }
 
     /// Selects a row by its title, as `rowTitles` gives it, and presses
@@ -384,53 +401,12 @@ final class BookReviewController: NSWindowController, NSTableViewDataSource, NST
     }
 
     private func build() {
+        configureTable()
+        let fields = makeFields()
+        let scroll = SheetTable.scrollView(for: table)
+        styleLabels()
+        let buttons = makeButtons()
         let content = NSView()
-        titleField.stringValue = draft.title
-        authorField.stringValue = draft.author
-        titleField.placeholderString = "Title"
-        authorField.placeholderString = "Author"
-        let fields = NSGridView(views: [
-            [NSTextField(labelWithString: "Title:"), titleField],
-            [NSTextField(labelWithString: "Author:"), authorField],
-        ])
-        fields.column(at: 0).xPlacement = .trailing
-        fields.rowSpacing = 6
-
-        table.style = .inset
-        table.rowHeight = 24
-        table.dataSource = self
-        table.delegate = self
-        for (id, title, width) in [
-            ("include", "", 24.0), ("title", "Part", 160.0), ("kind", "Kind", 70.0),
-            ("reason", "Why", 150.0), ("words", "Words", 60.0), ("first", "First line", 240.0),
-        ] {
-            let column = NSTableColumn(identifier: .init(id))
-            column.title = title
-            column.width = width
-            table.addTableColumn(column)
-        }
-        let scroll = NSScrollView()
-        scroll.documentView = table
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .noBorder
-
-        totalsLabel.font = Theme.statFont
-        warningsLabel.textColor = .systemOrange
-        warningsLabel.font = .systemFont(ofSize: 12)
-        warningsLabel.stringValue = draft.warnings.map { "⚠︎ " + $0.message }.joined(separator: "\n")
-        warningsLabel.isHidden = draft.warnings.isEmpty
-        errorLabel.textColor = .systemRed
-        errorLabel.font = .systemFont(ofSize: 12)
-        errorLabel.isHidden = true
-
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
-        cancel.keyEquivalent = "\u{1b}"
-        importButton.target = self
-        importButton.action = #selector(importPressed)
-        importButton.keyEquivalent = "\r"
-        let buttons = NSStackView(views: [NSView(), cancel, importButton])
-        buttons.spacing = 8
-
         let stack = NSStackView(views: [fields, warningsLabel, scroll, totalsLabel, errorLabel, buttons])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -449,6 +425,55 @@ final class BookReviewController: NSWindowController, NSTableViewDataSource, NST
             content.widthAnchor.constraint(greaterThanOrEqualToConstant: 640),
         ])
         window?.contentView = content
+    }
+
+    private func makeFields() -> NSGridView {
+        titleField.stringValue = draft.title
+        authorField.stringValue = draft.author
+        titleField.placeholderString = "Title"
+        authorField.placeholderString = "Author"
+        let fields = NSGridView(views: [
+            [NSTextField(labelWithString: "Title:"), titleField],
+            [NSTextField(labelWithString: "Author:"), authorField],
+        ])
+        fields.column(at: 0).xPlacement = .trailing
+        fields.rowSpacing = 6
+        return fields
+    }
+
+    private func configureTable() {
+        table.style = .inset
+        table.rowHeight = 24
+        table.dataSource = self
+        table.delegate = self
+        SheetTable.addColumns(
+            to: table,
+            [
+                ("include", "", 24), ("title", "Part", 160), ("kind", "Kind", 70),
+                ("reason", "Why", 150), ("words", "Words", 60), ("first", "First line", 240),
+            ])
+    }
+
+    private func styleLabels() {
+        totalsLabel.font = Theme.statFont
+        warningsLabel.textColor = .systemOrange
+        warningsLabel.font = .systemFont(ofSize: 12)
+        warningsLabel.stringValue = draft.warnings.map { "⚠︎ " + $0.message }.joined(separator: "\n")
+        warningsLabel.isHidden = draft.warnings.isEmpty
+        errorLabel.textColor = .systemRed
+        errorLabel.font = .systemFont(ofSize: 12)
+        errorLabel.isHidden = true
+    }
+
+    private func makeButtons() -> NSStackView {
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
+        cancel.keyEquivalent = "\u{1b}"
+        importButton.target = self
+        importButton.action = #selector(importPressed)
+        importButton.keyEquivalent = "\r"
+        let buttons = NSStackView(views: [NSView(), cancel, importButton])
+        buttons.spacing = 8
+        return buttons
     }
 
     /// Words, sittings at the child's speed, and whether there is anything to
@@ -520,9 +545,6 @@ final class BookReviewController: NSWindowController, NSTableViewDataSource, NST
         if onImport(draft) { finish() }
     }
 
-    /// Presses Import, as the button does.
-    func pressImport() { importPressed() }
-
     private func finish() {
         guard let window else { return }
         window.sheetParent?.endSheet(window)
@@ -535,6 +557,28 @@ final class BookReviewController: NSWindowController, NSTableViewDataSource, NST
     var warnings: String { warningsLabel.isHidden ? "" : warningsLabel.stringValue }
     var tableRowCount: Int { table.numberOfRows }
     var isImportEnabled: Bool { importButton.isEnabled }
+}
+
+/// What both sheets' tables share: columns from a list, and the borderless
+/// scroll view the Library's table sits in too.
+@MainActor
+private enum SheetTable {
+    static func addColumns(to table: NSTableView, _ columns: [(id: String, title: String, width: CGFloat)]) {
+        for (id, title, width) in columns {
+            let column = NSTableColumn(identifier: .init(id))
+            column.title = title
+            column.width = width
+            table.addTableColumn(column)
+        }
+    }
+
+    static func scrollView(for table: NSTableView) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .noBorder
+        return scroll
+    }
 }
 
 extension ChapterKind {

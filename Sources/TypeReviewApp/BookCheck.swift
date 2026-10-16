@@ -357,16 +357,6 @@ extension Diagnostics {
         }
     }
 
-    /// The menu items for one action, enabled as the menu bar would decide.
-    private static func menuItems(_ action: Selector) -> [NSMenuItem] {
-        func items(_ menu: NSMenu) -> [NSMenuItem] {
-            menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
-        }
-        let found = NSApp.mainMenu.map(items)?.filter { $0.action == action } ?? []
-        for menu in Set(found.compactMap(\.menu)) { menu.update() }
-        return found
-    }
-
     /// Three sentences, the place after each, and Enter and Tab harmless.
     private static func checkTypingThreeSentences(
         book: BookViewController, store: BookStore, added: Book
@@ -386,7 +376,7 @@ extension Diagnostics {
         guard hear.count == 1, hear[0].isEnabled, !hear[0].isHidden else {
             throw CheckFailure(message: "Book ▸ Hear Sentence is missing, hidden or greyed out")
         }
-        guard menuItems(#selector(AppDelegate.chooseSource(_:))).allSatisfy({ !$0.isEnabled }) else {
+        guard sourceMenuState() == .allDisabled else {
             throw CheckFailure(message: "View ▸ Source is not greyed out on Book")
         }
         guard book.pageText.next == added.sentences[1], book.pageText.place.contains("chapter 1 of 2") else {
@@ -430,7 +420,7 @@ extension Diagnostics {
 
     /// The reading log on disk, and in Statistics.
     private static func checkStatistics(store: BookStore, added: Book) throws {
-        store.flushReading()
+        guard store.flushReading() else { throw CheckFailure(message: "the reading log did not reach disk") }
         let reread = BookStore(profileDirectory: store.directory.deletingLastPathComponent())
         let totals = bookTotals(reread.reading, bookId: added.id)
         guard !reread.readingIsUnreadable, totals.sentences == 3, totals.activeMs > 0,
@@ -444,6 +434,7 @@ extension Diagnostics {
         stats.shelf = { reread.shelf() }
         _ = stats.view
         stats.refresh()
+        try checkKeyTableSurvivesTheMinimumHeight(stats)
         guard stats.bookLines.count == 1, stats.bookLines[0].hasPrefix("\(added.title) — 60%"),
             stats.bookLines[0].contains("3 sentences")
         else {
@@ -492,6 +483,27 @@ extension Diagnostics {
         }
     }
 
+    /// At the Statistics window's smallest, with a book listed, the key
+    /// table still shows. The header once took the whole height. In the
+    /// window the app builds, never ordered on screen.
+    private static func checkKeyTableSurvivesTheMinimumHeight(_ stats: StatsViewController) throws {
+        let window = AppDelegate.makeStatsWindow(for: stats)
+        // Resized here, and the size must not become the one the user's
+        // Statistics window opens at.
+        window.setFrameAutosaveName("")
+        defer {
+            window.contentViewController = nil
+            window.close()
+        }
+        window.setContentSize(window.contentMinSize)
+        window.contentView?.layoutSubtreeIfNeeded()
+        guard stats.keyTableHeight >= StatsViewController.keyTableMinHeight - 0.5 else {
+            throw CheckFailure(
+                message: "at \(Int(window.contentMinSize.height))pt the key table is "
+                    + "\(Int(stats.keyTableHeight))pt tall, under its \(Int(StatsViewController.keyTableMinHeight))pt floor")
+        }
+    }
+
     /// Removing takes the book, its place and its days.
     private static func checkRemove(store: BookStore, book: BookViewController, added: Book) throws {
         try store.remove(added.id)
@@ -503,5 +515,21 @@ extension Diagnostics {
         else {
             throw CheckFailure(message: "removing the book left \(gone.map(\.lastPathComponent)) behind")
         }
+        // A place a remove could not take is taken the next time the shelf
+        // is opened, not left to come back with the book.
+        try Data("{}".utf8).write(to: store.progressURL(added.id))
+        _ = BookStore(profileDirectory: store.directory.deletingLastPathComponent())
+        guard !FileManager.default.fileExists(atPath: store.progressURL(added.id).path) else {
+            throw CheckFailure(message: "a progress file left by a remove was never swept")
+        }
+        // Nor does it come back when the same book is shelved again before
+        // the next launch: a starter book's id never changes.
+        try encodeBookProgress(BookProgress(sentence: 2, lastRead: 0)).write(to: store.progressURL(added.id))
+        try store.add(added)
+        guard store.progress(added.id) == .absent, store.startingSentence(added) == 0 else {
+            throw CheckFailure(message: "shelving a removed book again brought back the place it was removed at")
+        }
+        try store.remove(added.id)
+        book.shelfChanged()
     }
 }

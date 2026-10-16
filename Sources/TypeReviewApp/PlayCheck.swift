@@ -60,18 +60,34 @@ extension Diagnostics {
         window.toolbar?.items.map(\.itemIdentifier.rawValue) ?? []
     }
 
-    /// Whether every View ▸ Source item is enabled, as the menu bar would
-    /// decide it now; nil if there are none to ask.
-    private static func sourceMenuEnabled() -> Bool? {
+    /// Every menu-bar item for an action, enabled as the menu bar would
+    /// decide it now. Shared by the Play and Book checks.
+    static func menuItems(_ action: Selector) -> [NSMenuItem] {
         func items(_ menu: NSMenu) -> [NSMenuItem] {
             menu.items.flatMap { [$0] + ($0.submenu.map(items) ?? []) }
         }
-        let picks = NSApp.mainMenu.map(items)?.filter {
-            $0.action == #selector(AppDelegate.chooseSource(_:))
-        } ?? []
-        guard !picks.isEmpty else { return nil }
-        for menu in Set(picks.compactMap(\.menu)) { menu.update() }
-        return picks.allSatisfy(\.isEnabled)
+        let found = NSApp.mainMenu.map(items)?.filter { $0.action == action } ?? []
+        for menu in Set(found.compactMap(\.menu)) { menu.update() }
+        return found
+    }
+
+    /// The state of the View ▸ Source items, taken together.
+    enum SourceMenuState {
+        /// There are none to ask: a menu that lost them cannot pass for one
+        /// that greys them out.
+        case missing
+        case allEnabled
+        case allDisabled
+        /// Some enabled and some not, which neither screen ever wants.
+        case mixed
+    }
+
+    static func sourceMenuState() -> SourceMenuState {
+        let picks = menuItems(#selector(AppDelegate.chooseSource(_:)))
+        guard !picks.isEmpty else { return .missing }
+        if picks.allSatisfy(\.isEnabled) { return .allEnabled }
+        if picks.allSatisfy({ !$0.isEnabled }) { return .allDisabled }
+        return .mixed
     }
 
     /// The switch, and everything that follows the screen.
@@ -98,7 +114,7 @@ extension Diagnostics {
         guard onPlay == playToolbar else {
             throw CheckFailure(message: "on Play the toolbar shows \(onPlay)")
         }
-        guard sourceMenuEnabled() == false else {
+        guard sourceMenuState() == .allDisabled else {
             throw CheckFailure(message: "View ▸ Source is not greyed out on Play")
         }
         for mode in PlayMode.allCases
@@ -250,7 +266,7 @@ extension Diagnostics {
         else {
             throw CheckFailure(message: "switching back left the toolbar showing \(onPractice)")
         }
-        guard sourceMenuEnabled() == true else {
+        guard sourceMenuState() == .allEnabled else {
             throw CheckFailure(message: "View ▸ Source is not enabled again on Practice")
         }
         guard play.state == .paused else {

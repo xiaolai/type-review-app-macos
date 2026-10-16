@@ -68,8 +68,31 @@ final class StatsViewController: NSViewController {
     /// The Books section: one line and one speed curve per book typed.
     private let booksHeading = NSTextField(labelWithString: "Books")
     private let booksStack = NSStackView()
+    /// The rows scroll inside a bounded band, so a long shelf cannot push the
+    /// key table off the bottom of the window.
+    private let booksScroll = NSScrollView()
+    ///
+    /// The band gives way before the key table does: its preferred height
+    /// yields to the table's floor, down to a floor of its own that still
+    /// shows a row. At the window's minimum height the header had taken it
+    /// all and left the table none.
+    private lazy var booksScrollHeight: NSLayoutConstraint = {
+        let height = booksScroll.heightAnchor.constraint(equalToConstant: 0)
+        height.priority = .defaultHigh
+        return height
+    }()
+    private lazy var booksScrollFloor = booksScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+    private static let booksMaxHeight: CGFloat = 132
+    private static let booksMinHeight: CGFloat = 40
+    /// The least of the key table ever shown: a header and a few rows. Held
+    /// by a required constraint, so the window stops shrinking before the
+    /// table disappears.
+    static let keyTableMinHeight: CGFloat = 96
     private var runObserver: NSObjectProtocol?
     private var dayObserver: NSObjectProtocol?
+    private var bookObserver: NSObjectProtocol?
+    /// The key table's scroll view, once installed.
+    private weak var keyScroll: NSScrollView?
 
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
@@ -151,7 +174,25 @@ final class StatsViewController: NSViewController {
         booksStack.orientation = .vertical
         booksStack.alignment = .leading
         booksStack.spacing = 6
-        let header = NSStackView(views: [summary, streakLabel, metric, calendar, booksHeading, booksStack])
+        let books = FlippedView()
+        booksStack.translatesAutoresizingMaskIntoConstraints = false
+        books.addSubview(booksStack)
+        books.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            booksStack.topAnchor.constraint(equalTo: books.topAnchor),
+            booksStack.leadingAnchor.constraint(equalTo: books.leadingAnchor),
+            booksStack.trailingAnchor.constraint(equalTo: books.trailingAnchor),
+            booksStack.bottomAnchor.constraint(equalTo: books.bottomAnchor),
+        ])
+        booksScroll.documentView = books
+        booksScroll.hasVerticalScroller = true
+        booksScroll.autohidesScrollers = true
+        booksScroll.drawsBackground = false
+        booksScroll.borderType = .noBorder
+        books.widthAnchor.constraint(equalTo: booksScroll.contentView.widthAnchor).isActive = true
+        booksScrollHeight.isActive = true
+        booksScrollFloor.isActive = true
+        let header = NSStackView(views: [summary, streakLabel, metric, calendar, booksHeading, booksScroll])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
@@ -163,6 +204,7 @@ final class StatsViewController: NSViewController {
         // Full width, so the grid has room for all twenty columns rather than
         // being squeezed to the width of the longest label above it.
         calendar.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
+        booksScroll.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         header.translatesAutoresizingMaskIntoConstraints = false
         return header
     }
@@ -178,7 +220,9 @@ final class StatsViewController: NSViewController {
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.keyTableMinHeight),
         ])
+        keyScroll = scroll
     }
 
     /// Re-reads and redisplays. Called when the window opens and whenever a
@@ -197,6 +241,9 @@ final class StatsViewController: NSViewController {
     // Read by `--selftest` and by nothing else. The Statistics window is built
     // lazily when somebody clicks, so everything in it is one refactor away
     // from being broken in a build that otherwise passes.
+
+    /// How tall the key table is laid out, for `--selftest`.
+    var keyTableHeight: CGFloat { keyScroll?.frame.height ?? 0 }
 
     /// Whether the practice grid is showing, and how many cells it holds.
     var calendarState: (hidden: Bool, cells: Int) { (calendar.isHidden, calendar.cellCount) }
@@ -225,18 +272,26 @@ final class StatsViewController: NSViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
+        // And book typing, which finishes no practice run: a sentence typed or
+        // heard, a book added or removed.
+        bookObserver = NotificationCenter.default.addObserver(
+            forName: BookStore.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
     }
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
-        // Both, from one list. Removing them one named field at a time is how
+        // All three, from one list. Removing them one named field at a time is how
         // the second one gets forgotten — which it was, the moment it was
         // added a few lines above.
-        for observer in [runObserver, dayObserver].compactMap({ $0 }) {
+        for observer in [runObserver, dayObserver, bookObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(observer)
         }
         runObserver = nil
         dayObserver = nil
+        bookObserver = nil
     }
 
     func present(results: [RunResult]) {
@@ -374,7 +429,12 @@ final class StatsViewController: NSViewController {
         }
         let empty = booksStack.arrangedSubviews.isEmpty
         booksStack.isHidden = empty
+        booksScroll.isHidden = empty
         booksHeading.isHidden = empty
+        booksStack.layoutSubtreeIfNeeded()
+        let rows = booksStack.fittingSize.height
+        booksScrollHeight.constant = min(rows, Self.booksMaxHeight)
+        booksScrollFloor.constant = min(rows, Self.booksMinHeight)
     }
 
     /// "25 min", "3 h 10 min".
@@ -550,4 +610,10 @@ final class ChapterSpeedView: NSView {
         Theme.caret.setStroke()
         path.stroke()
     }
+}
+
+/// A view whose origin is its top-left, so a stack inside a scroll view
+/// starts at the top rather than the bottom.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

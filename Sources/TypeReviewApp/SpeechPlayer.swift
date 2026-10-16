@@ -122,8 +122,12 @@ final class SpeechPlayer: NSObject {
     /// forgets the old voice, leaving the new one to be resolved by whoever
     /// gets there first — `prepare()` normally, and the first thing to speak
     /// if preparation was somehow missed.
-    func setPassage(_ text: String) {
-        stop()
+    ///
+    /// `interrupting: false` lets the word in flight finish: the Book screen
+    /// moves to the next sentence on the keystroke that completes the last
+    /// word, and stopping there cut that word off.
+    func setPassage(_ text: String, interrupting: Bool = true) {
+        if interrupting { stop() }
         passage = text
         voice = nil
         voiceIsResolved = false
@@ -166,13 +170,18 @@ final class SpeechPlayer: NSObject {
 
     /// A whole sentence, asked for on the Book screen.
     ///
-    /// Interrupts at once, unlike a word: somebody asked to hear this, and
-    /// letting the last word finish first is a delay with nothing to protect.
     /// Never reached from a keystroke — a menu item, a toolbar button, or a
     /// sentence arriving with Read Each Sentence First on.
-    func speak(sentence: String) {
+    ///
+    /// `interrupting: false` queues the sentence behind whatever is still to
+    /// be said. A sentence arriving is read after the last word of the one
+    /// before: any stop, even at a word boundary, empties the synthesizer's
+    /// queue, and the finished word waiting there was never heard. Asked for
+    /// by hand, the sentence is wanted now, and what is speaking stops at its
+    /// next word boundary.
+    func speak(sentence: String, interrupting: Bool = true) {
         resolveVoice()
-        synthesizer.stopSpeaking(at: .immediate)
+        if interrupting { synthesizer.stopSpeaking(at: .word) }
         synthesizer.speak(utterance(sentence))
         sentencesSpoken += 1
     }

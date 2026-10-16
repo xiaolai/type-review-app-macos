@@ -25,7 +25,7 @@ import TypeReviewKit
 /// — only somewhere to send its actions, and a way to read the two things its
 /// menus tick: the source, and the game's mode and rules.
 @MainActor
-final class MainToolbarController: NSObject, NSToolbarDelegate {
+final class MainToolbarController: NSObject, NSToolbarDelegate, NSToolbarItemValidation {
     var onNewText: () -> Void = {}
     var onToggleKeyboard: () -> Void = {}
     var onShowLibrary: () -> Void = {}
@@ -37,6 +37,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     var onChoosePlayRules: (_ gentle: Bool) -> Void = { _ in }
     var onShowBooks: () -> Void = {}
     var onSpeakSentence: () -> Void = {}
+    /// Whether Hear Sentence has a sentence to say, read when AppKit
+    /// validates the toolbar — the menu item asks the same question.
+    var canSpeakSentence: () -> Bool = { false }
     /// Read rather than stored, like `currentChannel`.
     var currentPlay: () -> (mode: PlayMode, gentle: Bool) = { (.words, true) }
     /// Read rather than stored, so the checkmark reflects the channel even when
@@ -308,6 +311,11 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     @objc private func newTextPressed() { onNewText() }
     @objc private func newGamePressed() { onNewGame() }
     @objc private func booksPressed() { onShowBooks() }
+
+    /// Every other item is always available.
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        item.itemIdentifier == Self.speakSentence ? canSpeakSentence() : true
+    }
     @objc private func speakSentencePressed() { onSpeakSentence() }
 
     @objc private func screenPicked(_ sender: NSSegmentedControl) {

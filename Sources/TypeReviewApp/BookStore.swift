@@ -32,8 +32,6 @@ final class BookStore {
     private(set) var readingIsUnreadable = false
     private(set) var reading = ReadingLog()
     private var readingIsDirty = false
-    /// Progress files that exist and could not be read, by book id.
-    private var unreadableProgress: Set<String> = []
     /// The one book open, so a sentence does not cost a file read.
     private var cached: Book?
 
@@ -41,6 +39,13 @@ final class BookStore {
     private let now: () -> Date
     private var timer: Timer?
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+
+    /// Posted whenever the shelf or the reading log changes: a book added
+    /// or removed, a sentence typed or heard. An open Statistics window
+    /// listens, so it never shows a removed book or yesterday's count.
+    static let didChange = Notification.Name("TypeBookStoreDidChange")
+
+    private func changed() { NotificationCenter.default.post(name: Self.didChange, object: self) }
 
     /// How often a dirty reading log reaches disk: the keystroke counter's
     /// interval, for its reasons. Progress is written after every sentence;
@@ -57,6 +62,7 @@ final class BookStore {
         self.now = now
         loadIndex()
         loadReading()
+        sweepLeftovers()
     }
 
     /// Beside the profile, so `--selftest`'s redirect covers these files too.
@@ -118,7 +124,6 @@ final class BookStore {
         let url = progressURL(id)
         guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
         guard let data = try? Data(contentsOf: url), let decoded = try? decodeBookProgress(data) else {
-            unreadableProgress.insert(id)
             return .unreadable
         }
         return .ok(decoded)
@@ -142,8 +147,12 @@ final class BookStore {
     // MARK: - Writing
 
     /// Saves the next sentence to type. One integer, so retrying is safe.
+    ///
+    /// The file is asked about at every save rather than once: one repaired
+    /// by hand is written again at once, and one damaged since the book was
+    /// opened is still never written over.
     func saveProgress(_ sentence: Int, for id: String) throws {
-        guard !unreadableProgress.contains(id) else {
+        guard progress(id) != .unreadable else {
             throw BookStoreError.unreadable(progressURL(id).lastPathComponent)
         }
         let progress = BookProgress(sentence: sentence, lastRead: now().timeIntervalSince1970 * 1000)
@@ -166,6 +175,7 @@ final class BookStore {
         guard !indexIsUnreadable else { throw BookStoreError.unreadable(indexURL.lastPathComponent) }
         guard books.count < maxBooks else { throw BookImportError.tooManyBooks }
         guard !books.contains(where: { $0.id == book.id }) else { throw BookStoreError.alreadyOnShelf }
+        try clearLeftovers(of: book.id)
         try writeDurably(try encodeBook(book), to: bookURL(book.id), in: directory)
         do {
             try commit(books + [book.summary])
@@ -173,18 +183,83 @@ final class BookStore {
             try? FileManager.default.removeItem(at: bookURL(book.id))
             throw error
         }
+        changed()
     }
 
     /// Takes a book off the shelf, with its place and its days in the log.
+    ///
+    /// Off the index first, so the book is gone whatever follows. A file
+    /// that will not go is then reported by name rather than passed over,
+    /// and `sweepLeftovers` tries it again.
     func remove(_ id: String) throws {
         guard !indexIsUnreadable else { throw BookStoreError.unreadable(indexURL.lastPathComponent) }
+        sweepLeftovers()
         try commit(books.filter { $0.id != id })
-        for url in [bookURL(id), progressURL(id)] { try? FileManager.default.removeItem(at: url) }
-        unreadableProgress.remove(id)
         if cached?.id == id { cached = nil }
+        var leftBehind: [String] = []
+        for url in [bookURL(id), progressURL(id)] {
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch CocoaError.fileNoSuchFile {
+                // Already gone is what was asked for.
+            } catch {
+                leftBehind.append(url.lastPathComponent)
+            }
+        }
         reading.remove(bookId: id)
         readingIsDirty = true
-        flushReading()
+        // An unreadable log still holds the book's days, and is said so
+        // rather than passed over.
+        if readingIsUnreadable || !flushReading() { leftBehind.append(readingURL.lastPathComponent) }
+        changed()
+        guard leftBehind.isEmpty else { throw BookStoreError.leftBehind(leftBehind) }
+    }
+
+    /// What an earlier remove could not take away, taken now: the file of a
+    /// book the index no longer names, its place, and its days in the log.
+    /// Run at launch and before each remove, so a file that would not go is
+    /// retried rather than forgotten once the index stopped naming it — a
+    /// progress file left behind is a place that comes back when the same
+    /// starter book is shelved again.
+    ///
+    /// Only over an index that was read: with none, or an unreadable one,
+    /// every book would look unshelved. The same for an unreadable log.
+    private func sweepLeftovers() {
+        guard !indexIsUnreadable, FileManager.default.fileExists(atPath: indexURL.path) else { return }
+        let shelved = Set(books.map(\.id))
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        for name in names where name != indexURL.lastPathComponent && name.hasSuffix(".json") {
+            let stem = String(name.dropLast(".json".count))
+            let id = stem.hasSuffix(".progress") ? String(stem.dropLast(".progress".count)) : stem
+            guard !shelved.contains(id) else { continue }
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
+        }
+        guard !readingIsUnreadable else { return }
+        let unshelved = Set(reading.days.values.flatMap(\.keys)).subtracting(shelved)
+        for id in unshelved { reading.remove(bookId: id) }
+        if !unshelved.isEmpty { readingIsDirty = true }
+    }
+
+    /// What a remove that did not finish left of a book about to be shelved
+    /// under the same id — a starter book, put back before the next launch's
+    /// sweep. Once the index names it again the sweep passes it over, so its
+    /// old place and days would come back as its own. Cleared here, or the
+    /// add is refused with the file that would not go.
+    ///
+    /// An unreadable log is never written, so its days cannot be cleared and
+    /// are not counted either; they are left for the file's owner.
+    private func clearLeftovers(of id: String) throws {
+        do {
+            try FileManager.default.removeItem(at: progressURL(id))
+        } catch CocoaError.fileNoSuchFile {
+            // Nothing left behind.
+        } catch {
+            throw BookStoreError.leftBehind([progressURL(id).lastPathComponent])
+        }
+        guard !readingIsUnreadable, reading.days.values.contains(where: { $0[id] != nil }) else { return }
+        reading.remove(bookId: id)
+        readingIsDirty = true
+        guard flushReading() else { throw BookStoreError.leftBehind([readingURL.lastPathComponent]) }
     }
 
     /// Persists a candidate index and adopts it only once the write is done,
@@ -199,35 +274,47 @@ final class BookStore {
     /// The day a sentence finished on, in the calendar the statistics use.
     func today() -> String { dayKey(now().timeIntervalSince1970 * 1000, calendar: calendar) }
 
-    func record(_ sentence: SentenceRecord) {
+    /// A sentence typed: counted in the log, and the place moved past it.
+    /// One change is posted, after both, so an open Statistics window never
+    /// shows the new count beside the old place. It is posted when the place
+    /// cannot be saved too, because the count did change.
+    func finish(_ sentence: SentenceRecord, next: Int) throws {
+        defer { changed() }
         reading.record(sentence, on: today())
         readingIsDirty = true
+        try saveProgress(next, for: sentence.bookId)
     }
 
     func recordHeard(bookId: String) {
         reading.recordHeard(bookId: bookId, on: today())
         readingIsDirty = true
+        changed()
     }
 
-    func flushReading() {
-        guard readingIsDirty, !readingIsUnreadable else { return }
+    /// Writes the reading log if it has changed. Answers whether it is on
+    /// disk now; an unreadable file is left alone and answers false.
+    @discardableResult
+    func flushReading() -> Bool {
+        guard !readingIsUnreadable else { return false }
+        guard readingIsDirty else { return true }
         reading.pruneHistograms()
         guard let data = try? encodeReadingLog(reading),
             (try? writeDurably(data, to: readingURL, in: readingURL.deletingLastPathComponent())) != nil
-        else { return }
+        else { return false }
         readingIsDirty = false
+        return true
     }
 
     func start() {
         guard timer == nil else { return }
         let timer = Timer.scheduledTimer(withTimeInterval: Self.flushInterval, repeats: true) {
             [weak self] _ in
-            MainActor.assumeIsolated { self?.flushReading() }
+            MainActor.assumeIsolated { _ = self?.flushReading() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
         let flush: @Sendable (Notification) -> Void = { [weak self] _ in
-            MainActor.assumeIsolated { self?.flushReading() }
+            MainActor.assumeIsolated { _ = self?.flushReading() }
         }
         let app = NotificationCenter.default
         let workspace = NSWorkspace.shared.notificationCenter
@@ -248,19 +335,13 @@ final class BookStore {
         ]
     }
 
-    func stop() {
-        flushReading()
-        timer?.invalidate()
-        timer = nil
-        for (center, observer) in observers { center.removeObserver(observer) }
-        observers = []
-    }
 }
 
 enum BookStoreError: Error, Equatable, LocalizedError {
     case unreadable(String)
     case notOnShelf
     case alreadyOnShelf
+    case leftBehind([String])
 
     var errorDescription: String? {
         switch self {
@@ -268,6 +349,9 @@ enum BookStoreError: Error, Equatable, LocalizedError {
             return "\(name) could not be read and will not be overwritten — move or repair it first"
         case .notOnShelf: return "That book is no longer on the shelf."
         case .alreadyOnShelf: return "That book is already on the shelf."
+        case .leftBehind(let names):
+            return "The book is off the shelf, but \(names.joined(separator: " and ")) could not be "
+                + "removed or updated"
         }
     }
 }

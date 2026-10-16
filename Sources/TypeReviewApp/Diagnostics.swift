@@ -1943,42 +1943,13 @@ enum Diagnostics {
                     print("  recorded head:    \(String(recorded.text.prefix(50)).debugDescription)")
                     exit(1)
                 }
-                // Play, after Practice has recorded its run, so the check can
-                // see that a whole game leaves that record alone.
-                let played: String
-                switch playCheck() {
-                case .success(let summary)?:
-                    played = summary
-                case .failure(let failure)?:
-                    print("SELFTEST FAIL: \(failure.message)")
-                    exit(1)
-                case nil:
-                    print("SELFTEST FAIL: there is no Play screen to check")
-                    exit(1)
-                }
-                // The whole profile, not its length: a game that rewrote a
-                // setting, or a result in place, leaves the count alone.
-                guard case .ok(let afterPlay) = store.load(), afterPlay == profile else {
-                    print("SELFTEST FAIL: playing a game changed the profile on disk")
-                    exit(1)
-                }
-                // Book, after Play, for the same reason: typing a book must
-                // leave the profile exactly as it was.
-                let read: String
-                switch bookCheck() {
-                case .success(let summary)?:
-                    read = summary
-                case .failure(let failure)?:
-                    print("SELFTEST FAIL: \(failure.message)")
-                    exit(1)
-                case nil:
-                    print("SELFTEST FAIL: there is no Book screen to check")
-                    exit(1)
-                }
-                guard case .ok(let afterBook) = store.load(), afterBook == profile else {
-                    print("SELFTEST FAIL: typing a book changed the profile on disk")
-                    exit(1)
-                }
+                // Play, then Book, each after Practice has recorded its run,
+                // and each must leave the profile on disk byte for byte as it
+                // was — the file, not a decoding of it, so a rewrite that
+                // decodes the same still fails.
+                let profileBytes = (try? Data(contentsOf: store.fileURL)) ?? Data()
+                let played = screenCheck("Play", "playing a game", playCheck, store, profileBytes)
+                let read = screenCheck("Book", "typing a book", bookCheck, store, profileBytes)
                 // The status item's mark, before the summary. A template
                 // image is only ever read for its alpha, so one that draws
                 // nothing is not a faint icon — it is an empty menu-bar slot,
@@ -2029,6 +2000,32 @@ enum Diagnostics {
             print("SELFTEST FAIL: timed out")
             exit(2)
         }
+    }
+}
+
+extension Diagnostics {
+    /// Runs one screen's check and requires the profile file unchanged after
+    /// it. Exits on any failure; answers the check's summary.
+    fileprivate static func screenCheck(
+        _ screen: String, _ doing: String, _ check: () -> Result<String, CheckFailure>?,
+        _ store: ProfileFileStore, _ profileBytes: Data
+    ) -> String {
+        let summary: String
+        switch check() {
+        case .success(let line)?:
+            summary = line
+        case .failure(let failure)?:
+            print("SELFTEST FAIL: \(failure.message)")
+            exit(1)
+        case nil:
+            print("SELFTEST FAIL: there is no \(screen) screen to check")
+            exit(1)
+        }
+        guard !profileBytes.isEmpty, (try? Data(contentsOf: store.fileURL)) == profileBytes else {
+            print("SELFTEST FAIL: \(doing) changed the profile on disk")
+            exit(1)
+        }
+        return summary
     }
 }
 
