@@ -21,6 +21,9 @@ let package = Package(
             resources: [.copy("Resources")]
         ),
         .executableTarget(name: "TypeReviewApp", dependencies: ["TypeReviewKit"]),
+        // Builds the starter shelf from public-domain texts: `make shelf`.
+        // Never linked into the app.
+        .executableTarget(name: "make-shelf", dependencies: ["TypeReviewKit"], path: "Tools/MakeShelf"),
         .testTarget(
             name: "TypeReviewKitTests",
             dependencies: ["TypeReviewKit"],
