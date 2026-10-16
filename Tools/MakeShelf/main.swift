@@ -48,9 +48,19 @@ do { book = try makeBook(from: draft, id: id, importedAt: 0) } catch { fail("\(f
 
 do {
     try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
-    try encodeBook(book).write(to: shelf.appendingPathComponent("\(id).json"))
     let indexURL = shelf.appendingPathComponent("index.json")
-    var entries = (try? JSONDecoder().decode([Entry].self, from: Data(contentsOf: indexURL))) ?? []
+    // Empty only when there is no index yet. One that cannot be read or
+    // decoded stops the run before either file is written, or adding a book
+    // would write an index naming that book alone. Absence is what the read
+    // reports, not `fileExists`, which also says no for a file it may not see.
+    var entries: [Entry] = []
+    let existing: Data?
+    do {
+        existing = try Data(contentsOf: indexURL)
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        existing = nil
+    }
+    if let existing { entries = try JSONDecoder().decode([Entry].self, from: existing) }
     entries.removeAll { $0.id == id }
     entries.append(
         Entry(
@@ -59,7 +69,9 @@ do {
     entries.sort { $0.id < $1.id }
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-    try (encoder.encode(entries) + Data("\n".utf8)).write(to: indexURL)
+    let index = try encoder.encode(entries) + Data("\n".utf8)
+    try encodeBook(book).write(to: shelf.appendingPathComponent("\(id).json"), options: .atomic)
+    try index.write(to: indexURL, options: .atomic)
 } catch {
     fail("writing \(id): \(error)")
 }

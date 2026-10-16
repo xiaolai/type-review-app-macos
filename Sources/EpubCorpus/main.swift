@@ -47,38 +47,82 @@ enum Input {
     case dataless(String)
 }
 
-func classify(_ path: String) -> Input? {
+/// The regular files of a folder EPUB, relative and sorted: the files
+/// `FolderArchive` reads, so links inside the folder are left out here too.
+///
+/// Nil when any part of the folder could not be listed or looked at: a
+/// listing with a file missing from it would hash as some other book.
+func folderFiles(_ path: String) -> [String]? {
+    let root = URL(fileURLWithPath: path, isDirectory: true)
+    let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+    var failed = false
+    guard
+        let enumerator = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys, errorHandler: { _, _ in
+                failed = true
+                return true
+            })
+    else { return nil }
+    let prefix = root.standardizedFileURL.path + "/"
+    var names: [String] = []
+    for case let url as URL in enumerator {
+        guard let values = try? url.resourceValues(forKeys: Set(keys)) else {
+            failed = true
+            continue
+        }
+        guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+        let full = url.standardizedFileURL.path
+        guard full.hasPrefix(prefix) else {
+            failed = true
+            continue
+        }
+        names.append(String(full.dropFirst(prefix.count)))
+    }
+    return failed ? nil : names.sorted()
+}
+
+/// Classifies the file a path finally names: a link is followed first, so a
+/// link to a file still in iCloud is seen as one, and the book is read and
+/// hashed at its real location.
+func classify(_ listed: String) -> Input? {
+    let path = (listed as NSString).resolvingSymlinksInPath
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return nil }
     if isDataless(path) { return .dataless(path) }
     guard isDirectory.boolValue else { return .file(path) }
-    // A folder EPUB inside another one, or a folder whose files are still
-    // in iCloud.
-    guard let enumerator = FileManager.default.enumerator(atPath: path) else { return nil }
-    for case let name as String in enumerator where isDataless(path + "/" + name) { return .dataless(path) }
+    // A folder whose files are still in iCloud. One that cannot be listed is
+    // still a book: hashing it fails and reports it, and the reader says
+    // what is wrong with it, where dropping it here said nothing.
+    guard let names = folderFiles(path) else { return .folder(path) }
+    if names.contains(where: { isDataless(path + "/" + $0) }) { return .dataless(path) }
     return .folder(path)
 }
 
-/// SHA-256 of a file, or of a folder's names and contents in order.
-func digest(_ input: Input) -> String? {
+struct UnreadableForHashing: Error {
+    let path: String
+}
+
+/// SHA-256 of a file, or of a folder's names and contents in order. Throws
+/// when any part cannot be read: a hash of what happened to be readable
+/// could match another book and hide this one as its duplicate.
+func digest(_ input: Input) throws(UnreadableForHashing) -> String {
+    func contents(_ path: String) throws(UnreadableForHashing) -> Data {
+        do { return try Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) } catch {
+            throw UnreadableForHashing(path: path)
+        }
+    }
     var hasher = SHA256()
     switch input {
     case .file(let path):
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .alwaysMapped) else { return nil }
-        hasher.update(data: data)
+        hasher.update(data: try contents(path))
     case .folder(let path):
-        guard let names = FileManager.default.enumerator(atPath: path)?.allObjects as? [String] else { return nil }
-        for name in names.sorted() {
-            var isDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: path + "/" + name, isDirectory: &isDirectory)
-            if isDirectory.boolValue { continue }
+        guard let names = folderFiles(path) else { throw UnreadableForHashing(path: path) }
+        for name in names {
             hasher.update(data: Data(name.utf8))
-            if let data = try? Data(contentsOf: URL(fileURLWithPath: path + "/" + name), options: .alwaysMapped) {
-                hasher.update(data: data)
-            }
+            hasher.update(data: try contents(path + "/" + name))
         }
-    case .dataless:
-        return nil
+    case .dataless(let path):
+        throw UnreadableForHashing(path: path)
     }
     return hasher.finalize().map { String(format: "%02x", $0) }.joined()
 }
@@ -119,64 +163,77 @@ func endsSentence(_ text: String) -> Bool {
     return ".!?".contains(last)
 }
 
+/// The report's name for why a book was refused.
+func refusalKey(_ error: Error) -> String {
+    guard let error = error as? BookImportError else { return "unexpected error" }
+    switch error {
+    case .copyProtected: return "copy-protected"
+    case .fixedLayout: return "fixed layout"
+    case .picturesOnly: return "pictures only"
+    case .noText: return "no text"
+    case .unreadable: return "unreadable"
+    case .tooLarge: return "too large"
+    case .tooManyBooks, .nothingIncluded: return "other"
+    }
+}
+
+/// Counts one story block's units into `tally`, and answers whether any of
+/// them breaks a rule. `split` is the block's own split, the one the draft
+/// was made from.
+func measureBlock(_ block: BookBlock, _ split: SentenceSplit, isEnglish: Bool, into tally: inout Tally) -> Bool {
+    var bad = split.truncatedPieces > 0
+    tally.truncated += split.truncatedPieces
+    var previousEnded = true
+    for unit in split.sentences {
+        tally.units += 1
+        if unit.trimmingCharacters(in: .whitespaces).isEmpty {
+            tally.empty += 1
+            bad = true
+        }
+        if unit.utf16.count > maxBookSentenceChars {
+            tally.overCap += 1
+            bad = true
+        }
+        if isEnglish && block.kind == .paragraph {
+            tally.englishUnits += 1
+            // A piece of a long sentence cut at the cap starts where the
+            // sentence did not, so only a unit after an ended sentence counts.
+            if previousEnded, let first = unit.unicodeScalars.first, CharacterSet.lowercaseLetters.contains(first) {
+                tally.englishLowercaseStarts += 1
+            }
+        }
+        previousEnded = endsSentence(unit)
+    }
+    return bad
+}
+
 func measure(_ path: String) -> Tally {
     var tally = Tally()
     tally.books = 1
     let contents: EpubContents
+    let splits: [[SentenceSplit]]
     let draft: BookDraft
     do {
         contents = try readEpubContents(at: URL(fileURLWithPath: path))
-        draft = try contents.draft()
-    } catch let error as BookImportError {
-        let key: String
-        switch error {
-        case .copyProtected: key = "copy-protected"
-        case .fixedLayout: key = "fixed layout"
-        case .picturesOnly: key = "pictures only"
-        case .noText: key = "no text"
-        case .unreadable: key = "unreadable"
-        case .tooLarge: key = "too large"
-        case .tooManyBooks, .nothingIncluded: key = "other"
-        }
-        tally.refused[key] = 1
-        return tally
+        // Split once, block by block: the draft is made from these, and the
+        // gate measures the same splits rather than making them again.
+        splits = contents.sources.map { splitBlocks($0.blocks) }
+        draft = try makeDraft(
+            title: contents.title, author: contents.author, sources: contents.sources, blockSplits: splits,
+            tablesDropped: contents.tablesDropped, unreadableFiles: contents.unreadableFiles,
+            imagesSeen: contents.imagesSeen)
     } catch {
-        tally.refused["unexpected error"] = 1
+        tally.refused[refusalKey(error)] = 1
         return tally
     }
     tally.imported = 1
     let isEnglish = !draft.warnings.contains { if case .notEnglish = $0 { return true } else { return false } }
     if isEnglish { tally.english = 1 }
     var bad = false
-    for source in contents.sources where source.kind == .story {
-        for block in source.blocks {
-            let split = splitIntoSentences([block])
-            tally.truncated += split.truncatedPieces
-            if split.truncatedPieces > 0 { bad = true }
-            var previousEnded = true
-            for unit in split.sentences {
-                tally.units += 1
-                if unit.trimmingCharacters(in: .whitespaces).isEmpty {
-                    tally.empty += 1
-                    bad = true
-                }
-                if unit.utf16.count > maxBookSentenceChars {
-                    tally.overCap += 1
-                    bad = true
-                }
-                if isEnglish && block.kind == .paragraph {
-                    tally.englishUnits += 1
-                    // A piece of a long sentence cut at the cap starts where
-                    // the sentence did not, so only a unit after an ended
-                    // sentence counts.
-                    if previousEnded, let first = unit.unicodeScalars.first,
-                        CharacterSet.lowercaseLetters.contains(first)
-                    {
-                        tally.englishLowercaseStarts += 1
-                    }
-                }
-                previousEnded = endsSentence(unit)
-            }
+    for (source, blockSplits) in zip(contents.sources, splits) where source.kind == .story {
+        for (block, split) in zip(source.blocks, blockSplits)
+        where measureBlock(block, split, isEnglish: isEnglish, into: &tally) {
+            bad = true
         }
     }
     if bad { tally.failing.append(path) }
@@ -217,6 +274,7 @@ var books: [String] = []
 var dataless = 0
 var duplicates = 0
 var nested = 0
+var unhashable: [String] = []
 let started = Date()
 // Folder EPUBs contain their own files, and Spotlight lists any `.epub`
 // beneath one too; only the outermost is a book.
@@ -241,8 +299,14 @@ for path in paths.sorted() {
         dataless += 1
     case .file(let file), .folder(let file):
         if case .folder = input { folders.insert(file) }
-        guard let hash = digest(input) else { continue }
-        if seen.insert(hash).inserted { books.append(file) } else { duplicates += 1 }
+        do {
+            if seen.insert(try digest(input)).inserted { books.append(file) } else { duplicates += 1 }
+        } catch {
+            // Never taken for a duplicate, and never dropped: the reader
+            // gets it, and says what is wrong with it.
+            unhashable.append(error.path)
+            books.append(file)
+        }
     }
 }
 
@@ -261,6 +325,8 @@ print("listed            \(paths.count)")
 print("not downloaded    \(dataless)")
 print("duplicates        \(duplicates)")
 print("inside a folder   \(nested)")
+print("unhashable        \(unhashable.count)")
+for path in unhashable.sorted().prefix(20) { print("  \(path)") }
 print("books read        \(tally.books)")
 print("imported          \(tally.imported)")
 for (reason, count) in tally.refused.sorted(by: { $0.key < $1.key }) {
@@ -286,9 +352,10 @@ if perThousand > 3 {
     failed = true
     print(String(format: "FAIL: %.2f lower-case starts per 1,000 English units, more than 3", perThousand))
 }
-if tally.books == 0 {
+// A gate that refused every book has measured nothing, and must not pass.
+if tally.imported == 0 || tally.units == 0 {
     failed = true
-    print("FAIL: no books were read")
+    print("FAIL: \(tally.books) books read, \(tally.imported) imported, \(tally.units) story units measured")
 }
 print(failed ? "EPUB CORPUS FAILED" : "EPUB CORPUS OK")
 exit(failed ? 1 : 0)
