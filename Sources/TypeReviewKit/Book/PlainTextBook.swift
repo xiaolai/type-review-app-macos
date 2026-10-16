@@ -26,6 +26,8 @@ private let chapterHeading = try! NSRegularExpression(
     pattern: "^(chapter|book|part|volume|prologue|epilogue)\\b[^\\n]{0,80}$|^[ivxlcdm]{1,8}\\.?$",
     options: [.caseInsensitive])
 
+private let illustrationMarker = try! NSRegularExpression(pattern: "^\\[(illustration|picture|image)[^\\]]*\\]$", options: [.caseInsensitive])
+
 /// "CHAPTER IV", "Chapter 4.", "BOOK TWO", a Roman numeral alone.
 func isChapterHeading(_ line: String) -> Bool {
     let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -117,12 +119,19 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
             lastWasHeading = false
             continue
         }
+        // "[Illustration]", "[Illustration: Dorothy and Toto]": where a
+        // picture was in the printed book.
+        if lines.count <= 3, matches(illustrationMarker, lines.joined(separator: " ")) {
+            continue
+        }
+        // A heading, and the title printed under it: "Chapter I" then
+        // "The Cyclone", one paragraph of two short lines.
+        if lines.count <= 3, isChapterHeading(lines[0]), lines.allSatisfy({ $0.count <= 80 }) {
+            chapters.append(Pending(title: lines.joined(separator: " "), front: false))
+            lastWasHeading = true
+            continue
+        }
         if lines.count == 1, let line = lines.first {
-            if isChapterHeading(line) {
-                chapters.append(Pending(title: line, front: false))
-                lastWasHeading = true
-                continue
-            }
             if isCapitalTitle(line) {
                 if lastWasHeading, var chapter = chapters.popLast() {
                     // "CHAPTER I." then "THE CYCLONE": one title.

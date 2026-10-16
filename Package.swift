@@ -25,8 +25,9 @@ let package = Package(
             name: "TypeReviewKitTests",
             dependencies: ["TypeReviewKit"],
             // Golden vectors generated from the TypeScript engine. They are
-            // the contract between the two implementations.
-            resources: [.copy("Vectors")]
+            // the contract between the two implementations. Fixtures are the
+            // books the import tests read, all public domain or hand-made.
+            resources: [.copy("Vectors"), .copy("Fixtures")]
         ),
     ]
 )
