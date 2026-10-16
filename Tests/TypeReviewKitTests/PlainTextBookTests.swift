@@ -90,6 +90,51 @@ final class PlainTextBookTests: XCTestCase {
         XCTAssertEqual(typed, ["The wind blew hard."])
     }
 
+    func testCapitalsAwayFromAChapterNumberAreText() throws {
+        // Alice's edition line above its contents, and the words Oz has
+        // written on a slate in the middle of a chapter.
+        let text = """
+            THE MILLENNIUM FULCRUM EDITION 3.0
+
+            CHAPTER I.
+            THE CYCLONE
+
+            At once the cap changed to a slate, on which was written:
+
+            "LET DOROTHY GO TO THE CITY OF EMERALDS"
+
+            The little old woman took the slate from her nose.
+            """
+        let draft = try readPlainTextBook(text, fallbackTitle: "x")
+        let story = draft.chapters.filter { $0.kind == .story }
+        XCTAssertEqual(story.map(\.title), ["CHAPTER I. THE CYCLONE"], "the number's title, and nothing else")
+        XCTAssertTrue(story[0].sentences.contains("\"LET DOROTHY GO TO THE CITY OF EMERALDS\""), "\(story[0].sentences)")
+        XCTAssertFalse(draft.chapters.filter(\.included).flatMap(\.sentences).contains { $0.contains("FULCRUM") })
+    }
+
+    func testItalicUnderscoresAreNotTyped() {
+        XCTAssertEqual(
+            removingEmphasisMarks("the Rabbit actually _took a watch out of its waistcoat-pocket_, and _then_ ran"),
+            "the Rabbit actually took a watch out of its waistcoat-pocket, and then ran")
+        XCTAssertEqual(removingEmphasisMarks("\"_Un_important, your Majesty\""), "\"Unimportant, your Majesty\"")
+        XCTAssertEqual(removingEmphasisMarks("a snake_case name stays"), "a snake_case name stays")
+        XCTAssertEqual(removingEmphasisMarks("one _lonely mark"), "one _lonely mark")
+    }
+
+    func testABookTitledOnlyInCapitalsStillFindsItsChapters() throws {
+        let text = """
+            THE FIRST DAY
+
+            The sun came up over the hill.
+
+            THE SECOND DAY
+
+            It rained all day long.
+            """
+        let draft = try readPlainTextBook(text, fallbackTitle: "x")
+        XCTAssertEqual(draft.chapters.filter { $0.kind == .story }.map(\.title), ["THE FIRST DAY", "THE SECOND DAY"])
+    }
+
     func testANonEnglishTextIsWarnedAbout() throws {
         let text = """
             Il était une fois une petite maison au bord d'un bois. Un vieil homme y vivait avec son chat, et ils étaient très heureux ensemble.

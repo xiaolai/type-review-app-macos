@@ -122,6 +122,15 @@ final class BookTextTests: XCTestCase {
         XCTAssertGreaterThan(split.droppedChars, 0)
     }
 
+    func testAnOrnamentIsDroppedWithoutCountingAsLost() {
+        let split = splitIntoSentences([
+            .paragraph("The end."), .paragraph("*      *      *      *"), .paragraph("...\""),
+        ])
+        XCTAssertEqual(split.sentences, ["The end."])
+        XCTAssertEqual(split.punctuationOnlyDropped, 0, "no letters were there to lose")
+        XCTAssertEqual(split.droppedChars, 0)
+    }
+
     func testTheSameInputAlwaysGivesTheSameSplit() {
         let blocks: [BookBlock] = [
             .paragraph("\u{201C}Where are we?\u{201D} Sam asked. It was late; the moon was up. Mr. Brown slept."),

@@ -28,6 +28,21 @@ private let chapterHeading = try! NSRegularExpression(
 
 private let illustrationMarker = try! NSRegularExpression(pattern: "^\\[(illustration|picture|image)[^\\]]*\\]$", options: [.caseInsensitive])
 
+/// `_took a watch_`: how Project Gutenberg's plain text marks italics. Kept
+/// as written, every one is two underscores a child has to find and type.
+/// The closing mark may sit inside a word — Alice's King says
+/// "_Un_important" — but the opening one starts a word, so `snake_case`
+/// is left alone.
+private let underscoreEmphasis = try! NSRegularExpression(
+    pattern: "(?<![A-Za-z0-9_])_([^_\\s][^_\\n]*?)_")
+
+/// A paragraph's text with italics markers taken off.
+func removingEmphasisMarks(_ text: String) -> String {
+    guard text.contains("_") else { return text }
+    return underscoreEmphasis.stringByReplacingMatches(
+        in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
+}
+
 /// "CHAPTER IV", "Chapter 4.", "BOOK TWO", a Roman numeral alone.
 func isChapterHeading(_ line: String) -> Bool {
     let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -113,6 +128,14 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
     }
     var chapters: [Pending] = [Pending(title: "Beginning", front: true)]
     var lastWasHeading = false
+    // Whether chapters are numbered ("Chapter I", "XII"). In a book that
+    // numbers them, a line in capitals on its own is a title only straight
+    // after a number; anywhere else it is text. Oz has "LET DOROTHY GO TO THE
+    // CITY OF EMERALDS" written on a slate mid-chapter, and Alice prints
+    // "THE MILLENNIUM FULCRUM EDITION 3.0" above its contents: both became
+    // chapters. A book with no numbers at all may title its chapters in
+    // capitals alone, and there the rule still applies.
+    let numbersChapters = paragraphs.contains { $0.count <= 3 && isChapterHeading($0[0]) }
     for lines in paragraphs {
         // A contents list: several lines, most of them chapter headings.
         if lines.count >= 3, lines.filter(isChapterHeading).count * 2 > lines.count {
@@ -132,7 +155,7 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
             continue
         }
         if lines.count == 1, let line = lines.first {
-            if isCapitalTitle(line) {
+            if isCapitalTitle(line), lastWasHeading || !numbersChapters {
                 if lastWasHeading, var chapter = chapters.popLast() {
                     // "CHAPTER I." then "THE CYCLONE": one title.
                     chapter.title += " " + line
@@ -145,7 +168,7 @@ public func readPlainTextBook(_ text: String, fallbackTitle: String) throws -> B
             }
         }
         lastWasHeading = false
-        chapters[chapters.count - 1].blocks.append(.paragraph(lines.joined(separator: " ")))
+        chapters[chapters.count - 1].blocks.append(.paragraph(removingEmphasisMarks(lines.joined(separator: " "))))
     }
 
     let hasChapters = chapters.count > 1

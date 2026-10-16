@@ -48,8 +48,10 @@ public struct SentenceSplit: Sendable, Equatable {
     /// Invisible formatting characters removed before cleaning. Not counted
     /// as lost: nobody could have typed them.
     public var invisibleRemoved = 0
-    /// Units that held nothing but punctuation once cleaned — what is left of
-    /// a line in another script, or a stray `..."`.
+    /// Units that had letters as written and none once cleaned: what is left
+    /// of a line in another script. A unit with no letter even as written —
+    /// a `*  *  *` ornament, a stray `..."` — is dropped without being
+    /// counted, because nothing was lost from it.
     public var punctuationOnlyDropped = 0
     /// Pieces `sanitize` truncated. Always zero; kept so tests can say so.
     public var truncatedPieces = 0
@@ -259,7 +261,11 @@ private func addCleaned(_ raw: String, to split: inout SentenceSplit) {
         if cleaned.truncated { split.truncatedPieces += 1 }
         guard !cleaned.text.isEmpty else { continue }
         guard hasLetterOrDigit(cleaned.text) else {
-            split.punctuationOnlyDropped += 1
+            // Counted only when cleaning took the letters. Alice's
+            // `*  *  *` lines were reported as "part of this book is in
+            // another language", which sends a parent looking for a
+            // language that is not there.
+            if hasLetterOrDigit(piece) { split.punctuationOnlyDropped += 1 }
             continue
         }
         split.sentences += splitLongSentence(cleaned.text)
