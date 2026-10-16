@@ -126,6 +126,7 @@ final class KeystrokeCounter {
         }
         log = KeystrokeLog()
         pending = 0
+        fileIsUnreadable = false
     }
 
     // MARK: - Disk
@@ -145,12 +146,24 @@ final class KeystrokeCounter {
         // An unreadable file is left alone rather than overwritten. It is the
         // only copy of the counts, and a parse failure is at least as likely
         // to be this app's fault as the file's.
-        guard let decoded = try? decodeKeystrokeLog(data) else { return }
+        //
+        // Returning was not enough to keep that promise: the log stayed empty,
+        // and the first flush a minute later wrote the day's few keys over the
+        // year of counts it had just declined to read. The flag is what stops
+        // the write.
+        guard let decoded = try? decodeKeystrokeLog(data) else {
+            fileIsUnreadable = true
+            return
+        }
         log = decoded
     }
 
+    /// Set when `keystrokes.json` exists and could not be read. Counting goes
+    /// on in memory, and nothing is written until the file is erased.
+    private(set) var fileIsUnreadable = false
+
     func flush() {
-        guard pending > 0 else { return }
+        guard pending > 0, !fileIsUnreadable else { return }
         log.add(pending, on: currentDay)
         pending = 0
         log.prune()
