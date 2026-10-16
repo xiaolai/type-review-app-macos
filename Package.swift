@@ -21,6 +21,9 @@ let package = Package(
             resources: [.copy("Resources")]
         ),
         .executableTarget(name: "TypeReviewApp", dependencies: ["TypeReviewKit"]),
+        // `make epub-corpus`: the EPUB reader measured over the books on
+        // this Mac. Local only, never in CI; not part of the app.
+        .executableTarget(name: "EpubCorpus", dependencies: ["TypeReviewKit"]),
         .testTarget(
             name: "TypeReviewKitTests",
             dependencies: ["TypeReviewKit"],

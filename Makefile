@@ -243,7 +243,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest soundcheck speechbench quit-running test remote runner-test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest soundcheck speechbench quit-running test remote runner-test icon clean notarize password-managers epub-corpus version appstore zip release pkg verify-pkg validate upload
 
 all: $(APP)
 
@@ -788,6 +788,20 @@ version:
 	@printf 'build     : %s   (git rev-list --count HEAD)\n' "$(BUILD_NUMBER)"
 	@printf 'tree      : %s\n' \
 		"$$(test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo 'DIRTY — a build from this is not reproducible')"
+
+# The EPUB reader run over every EPUB Spotlight finds on this Mac, the probe's
+# measurements as a gate: it exits non-zero if any unit is empty or over the
+# sentence cap, any piece was cut, or English books start more than 3 units in
+# 1,000 with a lower-case letter. Books iCloud has not downloaded are skipped,
+# not fetched, and copies are read once.
+#
+# Local only, and never in CI: the books are private and mostly copyrighted.
+# It prints numbers and the paths of failing books, and writes nothing beyond
+# the build products every target leaves in .build. Pass paths to measure
+# just those: `make epub-corpus EPUBS="a.epub b.epub"`.
+epub-corpus:
+	swift build -c $(CONFIG) --product EpubCorpus $(LINK_SDK)
+	"$(BIN_DIR)/EpubCorpus" $(EPUBS)
 
 # Re-check the password-manager list against Homebrew and the App Store.
 #
