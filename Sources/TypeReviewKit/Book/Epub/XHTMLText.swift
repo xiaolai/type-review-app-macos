@@ -174,7 +174,8 @@ func literalRanges(_ text: String) -> [NSRange] {
         (Array("<?".utf16), Array("?>".utf16)),
     ]
     func starts(_ prefix: [UInt16], at index: Int) -> Bool {
-        index + prefix.count <= units.count && units[index..<index + prefix.count].elementsEqual(prefix)
+        index + prefix.count <= units.count && units[index] == prefix[0]
+            && units[index..<index + prefix.count].elementsEqual(prefix)
     }
     /// The index just past the first `close` at or after `index`.
     func end(of close: [UInt16], from index: Int) -> Int? {
@@ -190,16 +191,21 @@ func literalRanges(_ text: String) -> [NSRange] {
     let quotes: Set<UInt16> = [UInt16(UInt8(ascii: "\"")), UInt16(UInt8(ascii: "'"))]
     var ranges: [NSRange] = []
     var index = 0
+    // Kinds whose closer a search has already failed to find before the end.
+    // No later opener of that kind can close either, and searching again for
+    // each one made a chapter of unclosed "<!--" quadratic.
+    var unclosable = Set<Int>()
     scan: while index < units.count {
         guard units[index] == lessThan else {
             index += 1
             continue
         }
-        for literal in literals where starts(literal.open, at: index) {
-            if let close = end(of: literal.close, from: index + literal.open.count) {
+        for (kind, literal) in literals.enumerated() where starts(literal.open, at: index) {
+            if !unclosable.contains(kind), let close = end(of: literal.close, from: index + literal.open.count) {
                 ranges.append(NSRange(location: index, length: close - index))
                 index = close
             } else {
+                unclosable.insert(kind)
                 index += literal.open.count
             }
             continue scan
@@ -462,6 +468,7 @@ private final class ChapterReader {
     private var block = BlockBuffer()
     private var inVerse = false
     private var eatSpace = false
+    private let tables = TableJudge()
 
     init(readLayoutTables: Bool) { self.readLayoutTables = readLayoutTables }
 
@@ -498,8 +505,10 @@ private final class ChapterReader {
             .filter { !$0.text.isEmpty }
         guard !lines.isEmpty else { return }
         // A paragraph that is nothing but a link is navigation: "Contents",
-        // "Start Reading", a note's way back.
-        if finished.isAllLink && finished.kind != .heading {
+        // "Start Reading", a note's way back. Not when it is nothing but an
+        // inline title: a chapter's title is often a link back to the
+        // contents, and it is still the title.
+        if finished.isAllLink && finished.kind != .heading && !finished.isAllTitle {
             x.navigationParagraphs += 1
             return
         }
@@ -544,7 +553,10 @@ private final class ChapterReader {
     /// Whether an element and everything in it is left out, counting it
     /// under what it is.
     private func isDropped(_ element: XMLElement, name: String, types: Set<String>, classes: String) -> Bool {
-        guard let drop = dropKind(element, name: name, types: types, classes: classes, readLayoutTables: readLayoutTables)
+        guard
+            let drop = dropKind(
+                element, name: name, types: types, classes: classes, readLayoutTables: readLayoutTables,
+                tables: tables)
         else { return false }
         switch drop {
         case .skipped: break
@@ -646,28 +658,23 @@ private final class ChapterReader {
     }
 }
 
-/// A table that holds data rather than a page: one with a header cell, a
-/// header row or a caption, or a grid of several short cells to a row.
-///
-/// A PDF conversion's page table has none of these — a cell or two to a row,
-/// each holding a page or a column of text — so this never takes a page.
-/// Tables nested inside are judged when the reader reaches them.
 /// Why an element and everything in it is left out of a chapter's text.
 enum DropKind {
     case skipped, image, table, noteMarker, noteBody, pageBreak, hidden
 }
 
 /// The reader's rules for what is left out, with no counting: the reader
-/// counts what it drops, and `isDataTable` measures only what would be kept.
+/// counts what it drops, and `TableJudge` measures only what would be kept.
 func dropKind(
-    _ element: XMLElement, name: String, types: Set<String>, classes: String, readLayoutTables: Bool
+    _ element: XMLElement, name: String, types: Set<String>, classes: String, readLayoutTables: Bool,
+    tables: TableJudge
 ) -> DropKind? {
     if skippedElements.contains(name) || name == "nav" { return .skipped }
     if name == "img" || name == "image" { return .image }
     // A table that says it holds data is left out even where tables are
     // layout: the fallback reads the page tables of a PDF conversion, not a
     // timetable that sits among them.
-    if name == "table" && (!readLayoutTables || isDataTable(element)) { return .table }
+    if name == "table" && (!readLayoutTables || tables.isData(element)) { return .table }
     if !types.isDisjoint(with: noteMarkerTypes) { return .noteMarker }
     // By type or role, and by class: converters often mark notes by class
     // alone (`class="footnotes"`, `x13-BM-Endnotes`).
@@ -683,36 +690,83 @@ func dropKind(
     return nil
 }
 
-/// The text of a node the reader would keep: hidden text, scripts and notes
-/// inside it are not counted.
-private func keptText(_ node: XMLNode) -> String {
-    if node.kind == .text { return textOf(node) }
-    if let element = node as? XMLElement,
-        dropKind(
-            element, name: localName(element), types: structuralTypes(element),
-            classes: attribute(element, "class") ?? "", readLayoutTables: true) != nil
-    {
-        return ""
+/// Whether a table holds data, decided once per table.
+///
+/// Judging a table measures the text its cells keep, and what a cell keeps
+/// depends on whether a table nested in it is data — which measures that
+/// table's cells, and so on down. Without remembering, every level was judged
+/// again for each level above it: thirty nested layout tables in a few
+/// kilobytes cost two to the thirtieth.
+///
+/// What a cell keeps is remembered per node too: measuring a cell walked
+/// everything below it, nested tables included, so each level walked again
+/// what the levels under it had already walked — quadratic in the depth.
+final class TableJudge {
+    private var verdicts: [ObjectIdentifier: Bool] = [:]
+    private var keptCounts: [ObjectIdentifier: Int] = [:]
+    private var leftOut: [ObjectIdentifier: Bool] = [:]
+    /// Nodes whose kept text has been measured, each once. For tests.
+    private(set) var nodesMeasured = 0
+
+    /// A table that holds data rather than a page: one with a header cell, a
+    /// header row or a caption, or a grid of several short cells to a row.
+    ///
+    /// A PDF conversion's page table has none of these — a cell or two to a
+    /// row, each holding a page or a column of text — so this never takes a
+    /// page. Tables nested inside are judged on their own.
+    func isData(_ table: XMLElement) -> Bool {
+        if let known = verdicts[ObjectIdentifier(table)] { return known }
+        var header = false
+        var rows = 0
+        var cells: [Int] = []
+        func visit(_ element: XMLElement) {
+            let name = localName(element)
+            if name == "table" && element !== table { return }
+            // What would not be kept is no evidence either way: a hidden
+            // caption made a page's layout table data, and its prose was lost.
+            if element !== table, isLeftOut(element) { return }
+            if name == "th" || name == "thead" || name == "caption" { header = true }
+            if name == "tr" { rows += 1 }
+            // Measured on what would be kept: a hidden note in every cell made
+            // a timetable's short cells look like a page's long ones.
+            if name == "td" || name == "th" { cells.append(keptCount(element)) }
+            for case let child as XMLElement in element.children ?? [] { visit(child) }
+        }
+        visit(table)
+        let verdict = header || (rows >= 2 && cells.count >= rows * 2 && cells.reduce(0, +) / cells.count < 40)
+        verdicts[ObjectIdentifier(table)] = verdict
+        return verdict
     }
-    return (node.children ?? []).map(keptText).joined()
+
+    private func isLeftOut(_ element: XMLElement) -> Bool {
+        let key = ObjectIdentifier(element)
+        if let known = leftOut[key] { return known }
+        let result = dropKind(
+            element, name: localName(element), types: structuralTypes(element),
+            classes: attribute(element, "class") ?? "", readLayoutTables: true, tables: self) != nil
+        leftOut[key] = result
+        return result
+    }
+
+    /// The characters other than spaces in the text of a node the reader
+    /// would keep: hidden text, scripts, notes and data tables inside it are
+    /// not counted.
+    private func keptCount(_ node: XMLNode) -> Int {
+        let key = ObjectIdentifier(node)
+        if let known = keptCounts[key] { return known }
+        nodesMeasured += 1
+        let count: Int
+        if node.kind == .text {
+            count = textOf(node).reduce(0) { $1.isWhitespace ? $0 : $0 + 1 }
+        } else if let element = node as? XMLElement, isLeftOut(element) {
+            count = 0
+        } else {
+            count = (node.children ?? []).reduce(0) { $0 + keptCount($1) }
+        }
+        keptCounts[key] = count
+        return count
+    }
 }
 
-func isDataTable(_ table: XMLElement) -> Bool {
-    var header = false
-    var rows = 0
-    var cells: [Int] = []
-    func visit(_ element: XMLElement) {
-        let name = localName(element)
-        if name == "table" && element !== table { return }
-        if name == "th" || name == "thead" || name == "caption" { header = true }
-        if name == "tr" { rows += 1 }
-        // Measured on what would be kept: a hidden note in every cell made
-        // a timetable's short cells look like a page's long ones.
-        if name == "td" || name == "th" { cells.append(keptText(element).filter { !$0.isWhitespace }.count) }
-        for case let child as XMLElement in element.children ?? [] { visit(child) }
-    }
-    visit(table)
-    if header { return true }
-    guard rows >= 2, cells.count >= rows * 2 else { return false }
-    return cells.reduce(0, +) / cells.count < 40
-}
+/// `TableJudge.isData` for one table on its own.
+func isDataTable(_ table: XMLElement) -> Bool { TableJudge().isData(table) }

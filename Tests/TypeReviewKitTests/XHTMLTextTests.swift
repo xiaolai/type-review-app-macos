@@ -48,6 +48,17 @@ final class XHTMLTextTests: XCTestCase {
         }
     }
 
+    func testUnclosedLiteralsAreScannedOnce() {
+        // Each "<!--" searched to the end of the file was quadratic: 20,000
+        // openers in 300,000 characters is six billion comparisons. Once a
+        // closer is missing, it is missing for all.
+        let text = String(repeating: "<!--<![CDATA[<?", count: 20_000)
+        let start = Date()
+        XCTAssertEqual(literalRanges(text), [])
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+        XCTAssertEqual(literalRanges("<!-- a --><!-- b"), [NSRange(location: 0, length: 10)])
+    }
+
     func testThePrePassLeavesWhatTheParserReadsAsWritten() throws {
         XCTAssertEqual(
             try entityPrePass("<p><![CDATA[Use &nbsp; literally.]]> a&nbsp;b</p>"),
@@ -239,6 +250,68 @@ final class XHTMLTextTests: XCTestCase {
             """)
         XCTAssertEqual(text.firstHeading, "Chapter One")
         XCTAssertEqual(blockTexts(text), ["He read Moby Dick twice."])
+    }
+
+    func testAnIndentedInlineTitleIsStillAHeading() throws {
+        let text = try chapterOf(
+            """
+            <p>
+                <span epub:type="title">Chapter One</span>
+            </p>
+            <p>It was a cold day in the hills.</p>
+            """)
+        XCTAssertEqual(text.firstHeading, "Chapter One")
+        XCTAssertEqual(blockTexts(text), ["It was a cold day in the hills."])
+    }
+
+    func testALinkedInlineTitleIsAHeadingNotNavigation() throws {
+        let text = try chapterOf(
+            """
+            <p><a href="toc.xhtml"><span epub:type="title">Chapter One</span></a></p>
+            <p>It was a cold day in the hills.</p>
+            """)
+        XCTAssertEqual(text.firstHeading, "Chapter One")
+        XCTAssertEqual(text.navigationParagraphs, 0)
+        XCTAssertEqual(blockTexts(text), ["It was a cold day in the hills."])
+    }
+
+    func testDeeplyNestedLayoutTablesAreJudgedOnce() throws {
+        // Each level was judged again for every level above it: thirty
+        // levels was two to the thirtieth judgements of a few kilobytes.
+        let depth = 30
+        let prose = "<p>" + String(repeating: "The story goes on and on through the page. ", count: 20) + "</p>"
+        let html = String(repeating: "<table><tr><td>", count: depth) + prose
+            + String(repeating: "</td></tr></table>", count: depth)
+        let start = Date()
+        let text = try chapterOf(html)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5)
+        XCTAssertTrue(text.layoutTables)
+        XCTAssertEqual(blockTexts(text).count, 1)
+    }
+
+    func testNestedTablesAreMeasuredOnceEach() throws {
+        // A cell's text was measured by walking everything below it, so each
+        // of the levels walked again what the levels under it had walked.
+        let depth = 50
+        let prose = String(repeating: "<p>The story goes on and on through the page.</p>", count: 200)
+        let html = String(repeating: "<table><tr><td>", count: depth) + prose
+            + String(repeating: "</td></tr></table>", count: depth)
+        let table = try XCTUnwrap(try makeDocument(Data(html.utf8), tidy: false).rootElement())
+        let judge = TableJudge()
+        XCTAssertFalse(judge.isData(table))
+        let nodes = try table.nodes(forXPath: "descendant-or-self::node()").count
+        XCTAssertLessThanOrEqual(judge.nodesMeasured, nodes, "each node once, not once per table above it")
+        XCTAssertGreaterThan(judge.nodesMeasured, 200, "the prose was measured")
+    }
+
+    func testAHiddenCaptionDoesNotMakeAPageTableData() throws {
+        let page = "<tr><td>" + String(repeating: "The story goes on and on through the page. ", count: 20) + "</td></tr>"
+        let table = try XCTUnwrap(
+            try makeDocument(
+                Data("<table><caption hidden=\"hidden\">x</caption><thead hidden=\"hidden\"><tr><th>h</th></tr></thead>\(page)</table>".utf8),
+                tidy: false
+            ).rootElement())
+        XCTAssertFalse(isDataTable(table))
     }
 
     func testTextDroppedAnywayDoesNotMakeADataTableLayout() throws {
