@@ -7,6 +7,17 @@ let maxReadingHistogramEntries = 5_000
 /// streak and the calendar need those for good — and drop the histogram,
 /// which is what would otherwise make the file grow without bound.
 public let maxReadingHistogramDays = 400
+/// Sittings counted per day per book. A sitting starts after ten idle minutes,
+/// so a day holds at most 144; the ceiling is what keeps a damaged file from
+/// asking the statistics to build a run per sitting by the trillion.
+public let maxReadingSittingsPerDay = 200
+/// Sittings the whole log may hold, newest kept: ten years at a sitting
+/// every two hours of a waking day, or centuries at one a day. A run is built
+/// per sitting, and the day ceiling alone still allows millions when every
+/// day is at its limit, which only a damaged file can be. Every kept day has
+/// a sitting, so this bounds the days too — a ceiling on days as well cut off
+/// a real history at ten years, however lightly it had been read.
+public let maxReadingSittings = 100_000
 
 /// One chapter's share of a day: what typing speed by chapter is drawn from.
 public struct ChapterTally: Sendable, Equatable {
@@ -85,7 +96,9 @@ public struct ReadingLog: Sendable, Equatable {
         tally.incorrectChars += sentence.metrics.incorrectChars
         tally.keystrokes += sentence.keystrokes
         tally.errors += sentence.errors
-        if sentence.startsSitting || tally.sittings == 0 { tally.sittings += 1 }
+        if sentence.startsSitting || tally.sittings == 0 {
+            tally.sittings = min(tally.sittings + 1, maxReadingSittingsPerDay)
+        }
         tally.histogram = mergeHistogram(tally.histogram, sentence.histogram)
         var chapter = tally.chapters[sentence.chapter] ?? ChapterTally()
         chapter.activeMs += sentence.metrics.durationMs
@@ -168,7 +181,8 @@ private func decodeTally(_ raw: Any) -> ReadingTally? {
         let activeMs = milliseconds(entry["activeMs"]), let sentences = count(entry["sentences"]),
         let correct = count(entry["correctChars"]), let incorrect = count(entry["incorrectChars"]),
         let keystrokes = count(entry["keystrokes"]), let errors = count(entry["errors"]),
-        let sittings = count(entry["sittings"]), let heard = count(entry["sentencesHeard"])
+        let sittings = count(entry["sittings"]), let heard = count(entry["sentencesHeard"]),
+        sittings <= min(sentences, maxReadingSittingsPerDay)
     else { return nil }
     var tally = ReadingTally()
     tally.activeMs = activeMs
@@ -215,16 +229,43 @@ public func decodeReadingLog(_ data: Data) throws -> ReadingLog {
     }
     var days: [String: [String: ReadingTally]] = [:]
     for (day, value) in object {
-        guard isKeystrokeDayKey(day), let books = value as? [String: Any] else { continue }
+        guard isCalendarDayKey(day), let books = value as? [String: Any] else { continue }
         var row: [String: ReadingTally] = [:]
-        for (book, entry) in books where isValidBookId(book) {
-            if let tally = decodeTally(entry) { row[book] = tally }
+        // One person, one day: the per-day ceiling holds across books too.
+        var daySittings = 0
+        for book in books.keys.sorted() where isValidBookId(book) {
+            guard let tally = decodeTally(books[book]!),
+                daySittings + max(tally.sittings, 1) <= maxReadingSittingsPerDay
+            else { continue }
+            daySittings += max(tally.sittings, 1)
+            row[book] = tally
         }
         if !row.isEmpty { days[day] = row }
+    }
+    var total = 0
+    for day in days.keys.sorted().reversed() {
+        total += days[day]!.values.reduce(0) { $0 + max($1.sittings, 1) }
+        if total > maxReadingSittings { days.removeValue(forKey: day) }
     }
     var log = ReadingLog(days: days)
     log.pruneHistograms()
     return log
+}
+
+/// A day key that names a real date: `YYYY-MM-DD` in shape, and a day the
+/// Gregorian calendar has. `2026-02-31` has the shape, and a calendar handed
+/// it quietly moves it to 3 March, which would count the day's typing on a
+/// day nobody typed.
+public func isCalendarDayKey(_ key: String) -> Bool {
+    guard isKeystrokeDayKey(key) else { return false }
+    let parts = key.split(separator: "-").compactMap { Int($0) }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    guard parts.count == 3, parts[0] >= 1,
+        let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+    else { return false }
+    let back = calendar.dateComponents([.year, .month, .day], from: date)
+    return back.year == parts[0] && back.month == parts[1] && back.day == parts[2]
 }
 
 /// Sorted keys, so an unchanged day writes unchanged bytes.
@@ -380,14 +421,6 @@ public func chapterSpeeds(_ log: ReadingLog, bookId: String) -> [(chapter: Int, 
         guard chapter.activeMs > 0 else { return nil }
         return (index, Double(chapter.correctChars) / charsPerWord / (chapter.activeMs / msPerMinute))
     }
-}
-
-/// Minutes of typing still ahead in a book at a given speed, or nil without one.
-public func estimatedMinutesLeft(book: Book, from sentence: Int, wpm: Double?) -> Double? {
-    guard let wpm, wpm > 0 else { return nil }
-    let remaining = book.sentences.dropFirst(min(sentence, book.sentences.count))
-        .reduce(0) { $0 + $1.utf16.count }
-    return Double(remaining) / charsPerWord / wpm
 }
 
 /// Minutes left in a book without reading its file: the sentences still to

@@ -70,6 +70,77 @@ final class ReadingLogTests: XCTestCase {
         XCTAssertThrowsError(try decodeReadingLog(Data("[1]".utf8)))
     }
 
+    func testADamagedLogCannotAskForRunsByTheMillion() throws {
+        let good = try JSONSerialization.jsonObject(with: try encodeReadingLog({
+            var log = ReadingLog()
+            log.record(sentence(sitting: true), on: "2026-05-01")
+            return log
+        }())) as! [String: Any]
+        var tally = (good["2026-05-01"] as! [String: Any])["b-1"] as! [String: Any]
+        tally["sentences"] = 1_000_000_000_000
+        tally["sittings"] = 1_000_000_000_000
+        let object: [String: Any] = ["2026-05-01": ["b-1": tally]]
+        let log = try decodeReadingLog(JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(log.isEmpty, "more sittings than a day can hold is a file this app did not write")
+        XCTAssertLessThan(readingRuns(log, calendar: calendar("Europe/London")).count, 10)
+
+        var many = ReadingLog()
+        for _ in 0..<(maxReadingSittingsPerDay + 5) { many.record(sentence(sitting: true), on: "2026-05-02") }
+        XCTAssertEqual(many.days["2026-05-02"]!["b-1"]!.sittings, maxReadingSittingsPerDay)
+        XCTAssertEqual(try decodeReadingLog(try encodeReadingLog(many)), many, "a log this app wrote reads back")
+    }
+
+    func testTheSittingCeilingsHoldAcrossBooksAndDays() throws {
+        let good = try JSONSerialization.jsonObject(with: try encodeReadingLog({
+            var log = ReadingLog()
+            log.record(sentence(sitting: true), on: "2026-05-01")
+            return log
+        }())) as! [String: Any]
+        var tally = (good["2026-05-01"] as! [String: Any])["b-1"] as! [String: Any]
+        tally["sentences"] = maxReadingSittingsPerDay
+        tally["sittings"] = maxReadingSittingsPerDay
+        var object: [String: Any] = ["2026-05-01": ["b-1": tally, "b-2": tally, "b-3": tally]]
+        let start = Date(timeIntervalSince1970: 1_600_000_000)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        for offset in 1...600 {
+            object[formatter.string(from: start.addingTimeInterval(Double(offset) * 86_400))] = ["b-1": tally]
+        }
+        let log = try decodeReadingLog(JSONSerialization.data(withJSONObject: object))
+        let perDay = log.days.values.map { $0.values.reduce(0) { $0 + $1.sittings } }
+        XCTAssertLessThanOrEqual(perDay.max() ?? 0, maxReadingSittingsPerDay)
+        XCTAssertLessThanOrEqual(perDay.reduce(0, +), maxReadingSittings)
+        XCTAssertNotNil(log.days[formatter.string(from: start.addingTimeInterval(600 * 86_400))], "the newest are kept")
+        XCTAssertLessThanOrEqual(readingRuns(log, calendar: calendar("Europe/London")).count, maxReadingSittings)
+    }
+
+    func testALongLightHistoryIsKeptWhole() throws {
+        var log = ReadingLog()
+        let start = Date(timeIntervalSince1970: 0)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        for offset in 0..<5_000 {
+            log.record(sentence(sitting: true), on: formatter.string(from: start.addingTimeInterval(Double(offset) * 86_400)))
+        }
+        XCTAssertEqual(try decodeReadingLog(try encodeReadingLog(log)).days.count, 5_000, "over thirteen years, one a day")
+    }
+
+    func testOnlyRealDatesAreKept() throws {
+        XCTAssertTrue(isCalendarDayKey("2024-02-29"))
+        for bad in ["2026-02-31", "2026-13-01", "2026-00-10", "0000-01-01", "2026-2-1"] {
+            XCTAssertFalse(isCalendarDayKey(bad), bad)
+        }
+        let good = try JSONSerialization.jsonObject(with: try encodeReadingLog({
+            var log = ReadingLog()
+            log.record(sentence(sitting: true), on: "2026-05-01")
+            return log
+        }())) as! [String: Any]
+        let object: [String: Any] = ["2026-02-31": good["2026-05-01"]!, "2026-05-01": good["2026-05-01"]!]
+        XCTAssertEqual(Set(try decodeReadingLog(JSONSerialization.data(withJSONObject: object)).days.keys), ["2026-05-01"])
+    }
+
     func testOldDaysKeepTheirTotalsButNotTheirBigrams() {
         var log = ReadingLog()
         for day in 1...5 {
@@ -159,12 +230,6 @@ final class ReadingLogTests: XCTestCase {
         let speeds = chapterSpeeds(log, bookId: "b-1")
         XCTAssertEqual(speeds.map(\.chapter), [0, 1])
         XCTAssertEqual(speeds.map(\.wpm), [20, 10])
-
-        let book = Book(
-            id: "b-1", title: "t", author: "", importedAt: 0, chapters: [BookChapter(title: "", start: 0)],
-            sentences: [String(repeating: "a", count: 100), String(repeating: "b", count: 100)])
-        XCTAssertEqual(estimatedMinutesLeft(book: book, from: 1, wpm: 20), 1)
-        XCTAssertNil(estimatedMinutesLeft(book: book, from: 0, wpm: nil))
 
         // 150 characters over two sentences is 75 a sentence, at 15 wpm: four
         // more sentences are 300 characters, 60 words, four minutes.
