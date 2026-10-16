@@ -832,7 +832,8 @@ a screen: one keyboard, one drawer, never wanted beside the others.
 
 **Splitting happens once, at import, and is stored.** `NLTokenizer`'s output
 can change between macOS versions, and a stored place must not shift when it
-does. The pipeline is the Kit's (`Sources/TypeReviewKit/Book/`): a reader makes
+does. The pipeline is the Kit's (`Sources/TypeReviewKit/Book/`): a reader —
+plain text or EPUB — makes
 blocks — heading, paragraph, verse line, scene break — `repairBlocks` fixes what
 the corpus run found (mojibake, one printed line per paragraph, label
 paragraphs, page numbers, Gutenberg licence text), invisible formatting is
@@ -842,6 +843,22 @@ cuts at 5,000 characters and must never meet a chapter. No unit is empty or
 over 300 characters. The parent then reviews the parts in a sheet — story
 ticked, the rest listed unticked with the reason — and nothing is saved until
 Import.
+
+**EPUB is untrusted input, read in two shapes.** A ZIP file, and the folder
+named `*.epub` that Apple Books keeps — both behind one `BookArchive`, with the
+same limits: 64 MB in all, 10,000 entries, 16 MB an entry, a compression ratio
+of 100, CRC checked, ZIP64 and unsafe names refused. Every XML file goes
+through one parsing function with external entities off, and any file whose
+DOCTYPE has an internal subset or that declares an entity is refused before it
+is parsed; a test fails if a second `XMLDocument` call appears in the Kit.
+`XMLDocument` silently deletes undeclared entities such as `&nbsp;` when the
+XHTML DTD is declared, which the corpus run found in 353 books, so named
+entities are replaced before parsing. Each part of the spine is classified
+with the rule that fired — the book's own tags first, then its guide and
+landmarks, then the shape of the page — and the review sheet shows that
+reason. Copy-protected, fixed-layout and picture-only books are refused with
+a message. Every rule has a fixture built from public-domain or hand-written
+text; none is cut from a copyrighted book.
 
 **Book typing never enters the profile.** Each sentence is a `Session` run with
 passage id `book:<id>:<index>`, over a scratch profile that is never saved: a

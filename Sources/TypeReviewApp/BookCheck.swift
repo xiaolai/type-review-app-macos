@@ -39,6 +39,7 @@ extension Diagnostics {
             try checkUnreadableFilesAreLeftAlone()
             try checkShelf()
             let draft = try checkReview()
+            try checkEpubReview()
             let added = try store.add(draft)
             try checkBookScreen(book: book, window: window, show: show)
             let typed = try checkTypingThreeSentences(book: book, store: store, added: added)
@@ -139,6 +140,193 @@ extension Diagnostics {
         review.setIncluded(true, row: 0)
         review.setIncluded(true, row: 1)
         return review.draft
+    }
+
+    /// An EPUB 2 book with no tags at all — the shape of the
+    /// `untagged-hand-made` fixture, trimmed — as the folder Apple Books
+    /// keeps, so the check reads the folder path as well.
+    private static let untaggedBook: [(path: String, text: String)] = [
+        ("META-INF/container.xml", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+              <rootfiles>
+                <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+              </rootfiles>
+            </container>
+            """#),
+        ("OEBPS/content.opf", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="bookid">
+              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+                <dc:title>The Kite on the Hill</dc:title>
+                <dc:creator>A. N. Example</dc:creator>
+                <dc:language>en</dc:language>
+                <dc:identifier id="bookid">urn:uuid:5f0c2a4e-0000-4000-8000-000000000001</dc:identifier>
+              </metadata>
+              <manifest>
+                <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+                <item id="p1" href="page1.html" media-type="application/xhtml+xml"/>
+                <item id="p2" href="page2.html" media-type="application/xhtml+xml"/>
+                <item id="p3" href="page3.html" media-type="application/xhtml+xml"/>
+                <item id="p4" href="page4.html" media-type="application/xhtml+xml"/>
+                <item id="p5" href="page5.html" media-type="application/xhtml+xml"/>
+                <item id="p6" href="page6.html" media-type="application/xhtml+xml"/>
+                <item id="p7" href="page7.html" media-type="application/xhtml+xml"/>
+                <item id="p8" href="page8.html" media-type="application/xhtml+xml"/>
+              </manifest>
+              <spine toc="ncx">
+                <itemref idref="p1"/>
+                <itemref idref="p2"/>
+                <itemref idref="p3"/>
+                <itemref idref="p4"/>
+                <itemref idref="p5"/>
+                <itemref idref="p6"/>
+                <itemref idref="p7"/>
+                <itemref idref="p8"/>
+              </spine>
+            </package>
+            """#),
+        ("OEBPS/page1.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>Cover</title></head>
+            <body>
+            <div><img src="cover.png" alt="The Kite on the Hill"/></div>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page2.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>The Kite on the Hill</title></head>
+            <body>
+            <p>The Kite on the Hill</p>
+            <p>A. N. Example</p>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page3.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>The Kite on the Hill</title></head>
+            <body>
+            <p>The chapters</p>
+            <ul>
+            <li>1. <a href="page4.html">Chapter One: The Red Kite and the Long String Wound on a Stick</a></li>
+            <li>2. <a href="page5.html">Chapter Two: The Wind Comes Over the Hill at Last</a></li>
+            <li>3. <a href="page6.html">Chapter Three: Up Into the Tall Old Oak Tree by the Field</a></li>
+            <li>4. <a href="page7.html">Chapter Four: Home Again Before the Rain Falls on the Village</a></li>
+            <li>5. <a href="page8.html">About the Writer of This Little Book</a></li>
+            </ul>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page4.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>Chapter One</title></head>
+            <body>
+            <h2>Chapter One: The Red Kite and the Long String</h2>
+            <p>Nell found the kite in the shed behind the house, under a box of old garden tools. It was red, with a long tail made of knotted ribbons, and the paper was only a little torn at one corner.</p>
+            <p>She carried it into the kitchen and laid it on the table. Her grandfather looked up from his newspaper and smiled. "That was your mother's kite," he said. "She flew it on the hill every summer when she was your age."</p>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page5.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>Chapter Two</title></head>
+            <body>
+            <h2>Chapter Two: The Wind Comes Over the Hill</h2>
+            <p>The next morning was bright and cold. Nell ate her porridge quickly, pulled on her boots, and ran out of the gate with the kite held high above her head so that the tail would not drag in the mud.</p>
+            <p>The hill was steeper than it looked from the house. Halfway up she had to stop and catch her breath, and when she turned round she could see the whole village below her: the church, the shop, the bridge, and the thin grey line of smoke rising from her grandfather's chimney.</p>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page6.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>Chapter Three</title></head>
+            <body>
+            <h2>Chapter Three: Up Into the Tall Old Oak Tree</h2>
+            <p>For a long time the kite flew well. Then the wind changed. It swung round from the west and came in short, rough bursts, and the kite began to swoop from side to side like a bird that could not decide where to go.</p>
+            <p>Nell wound in the string as fast as she could, but it was no use. One hard gust tore the kite sideways, and it dropped into the branches of the old oak tree at the edge of the field and stuck there, its tail fluttering.</p>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page7.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>Chapter Four</title></head>
+            <body>
+            <h2>Chapter Four: Home Again Before the Rain Falls</h2>
+            <p>The boy's name was Tom, and his dog was called Biscuit. They walked down the hill together, Nell holding the kite and Tom holding the string, while Biscuit ran ahead and barked at the sheep.</p>
+            <p>Dark clouds were gathering over the far side of the valley. By the time they reached the bridge the first drops of rain were falling, fat and cold, and they began to run.</p>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/page8.html", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+            <head><title>About the Writer</title></head>
+            <body>
+            <h2>About the Writer</h2>
+            <p>A. N. Example lives in a small town by the sea and has flown kites on the same windy hill for many years. This is the first of several little stories written for children who like the outdoors, and for the grown-ups who read with them on rainy days.</p>
+            </body>
+            </html>
+            """#),
+        ("OEBPS/toc.ncx", #"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+              <head><meta name="dtb:uid" content="urn:uuid:5f0c2a4e-0000-4000-8000-000000000001"/></head>
+              <docTitle><text>The Kite on the Hill</text></docTitle>
+              <navMap>
+                <navPoint id="n1" playOrder="1"><navLabel><text>Start</text></navLabel><content src="page1.html"/></navPoint>
+                <navPoint id="n4" playOrder="2"><navLabel><text>One</text></navLabel><content src="page4.html"/></navPoint>
+                <navPoint id="n5" playOrder="3"><navLabel><text>Two</text></navLabel><content src="page5.html"/></navPoint>
+                <navPoint id="n6" playOrder="4"><navLabel><text>Three</text></navLabel><content src="page6.html"/></navPoint>
+                <navPoint id="n7" playOrder="5"><navLabel><text>Four</text></navLabel><content src="page7.html"/></navPoint>
+              </navMap>
+            </ncx>
+            """#),
+        ("mimetype", #"""
+            application/epub+zip
+            """#),
+    ]
+
+    /// An EPUB with no tags, read through Import's own path from a folder:
+    /// the contents page is listed, unticked, with the reason, and the
+    /// chapters are ticked story.
+    private static func checkEpubReview() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TypeReviewBookCheck-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("The Kite on the Hill.epub", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for (path, text) in untaggedBook {
+            let url = folder.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        let draft = try BookImport.draft(from: folder)
+        let review = BookReviewController(draft: draft, wpm: nil)
+        _ = review.window
+        guard draft.title == "The Kite on the Hill", review.tableRowCount == draft.chapters.count else {
+            throw CheckFailure(message: "the EPUB read as \"\(draft.title)\" with \(review.tableRowCount) rows")
+        }
+        guard let contents = draft.chapters.first(where: { $0.reason == "looks like a table of contents" }),
+            !contents.included, contents.kind == .skip
+        else {
+            throw CheckFailure(
+                message: "the untagged EPUB's contents page was not offered unticked: "
+                    + draft.chapters.map { "\($0.title) \($0.kind) \($0.included) \($0.reason)" }
+                    .joined(separator: "; "))
+        }
+        let story = draft.chapters.filter { $0.kind == .story }
+        guard story.count >= 4, story.allSatisfy(\.included), review.warnings.isEmpty else {
+            throw CheckFailure(message: "the untagged EPUB's chapters were not all ticked story")
+        }
     }
 
     private static let bookToolbar: [String] = {

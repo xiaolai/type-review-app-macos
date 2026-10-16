@@ -9,7 +9,7 @@ enum BookImport {
     static let maxTextBytes = maxBookCharacters * 4
 
     static func draft(from url: URL) throws -> BookDraft {
-        if url.pathExtension.lowercased() == "epub" { throw BookImportError.unreadable("EPUB import is not in this build yet") }
+        if url.pathExtension.lowercased() == "epub" { return try readEpubBook(at: url) }
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         if let size = attributes?[.size] as? Int, size > maxTextBytes {
             throw BookImportError.tooLarge("over \(maxTextBytes / 1_000_000) MB of text")
