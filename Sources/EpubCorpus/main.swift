@@ -47,12 +47,23 @@ enum Input {
     case dataless(String)
 }
 
-/// The regular files of a folder EPUB, relative and sorted: the files
-/// `FolderArchive` reads, so links inside the folder are left out here too.
-///
-/// Nil when any part of the folder could not be listed or looked at: a
-/// listing with a file missing from it would hash as some other book.
-func folderFiles(_ path: String) -> [String]? {
+/// What a folder EPUB holds, read without downloading anything.
+struct FolderListing {
+    /// The regular files, relative and sorted: the files `FolderArchive`
+    /// reads, so links inside the folder are left out here too.
+    var names: [String] = []
+    /// Whether anything in it, a folder included, is still in iCloud. A
+    /// dataless folder lists as empty, so checking only the files listed
+    /// let one through to be hashed and read.
+    var hasDataless = false
+    /// False when any part of the folder could not be listed or looked at:
+    /// a listing with a file missing from it would hash as some other book.
+    /// Kept apart from `hasDataless`, so a folder that is both partly in
+    /// iCloud and partly unlistable is still skipped as not downloaded.
+    var complete = true
+}
+
+func folderListing(_ path: String) -> FolderListing {
     let root = URL(fileURLWithPath: path, isDirectory: true)
     let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
     var failed = false
@@ -62,23 +73,32 @@ func folderFiles(_ path: String) -> [String]? {
                 failed = true
                 return true
             })
-    else { return nil }
+    else { return FolderListing(complete: false) }
     let prefix = root.standardizedFileURL.path + "/"
-    var names: [String] = []
+    var listing = FolderListing()
     for case let url as URL in enumerator {
         guard let values = try? url.resourceValues(forKeys: Set(keys)) else {
             failed = true
             continue
         }
-        guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+        guard values.isSymbolicLink != true else { continue }
         let full = url.standardizedFileURL.path
         guard full.hasPrefix(prefix) else {
             failed = true
             continue
         }
-        names.append(String(full.dropFirst(prefix.count)))
+        if isDataless(full) {
+            listing.hasDataless = true
+            // Enumerating a dataless folder would download it.
+            enumerator.skipDescendants()
+            continue
+        }
+        guard values.isRegularFile == true else { continue }
+        listing.names.append(String(full.dropFirst(prefix.count)))
     }
-    return failed ? nil : names.sorted()
+    listing.names.sort()
+    listing.complete = !failed
+    return listing
 }
 
 /// Classifies the file a path finally names: a link is followed first, so a
@@ -90,12 +110,10 @@ func classify(_ listed: String) -> Input? {
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else { return nil }
     if isDataless(path) { return .dataless(path) }
     guard isDirectory.boolValue else { return .file(path) }
-    // A folder whose files are still in iCloud. One that cannot be listed is
-    // still a book: hashing it fails and reports it, and the reader says
-    // what is wrong with it, where dropping it here said nothing.
-    guard let names = folderFiles(path) else { return .folder(path) }
-    if names.contains(where: { isDataless(path + "/" + $0) }) { return .dataless(path) }
-    return .folder(path)
+    // A folder whose files are still in iCloud. One that cannot be listed in
+    // full is still a book: hashing it fails and reports it, and the reader
+    // says what is wrong with it, where dropping it here said nothing.
+    return folderListing(path).hasDataless ? .dataless(path) : .folder(path)
 }
 
 struct UnreadableForHashing: Error {
@@ -116,8 +134,11 @@ func digest(_ input: Input) throws(UnreadableForHashing) -> String {
     case .file(let path):
         hasher.update(data: try contents(path))
     case .folder(let path):
-        guard let names = folderFiles(path) else { throw UnreadableForHashing(path: path) }
-        for name in names {
+        let listing = folderListing(path)
+        guard listing.complete, !listing.hasDataless else {
+            throw UnreadableForHashing(path: path)
+        }
+        for name in listing.names {
             hasher.update(data: Data(name.utf8))
             hasher.update(data: try contents(path + "/" + name))
         }
@@ -261,18 +282,31 @@ final class Shared: @unchecked Sendable {
 }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
-let paths: [String]
+let listed: [String]
 do {
-    paths = arguments.isEmpty ? try spotlightEpubs() : arguments
+    listed = arguments.isEmpty ? try spotlightEpubs() : arguments
 } catch {
     FileHandle.standardError.write(Data("mdfind failed: \(error)\n".utf8))
     exit(2)
+}
+// Every path as the file system finally names it, once, before the sort and
+// the nesting check: a folder EPUB and a file inside it listed through a
+// link to the folder were both read, because only one of them was resolved.
+var canonical = Set<String>()
+var aliases = 0
+let paths = listed.compactMap { path -> String? in
+    let resolved = (path as NSString).resolvingSymlinksInPath
+    guard canonical.insert(resolved).inserted else {
+        aliases += 1
+        return nil
+    }
+    return resolved
 }
 
 var seen = Set<String>()
 var books: [String] = []
 var dataless = 0
-var duplicates = 0
+var duplicates = aliases
 var nested = 0
 var unhashable: [String] = []
 let started = Date()
@@ -321,7 +355,7 @@ DispatchQueue.concurrentPerform(iterations: list.count) { index in
 let tally = shared.result
 let perThousand = tally.englishUnits == 0 ? 0 : Double(tally.englishLowercaseStarts) * 1000 / Double(tally.englishUnits)
 
-print("listed            \(paths.count)")
+print("listed            \(listed.count)")
 print("not downloaded    \(dataless)")
 print("duplicates        \(duplicates)")
 print("inside a folder   \(nested)")
