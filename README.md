@@ -23,6 +23,15 @@ account, no server, no telemetry.
   A second screen of the same window, switched from the toolbar: nothing is
   lost under the default rules, nothing is recorded to your statistics, and
   Letters drops the letters your lessons have unlocked.
+- **Book** — a whole book typed one sentence at a time, with your place kept
+  after every sentence, so a novel can be typed over weeks of short sittings.
+  Import a plain-text or DRM-free EPUB book, or start with *The Wonderful
+  Wizard of Oz* or *Alice's Adventures in Wonderland*, which come with the app.
+  Before anything is saved it shows what it will leave out — contents pages,
+  copyright pages, notes, indexes — and why, and any part can be put back.
+  Made for a parent and a child: choose the book together, and let the child
+  type it. Any sentence or word can be read aloud on request, a setting reads
+  each sentence before it is typed, and the time counts in Statistics.
 - **Keystroke sound, optionally everywhere.** Seven packs — three synthesised
   mechanical profiles, a real typewriter recording, a muted one, a laptop one,
   and off. The synthesised ones sound the key coming back up as well as going
@@ -31,6 +40,7 @@ account, no server, no telemetry.
   login, hide its Dock icon, and be summoned with a shortcut from any app.
 - **Your data is a file you can point at.** One JSON profile under
   Application Support, revealed in Finder from Settings, and importable back.
+  Books and your place in them are kept beside it.
 
 ## Requirements
 
@@ -94,7 +104,8 @@ No analytics, no telemetry, no accounts. The app makes no network requests of
 its own — it links no networking framework and contains no HTTP client; the
 only thing that leaves it is the `type.review` link in About, which hands a URL
 to your browser when you click it. The profile lives on your Mac in one file
-you can read, back up, or delete.
+you can read, back up, or delete; imported books are read once from the file
+you chose and kept beside it, never uploaded.
 
 ## The engine is the website's, checked
 
