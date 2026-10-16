@@ -45,6 +45,7 @@ extension Diagnostics {
             let typed = try checkTypingThreeSentences(book: book, store: store, added: added)
             try checkStatistics(store: store, added: added)
             try checkRemove(store: store, book: book, added: added)
+            try checkBooksSheet(store: store, book: book)
             return .success(typed)
         } catch let failure as CheckFailure {
             return .failure(failure)
@@ -460,6 +461,34 @@ extension Diagnostics {
         UserDefaults.standard.setVolatileDomain(before, forName: UserDefaults.argumentDomain)
         guard stats.calendarSummary.hasSuffix("minutes reading") else {
             throw CheckFailure(message: "the minutes grid describes itself as \"\(stats.calendarSummary)\"")
+        }
+    }
+
+    /// The Books sheet: the shelf listed beside nothing yet imported,
+    /// Continue putting a shelf book on the shelf and opening it, and Remove
+    /// taking it off again.
+    private static func checkBooksSheet(store: BookStore, book: BookViewController) throws {
+        let sheet = BooksSheetController(store: store)
+        sheet.onOpen = { book.open($0) }
+        sheet.onShelfChanged = { book.shelfChanged() }
+        let shelf = BundledShelf.books.map { "shelf:" + $0.title }
+        guard sheet.rowTitles == shelf, let first = BundledShelf.books.first else {
+            throw CheckFailure(message: "the Books sheet lists \(sheet.rowTitles)")
+        }
+        guard sheet.continueWith("shelf:" + first.title) else {
+            throw CheckFailure(message: "the Books sheet has no row for \(first.title)")
+        }
+        guard store.books.map(\.id) == [first.id], book.book?.id == first.id, book.sentence == 0,
+            book.currentSentenceText == first.sentences[0]
+        else {
+            throw CheckFailure(message: "Continue on \(first.title) did not shelve and open it: \(sheet.status)")
+        }
+        let again = BooksSheetController(store: store)
+        again.onShelfChanged = { book.shelfChanged() }
+        guard again.rowTitles.first == first.title, again.confirmRemove(first.title), store.books.isEmpty,
+            book.book == nil
+        else {
+            throw CheckFailure(message: "Remove in the Books sheet left \(store.books.map(\.title))")
         }
     }
 

@@ -42,6 +42,7 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
         window.useSRGBBacking()
         super.init(window: window)
         build()
+        reload()
     }
 
     @available(*, unavailable)
@@ -208,17 +209,22 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
-                guard response == .alertFirstButtonReturn, let self else { return }
-                do {
-                    try self.store.remove(book.id)
-                    self.statusLabel.stringValue = ""
-                } catch {
-                    self.statusLabel.stringValue = error.localizedDescription
-                }
-                self.onShelfChanged()
-                self.reload()
+                guard response == .alertFirstButtonReturn else { return }
+                self?.remove(book)
             }
         }
+    }
+
+    /// What Remove does once it is confirmed.
+    private func remove(_ book: BookSummary) {
+        do {
+            try store.remove(book.id)
+            statusLabel.stringValue = ""
+        } catch {
+            statusLabel.stringValue = error.localizedDescription
+        }
+        onShelfChanged()
+        reload()
     }
 
     @objc private func closePressed() { dismiss() }
@@ -315,6 +321,23 @@ final class BooksSheetController: NSWindowController, NSTableViewDataSource, NST
         }
     }
     var reviewSheet: BookReviewController? { review }
+    var status: String { statusLabel.stringValue }
+
+    /// Selects a row by its title, as `rowTitles` gives it, and presses
+    /// Continue. False when there is no such row.
+    func continueWith(_ title: String) -> Bool {
+        guard let row = rowTitles.firstIndex(of: title) else { return false }
+        table.selectRowIndexes([row], byExtendingSelection: false)
+        continuePressed()
+        return true
+    }
+
+    /// Removes a book by title as a confirmed Remove would, without the alert.
+    func confirmRemove(_ title: String) -> Bool {
+        guard let row = rowTitles.firstIndex(of: title), case .book(let book) = rows[row] else { return false }
+        remove(book)
+        return true
+    }
 }
 
 /// The parent's review of an imported book, before anything is saved.
