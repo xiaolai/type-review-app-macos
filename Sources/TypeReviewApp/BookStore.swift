@@ -256,9 +256,14 @@ final class BookStore {
         } catch {
             throw BookStoreError.leftBehind([progressURL(id).lastPathComponent])
         }
-        guard !readingIsUnreadable, reading.days.values.contains(where: { $0[id] != nil }) else { return }
-        reading.remove(bookId: id)
-        readingIsDirty = true
+        guard !readingIsUnreadable else { return }
+        if reading.days.values.contains(where: { $0[id] != nil }) {
+            reading.remove(bookId: id)
+            readingIsDirty = true
+        }
+        // Flushed even when the tally is already gone from memory: a removal
+        // whose write failed left it gone here and still on disk, and the
+        // next launch would read it back as this book's.
         guard flushReading() else { throw BookStoreError.leftBehind([readingURL.lastPathComponent]) }
     }
 

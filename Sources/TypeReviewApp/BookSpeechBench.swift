@@ -6,6 +6,10 @@ extension Diagnostics {
     /// it silent. Generous: the first utterance of a launch builds the
     /// synthesizer.
     fileprivate static let sentenceStartSeconds: Double = 8
+    /// How long the first sentence may take to finish speaking before the
+    /// second is timed. A sentence read aloud is a few seconds; this only
+    /// keeps a voice that never ends from hanging the bench.
+    fileprivate static let sentenceFinishSeconds: Double = 60
 
     /// The Book screen's sentence speech, for `--speechbench`: offered,
     /// spoken, and never on the typing path.
@@ -44,6 +48,8 @@ private final class SentenceBench {
     private let book = BookViewController()
     /// What to call when the next utterance begins.
     private var onStart: (() -> Void)?
+    /// What to call when the next utterance ends.
+    private var onEnd: (() -> Void)?
 
     /// Sets up the shelf and the preferences. Anything that fails here has
     /// already been put back.
@@ -74,30 +80,59 @@ private final class SentenceBench {
             self.onStart = nil
             waiting?()
         }
+        book.onUtteranceEnded = { [weak self] _ in
+            guard let self else { return }
+            let waiting = self.onEnd
+            self.onEnd = nil
+            waiting?()
+        }
         _ = book.view
     }
 
     func tearDown() {
         book.leave()
         book.onUtteranceStarted = nil
+        book.onUtteranceEnded = nil
         UserDefaults.standard.setVolatileDomain(argumentsBefore, forName: UserDefaults.argumentDomain)
         try? FileManager.default.removeItem(at: directory)
     }
 
     /// Calls `then` when the next utterance begins, or fails after the
     /// deadline. Whichever comes first wins; the other is ignored.
-    private func awaitStart(_ what: String, then: @escaping (Result<Void, CheckFailure>) -> Void) {
+    ///
+    /// `afterSpeech` times the deadline from when the voice falls quiet, not
+    /// from now: a sentence read as it arrives waits for the one before to
+    /// finish, and a long one would otherwise use up the deadline speaking.
+    /// That wait has a bound of its own.
+    private func awaitStart(
+        _ what: String, afterSpeech: Bool = false, then: @escaping (Result<Void, CheckFailure>) -> Void
+    ) {
         var settled = false
-        onStart = {
+        func settle(_ result: Result<Void, CheckFailure>) {
             guard !settled else { return }
             settled = true
-            then(.success(()))
+            onStart = nil
+            onEnd = nil
+            then(result)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Diagnostics.sentenceStartSeconds) { [weak self] in
-            guard !settled else { return }
-            settled = true
-            self?.onStart = nil
-            then(.failure(CheckFailure(message: "\(what) was handed over and never began speaking")))
+        onStart = { settle(.success(())) }
+        func armDeadline() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Diagnostics.sentenceStartSeconds) {
+                settle(.failure(CheckFailure(message: "\(what) was handed over and never began speaking")))
+            }
+        }
+        // Quiet already: the sentence before finished while it was typed.
+        guard afterSpeech, book.isSpeechBusy else { return armDeadline() }
+        // The finish bound stands down once the voice falls quiet; from then
+        // on only the start deadline can fail the wait.
+        var quiet = false
+        onEnd = {
+            quiet = true
+            armDeadline()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Diagnostics.sentenceFinishSeconds) {
+            guard !quiet else { return }
+            settle(.failure(CheckFailure(message: "the sentence before \(what) never finished speaking")))
         }
     }
 
@@ -125,7 +160,7 @@ private final class SentenceBench {
             }
             // Spoken: the next sentence is read on the next turn, and begins
             // speaking itself.
-            awaitStart("the second sentence") { [self] second in
+            awaitStart("the second sentence", afterSpeech: true) { [self] second in
                 if case .failure(let failure) = second { return finish(.failure(failure)) }
                 guard book.spokenSentenceCount == 2 else {
                     return finish(.failure(CheckFailure(message: "the next sentence was not read when it arrived")))

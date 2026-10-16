@@ -144,6 +144,33 @@ final class StatsViewController: NSViewController {
         return scroll
     }
 
+    /// The Books section: its heading, and its rows in a scroll view of their
+    /// own, which gives way before the key table does.
+    private func configureBooks() {
+        booksHeading.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        booksStack.orientation = .vertical
+        booksStack.alignment = .leading
+        booksStack.spacing = 6
+        let books = FlippedView()
+        booksStack.translatesAutoresizingMaskIntoConstraints = false
+        books.addSubview(booksStack)
+        books.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            booksStack.topAnchor.constraint(equalTo: books.topAnchor),
+            booksStack.leadingAnchor.constraint(equalTo: books.leadingAnchor),
+            booksStack.trailingAnchor.constraint(equalTo: books.trailingAnchor),
+            booksStack.bottomAnchor.constraint(equalTo: books.bottomAnchor),
+        ])
+        booksScroll.documentView = books
+        booksScroll.hasVerticalScroller = true
+        booksScroll.autohidesScrollers = true
+        booksScroll.drawsBackground = false
+        booksScroll.borderType = .noBorder
+        books.widthAnchor.constraint(equalTo: booksScroll.contentView.widthAnchor).isActive = true
+        booksScrollHeight.isActive = true
+        booksScrollFloor.isActive = true
+    }
+
     private func makeHeader() -> NSStackView {
         grouping.selectedSegment = 0
         grouping.target = self
@@ -170,28 +197,7 @@ final class StatsViewController: NSViewController {
         metric.isBordered = false
         metric.controlSize = .small
         metric.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        booksHeading.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        booksStack.orientation = .vertical
-        booksStack.alignment = .leading
-        booksStack.spacing = 6
-        let books = FlippedView()
-        booksStack.translatesAutoresizingMaskIntoConstraints = false
-        books.addSubview(booksStack)
-        books.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            booksStack.topAnchor.constraint(equalTo: books.topAnchor),
-            booksStack.leadingAnchor.constraint(equalTo: books.leadingAnchor),
-            booksStack.trailingAnchor.constraint(equalTo: books.trailingAnchor),
-            booksStack.bottomAnchor.constraint(equalTo: books.bottomAnchor),
-        ])
-        booksScroll.documentView = books
-        booksScroll.hasVerticalScroller = true
-        booksScroll.autohidesScrollers = true
-        booksScroll.drawsBackground = false
-        booksScroll.borderType = .noBorder
-        books.widthAnchor.constraint(equalTo: booksScroll.contentView.widthAnchor).isActive = true
-        booksScrollHeight.isActive = true
-        booksScrollFloor.isActive = true
+        configureBooks()
         let header = NSStackView(views: [summary, streakLabel, metric, calendar, booksHeading, booksScroll])
         header.orientation = .vertical
         header.alignment = .leading

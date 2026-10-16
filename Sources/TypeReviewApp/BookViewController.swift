@@ -416,6 +416,14 @@ final class BookViewController: NSViewController {
         get { speech.onWordStarted }
         set { speech.onWordStarted = newValue }
     }
+    /// Told when an utterance ends, so `--speechbench` can time the next
+    /// sentence from when the voice was free to begin it.
+    var onUtteranceEnded: ((Int) -> Void)? {
+        get { speech.onWordEnded }
+        set { speech.onWordEnded = newValue }
+    }
+    /// Whether anything is being said or waiting to be.
+    var isSpeechBusy: Bool { speech.isBusy }
 
     private func speakFinishedWord(after cursorBefore: Int) {
         guard speaksWords, let typing = lastTyping,
