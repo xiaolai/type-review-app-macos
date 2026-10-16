@@ -120,7 +120,20 @@ private struct PendingChapter {
 
 /// A paragraph's printed lines as one line of text.
 private func paragraphText(_ lines: some Sequence<String>) -> String {
-    removingEmphasisMarks(lines.reduce("") { $0.isEmpty ? $1 : joinWrapped($0, $1) })
+    // The glue depends on how the text so far ends, which a short line can
+    // share with the line before it: "word-" then "-" ends "--", a dash.
+    var pieces: [String] = []
+    var tail = ""
+    for line in lines {
+        if !pieces.isEmpty {
+            let glue = wrapGlue(after: tail)
+            pieces.append(glue)
+            tail += glue
+        }
+        pieces.append(line)
+        tail = String((tail + line).suffix(2))
+    }
+    return removingEmphasisMarks(pieces.joined())
 }
 
 /// The paragraphs sorted into chapters by their headings. The first chapter

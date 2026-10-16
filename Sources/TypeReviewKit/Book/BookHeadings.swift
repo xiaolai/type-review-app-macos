@@ -7,8 +7,11 @@ import Foundation
 private let numberWords =
     "one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
     + "sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
+private let unitOrdinals = "first|second|third|fourth|fifth|sixth|seventh|eighth|ninth"
 private let ordinalWords =
-    "first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|last"
+    "(?:(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-)?(?:\(unitOrdinals))|tenth|eleventh|twelfth|"
+    + "thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|thirtieth|"
+    + "fortieth|fiftieth|sixtieth|seventieth|eightieth|ninetieth|hundredth|last"
 /// A Roman numeral that is well formed, so "mild" and "did" are not one.
 private let roman = "(?=[ivxlcdm])m{0,3}(?:cm|cd|d?c{0,3})(?:xc|xl|l?x{0,3})(?:ix|iv|v?i{0,3})"
 /// What follows "Chapter": "4", "IV", "Two", "Twenty-one", "the First".
@@ -49,7 +52,7 @@ func numberedHeadingShape(_ line: String) -> HeadingShape? {
     else { return nil }
     let rest = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
     if rest.isEmpty || match.range(at: 2).location != NSNotFound { return .complete }
-    return isTitleCased(rest) || isCapitalTitle(rest) ? .runOn : nil
+    return isCasedAsTitle(rest) ? .runOn : nil
 }
 
 func isNumberedChapterHeading(_ line: String) -> Bool { numberedHeadingShape(line) != nil }
@@ -70,7 +73,7 @@ private let minorWords: Set<String> = [
 /// Every word but the minor ones capitalised: "Who Stole the Tarts?", "The
 /// Boy Who Lived". Prose never is — "I saw Mary." has "saw".
 func isTitleCased(_ text: String) -> Bool {
-    let words = text.split(separator: " ").map { word in String(word.drop { !$0.isLetter && !$0.isNumber }) }
+    let words = text.split(whereSeparator: { $0.isWhitespace }).map { word in String(word.drop { !$0.isLetter && !$0.isNumber }) }
         .filter { !$0.isEmpty }
     guard !words.isEmpty else { return false }
     return words.enumerated().allSatisfy { index, word in
@@ -104,7 +107,18 @@ func isCapitalTitle(_ line: String) -> Bool {
 func isTitleLine(_ line: String) -> Bool {
     let trimmed = line.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty, trimmed.count <= 80 else { return false }
-    return isTitleCased(trimmed) || isCapitalTitle(trimmed)
+    return isCasedAsTitle(trimmed)
+}
+
+/// Cased as a title, in capitals or in title case. A line in capitals is
+/// held to `isCapitalTitle`, so "HELP!" — every word capitalised, and
+/// shouting — is not a title in either reading.
+func isCasedAsTitle(_ text: String) -> Bool {
+    let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }
+    if !letters.isEmpty, letters.allSatisfy({ !CharacterSet.lowercaseLetters.contains($0) }) {
+        return isCapitalTitle(text)
+    }
+    return isTitleCased(text)
 }
 
 /// Two printed lines of one paragraph, joined. A word broken across them keeps

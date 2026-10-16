@@ -86,7 +86,6 @@ private struct ReadItem {
     /// Where it sits in the package's spine, counting the files that could
     /// not be read.
     let spineIndex: Int
-    let path: String
     let text: ChapterText
     var classification: Classification
     let label: String
@@ -121,7 +120,7 @@ private func loadSpineItems(
         let label = package.tableOfContentsLabels[spine.path] ?? ""
         items.append(
             ReadItem(
-                spineIndex: spineIndex, path: spine.path, text: text,
+                spineIndex: spineIndex, text: text,
                 classification: classifySpineItem(spineFacts(spine, text: text, label: label, package: package)),
                 label: label))
     }
@@ -177,15 +176,6 @@ func isGutenbergLicence(_ text: String, characters: Int) -> Bool {
         || text.range(of: "*** END OF", options: .caseInsensitive) != nil
     return nearTop && licence && !holdsWholeBook(text)
 }
-
-/// Project Gutenberg's markers, in the forms `repairBlocks` cuts on: with or
-/// without the stars, "THE" or "THIS", and the older "End of Project
-/// Gutenberg's …". The start marker takes the rest of its line, to the
-/// closing stars when there are any.
-private let gutenbergStart = try! NSRegularExpression(
-    pattern: "START OF TH[A-Z]*\\s+PROJECT GUTENBERG(?:[^*]{0,200}\\*{3})?", options: [.caseInsensitive])
-private let gutenbergEnd = try! NSRegularExpression(
-    pattern: "(?:\\*{3}\\s*)?END OF (?:TH[A-Z]*\\s+)?PROJECT GUTENBERG", options: [.caseInsensitive])
 
 /// A file with both of Project Gutenberg's markers and a story between them:
 /// a short book in one file, whose header and licence `repairBlocks` cuts.

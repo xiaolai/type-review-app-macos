@@ -93,9 +93,15 @@ func endsSentence(_ text: String) -> Bool {
 
 private let numberOnly = try! NSRegularExpression(pattern: "^[\\[(]?\\d{1,4}[\\])]?\\.?$")
 
-private func containsGutenberg(_ text: String) -> Bool {
-    text.range(of: "PROJECT GUTENBERG", options: .caseInsensitive) != nil
-}
+/// Project Gutenberg's markers: with or without the stars, "THE" or "THIS",
+/// and the older "End of Project Gutenberg's …". The start marker takes the
+/// rest of its line, to the closing stars when there are any. One pair, used
+/// both to cut a chapter file and to tell a whole short book from a licence,
+/// so a book kept for its markers always has them cut.
+let gutenbergStart = try! NSRegularExpression(
+    pattern: "START OF TH[A-Z]*\\s+PROJECT GUTENBERG(?:[^*]{0,200}\\*{3})?", options: [.caseInsensitive])
+let gutenbergEnd = try! NSRegularExpression(
+    pattern: "(?:\\*{3}\\s*)?END OF (?:TH[A-Z]*\\s+)?PROJECT GUTENBERG", options: [.caseInsensitive])
 
 /// Repairs one file's blocks before they are split into sentences.
 ///
@@ -127,18 +133,11 @@ private func repairEncoding(_ blocks: [BookBlock], _ report: inout RepairReport)
 
 /// Project Gutenberg's own matter, when it sits inside a chapter file.
 private func cutGutenbergMatter(_ blocks: inout [BookBlock], _ report: inout RepairReport) {
-    if let start = blocks.lastIndex(where: {
-        let text = $0.lines.joined(separator: " ")
-        return containsGutenberg(text) && text.range(of: "START OF TH", options: .caseInsensitive) != nil
-    }) {
+    if let start = blocks.lastIndex(where: { matches(gutenbergStart, $0.lines.joined(separator: " ")) }) {
         blocks.removeFirst(start + 1)
         report.gutenbergCuts += 1
     }
-    if let end = blocks.firstIndex(where: {
-        let text = $0.lines.joined(separator: " ")
-        return containsGutenberg(text)
-            && (text.range(of: "END OF TH", options: .caseInsensitive) != nil || text.hasPrefix("End of"))
-    }) {
+    if let end = blocks.firstIndex(where: { matches(gutenbergEnd, $0.lines.joined(separator: " ")) }) {
         blocks.removeSubrange(end...)
         report.gutenbergCuts += 1
     }
@@ -172,8 +171,9 @@ private func markLeadingLabels(_ blocks: inout [BookBlock], label: String, _ rep
         // that the next paragraph continues in lower case is a printed line of
         // prose: "Book One Was the Best" / "of all the summers". "Chapter 1"
         // stays a label whatever follows it.
-        let continues = blocks[(index + 1)...].first(where: { $0.kind == .paragraph }).map {
-            startsLowercase($0.lines[0].trimmingCharacters(in: .whitespaces))
+        let next = index + 1 < blocks.count ? blocks[index + 1] : nil
+        let continues = next.map {
+            $0.kind == .paragraph && startsLowercase($0.lines[0].trimmingCharacters(in: .whitespaces))
         } ?? false
         let isLabel = tocLabel || shape == .complete || (!continues && (shape == .runOn || isCapitalTitle(text)))
         guard isLabel else { break }

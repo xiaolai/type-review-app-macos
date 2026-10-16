@@ -275,6 +275,20 @@ final class BookRepairTests: XCTestCase {
         XCTAssertEqual(report.labelsMadeHeadings, 0)
     }
 
+    func testOnlyTheNextBlockCanContinueALabel() {
+        let (blocks, _) = repairBlocks([
+            .paragraph("THE TITLE"), .heading("Chapter 1"), .paragraph("once upon a time there was a fox."),
+        ])
+        XCTAssertEqual(blocks.first, .heading("THE TITLE"))
+    }
+
+    func testEveryGutenbergEndMarkerIsCut() {
+        for marker in ["END OF PROJECT GUTENBERG'S THE BOAT", "End of the Project Gutenberg EBook of The Boat"] {
+            let (blocks, _) = repairBlocks([.paragraph("The river ran fast."), .paragraph(marker), .paragraph("License.")])
+            XCTAssertEqual(blocks, [.paragraph("The river ran fast.")], marker)
+        }
+    }
+
     func testAChapterNumberStaysALabelWhateverFollows() {
         let (blocks, _) = repairBlocks([.paragraph("Chapter 1"), .paragraph("once upon a time there was a fox.")])
         XCTAssertEqual(blocks, [.heading("Chapter 1"), .paragraph("once upon a time there was a fox.")])

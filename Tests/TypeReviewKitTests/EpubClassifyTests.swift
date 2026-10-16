@@ -197,6 +197,22 @@ final class EpubClassifyTests: XCTestCase {
         XCTAssertEqual(draft.chapters[0].sentences, ["The fox ran into the wood.", "The hen sat on her eggs."])
     }
 
+    func testAShortBookDoesNotTakeInTheFrontMatterBeforeItsStart() {
+        let short = Classification(kind: .skip, rule: .tooShort, reason: "")
+        XCTAssertEqual(
+            classifySequence([short, short], characters: [50, 50], bodyStart: 1).map(\.kind), [.skip, .story])
+    }
+
+    func testAShortPageOfLinksOrPublisherWordsIsNeverKeptForItsLength() throws {
+        var book = EpubBuilder()
+        book.chapters = [
+            BuiltChapter("rights.xhtml", "<p>Copyright 2020 by A. Tester. All rights reserved.</p>"),
+            BuiltChapter("story.xhtml", "<p>The fox ran into the wood.</p><p>The hen sat on her eggs.</p>"),
+        ]
+        let draft = try book.draft()
+        XCTAssertEqual(draft.chapters.filter { $0.kind == .story }.count, 1, draft.chapters.map(\.reason).joined(separator: "; "))
+    }
+
     func testAShortPageBesideAStoryIsStillSkipped() {
         let short = Classification(kind: .skip, rule: .tooShort, reason: "")
         let story = Classification(kind: .story, rule: .defaultStory, reason: "")

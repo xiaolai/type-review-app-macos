@@ -137,14 +137,16 @@ func classifySpineItem(_ facts: SpineFacts) -> Classification {
     if matches(optionalTitle, title) {
         return Classification(kind: .optional, rule: .titleOptional, reason: "titled “\(title)”")
     }
-    if facts.characters < 200 {
-        return Classification(kind: .skip, rule: .tooShort, reason: "too short to be a chapter")
-    }
     if facts.linkCharacters * 2 > facts.characters {
         return Classification(kind: .skip, rule: .mostlyLinks, reason: "looks like a table of contents")
     }
     if facts.characters < 3_000, matches(publisherWords, String(facts.head.prefix(300))) {
         return Classification(kind: .skip, rule: .publisherWords, reason: "looks like publisher matter")
+    }
+    // Last, so that a page skipped for its length is skipped for nothing
+    // else: a book with no other story keeps it.
+    if facts.characters < 200 {
+        return Classification(kind: .skip, rule: .tooShort, reason: "too short to be a chapter")
     }
     return Classification(kind: .story, rule: .defaultStory, reason: "part of the story")
 }
@@ -170,7 +172,8 @@ func classifySequence(_ verdicts: [Classification], characters: [Int], bodyStart
     // story a parent meant a child to type. When nothing else is story, the
     // parts skipped only for their length are.
     if !out.contains(where: { $0.kind == .story }) {
-        for index in out.indices where out[index].rule == .tooShort {
+        // Not front matter the book says comes before its text.
+        for index in out.indices where out[index].rule == .tooShort && index >= (bodyStart ?? 0) {
             out[index] = Classification(kind: .story, rule: .wholeBookShort, reason: "the whole book is this short")
         }
     }

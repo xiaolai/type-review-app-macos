@@ -126,22 +126,6 @@ func startsLowercase(_ text: String) -> Bool {
     return CharacterSet.lowercaseLetters.contains(first)
 }
 
-/// Opening quotation marks not yet closed. Curly quotes say which way they
-/// face; straight double quotes count by parity.
-func unclosedQuotes(_ text: String) -> Int {
-    var curly = 0
-    var straight = 0
-    for scalar in text.unicodeScalars {
-        switch scalar.value {
-        case 0x201C: curly += 1
-        case 0x201D: curly -= 1
-        case 0x22: straight += 1
-        default: break
-        }
-    }
-    return max(curly, 0) + straight % 2
-}
-
 private let abbreviationAtEnd = try! NSRegularExpression(
     pattern: "\\b(Mr|Mrs|Ms|Dr|St|Mt|Jr|Sr|Prof|Capt|Col|Gen|Lt|Rev|Sgt|Hon)\\.$")
 
@@ -219,8 +203,9 @@ func mergeSentencePieces(_ pieces: [String]) -> [String] {
     return units
 }
 
-/// `unclosedQuotes`, kept as running counts so a text can be added to piece by
-/// piece.
+/// Opening quotation marks not yet closed, kept as running counts so a text
+/// can be added piece by piece. Curly quotes say which way they face;
+/// straight double quotes count by parity.
 private struct QuoteCount {
     var curly = 0
     var straight = 0

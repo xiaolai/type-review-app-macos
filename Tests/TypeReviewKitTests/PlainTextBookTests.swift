@@ -69,7 +69,7 @@ final class PlainTextBookTests: XCTestCase {
             XCTAssertTrue(isChapterHeading(heading), heading)
         }
         for heading in ["Chapter I. The Cyclone", "Chapter I. The Cyclone.", "Book the First", "Chapter Twenty-one",
-            "Prologue: The Boy", "Epilogue."]
+            "Prologue: The Boy", "Epilogue.", "Chapter the Thirteenth", "Book the Twenty-first", "CHAPTER THE LAST"]
         {
             XCTAssertTrue(isChapterHeading(heading), heading)
         }
@@ -97,7 +97,7 @@ final class PlainTextBookTests: XCTestCase {
     }
 
     func testASentenceUnderTheHeadingIsNotItsTitle() throws {
-        for line in ["I saw Mary.", "It was a dark and", "Mary and I\nwent home."] {
+        for line in ["I saw Mary.", "It was a dark and", "Mary and I\nwent home.", "HELP!", "I\tsaw Mary."] {
             let text = "Chapter 1\n\(line)\n\nThe end came soon enough for all of them."
             let draft = try readPlainTextBook(text, fallbackTitle: "t")
             XCTAssertEqual(draft.chapters.first { $0.kind == .story }?.title, "Chapter 1", line)
@@ -149,6 +149,11 @@ final class PlainTextBookTests: XCTestCase {
             """
         let draft = try readPlainTextBook(text, fallbackTitle: "t")
         XCTAssertEqual(draft.chapters.map(\.title), ["Prologue", "THE FIRST DAY", "THE SECOND DAY"])
+    }
+
+    func testADashOnALineOfItsOwnIsADash() throws {
+        let draft = try readPlainTextBook("He stopped at the word-\n-\nand went on with the story.", fallbackTitle: "t")
+        XCTAssertEqual(draft.chapters[0].sentences, ["He stopped at the word-- and went on with the story."])
     }
 
     func testAWordBrokenAcrossWrappedLinesIsRejoined() throws {
