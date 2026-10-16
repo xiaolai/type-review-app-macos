@@ -251,12 +251,17 @@ enum Diagnostics {
                     // go back — and it needs real time, because what it
                     // measures is whether an utterance was allowed to finish.
                     checkNothingIsClipped(practice) { clip in
-                        restore()
-                        report(
-                            state: state, clip: clip,
-                            utterances: roundUtterances,
-                            runsRecorded: (practice.history.map(\.index).max() ?? -1)
-                                - indexBefore)
+                        // The Book screen's sentences, after the words, so
+                        // nothing it says lands on the clipping measurement.
+                        checkSentenceSpeech { sentence in
+                            restore()
+                            report(
+                                state: state, clip: clip,
+                                utterances: roundUtterances,
+                                runsRecorded: (practice.history.map(\.index).max() ?? -1)
+                                    - indexBefore,
+                                sentence: sentence)
+                        }
                     }
                 }
             }
@@ -563,7 +568,7 @@ enum Diagnostics {
 
     private static func report(
         state: BenchState, clip: (audibleMs: Int, interruptedAfter: Double?)?,
-        utterances: Int, runsRecorded: Int
+        utterances: Int, runsRecorded: Int, sentence: Result<String, CheckFailure>
     ) {
         let words = state.spokenWords
         let (silent, speaking) = (state.silent, state.speaking)
@@ -641,6 +646,14 @@ enum Diagnostics {
             exit(1)
         }
 
+        let sentenceLine: String
+        switch sentence {
+        case .success(let line): sentenceLine = line
+        case .failure(let failure):
+            print("SPEECHBENCH FAIL: Book: \(failure.message)")
+            exit(1)
+        }
+
         guard let clip else {
             print("SPEECHBENCH FAIL: the interrupted word never started speaking")
             exit(1)
@@ -690,6 +703,7 @@ enum Diagnostics {
         print(
             "SPEECHBENCH clip: a word interrupted after \(interruptMs)ms still ran "
                 + "\(clip.audibleMs)ms — not cut off")
+        print("SPEECHBENCH sentence: \(sentenceLine)")
         print(
             String(
                 format: "SPEECHBENCH OK: speech adds %.1fµs median, %.1fµs at p95, "
@@ -958,7 +972,8 @@ enum Diagnostics {
     /// `checkPlay` — and answers nil if there is no Play screen to check.
     static func runSelfTest(
         practice: PracticeViewController,
-        playCheck: @escaping () -> Result<String, CheckFailure>?
+        playCheck: @escaping () -> Result<String, CheckFailure>?,
+        bookCheck: @escaping () -> Result<String, CheckFailure>?
     ) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             let store = try? ProfileFileStore.standard()
@@ -1412,8 +1427,11 @@ enum Diagnostics {
                 var inBand = false
                 for y in 0..<rowsHigh {
                     let start = y * rowBytes
-                    let inked = (start..<(start + rowBytes)).contains {
-                        abs(Int(unbrokenOff[$0]) - Int(lettersGone[$0])) > 12
+                    // Typed out, closure and all: inferred, this expression
+                    // timed the type checker out on a loaded machine.
+                    let inked = (start..<(start + rowBytes)).contains { (index: Int) -> Bool in
+                        let difference: Int = Int(unbrokenOff[index]) - Int(lettersGone[index])
+                        return abs(difference) > 12
                     }
                     if inked && !inBand { bands += 1 }
                     inBand = inked
@@ -1566,19 +1584,28 @@ enum Diagnostics {
 
             // Every window this app makes is backed in sRGB — see
             // `useSRGBBacking` for what the display's own colour space costs.
-            // All five are in hand here: the main window and its drawer from
-            // launch, Settings above, and Statistics and Library built now and
-            // never shown. Asked of `NSApp.windows` rather than of the five by
+            // All seven are in hand here: the main window and its drawer from
+            // launch, Settings above, and Statistics, Library, the Books sheet
+            // and the review sheet built now and never shown. Asked of `NSApp.windows` rather than of the five by
             // name, so a sixth window is held to it too, whatever it is —
             // but only windows of this app's making, which are all plain
             // `NSWindow`s: AppKit puts its own in the list too, a text-input
             // panel among them, and those are not ours to back.
             let statsWindow = AppDelegate.makeStatsWindow(for: StatsViewController())
             let libraryWindow = LibraryWindowController(store: practice.library)
-            withExtendedLifetime((settings, statsWindow, libraryWindow)) {
+            let booksWindow = BooksSheetController(
+                store: BookStore(
+                    profileDirectory: FileManager.default.temporaryDirectory
+                        .appendingPathComponent("TypeReviewSheetCheck-\(UUID().uuidString)")))
+            guard let reviewDraft = try? readPlainTextBook("The dog ran home.", fallbackTitle: "check") else {
+                print("SELFTEST FAIL: a one-sentence text could not be read as a book")
+                exit(1)
+            }
+            let reviewWindow = BookReviewController(draft: reviewDraft, wpm: nil)
+            withExtendedLifetime((settings, statsWindow, libraryWindow, booksWindow, reviewWindow)) {
                 let windows = NSApp.windows.filter { $0.isMember(of: NSWindow.self) }
-                guard windows.count >= 5 else {
-                    print("SELFTEST FAIL: expected the app's five windows, found \(windows.count)")
+                guard windows.count >= 7 else {
+                    print("SELFTEST FAIL: expected the app's seven windows, found \(windows.count)")
                     exit(1)
                 }
                 let wideGamut = windows.filter { !$0.isBackedInSRGB }
@@ -1935,6 +1962,23 @@ enum Diagnostics {
                     print("SELFTEST FAIL: playing a game changed the profile on disk")
                     exit(1)
                 }
+                // Book, after Play, for the same reason: typing a book must
+                // leave the profile exactly as it was.
+                let read: String
+                switch bookCheck() {
+                case .success(let summary)?:
+                    read = summary
+                case .failure(let failure)?:
+                    print("SELFTEST FAIL: \(failure.message)")
+                    exit(1)
+                case nil:
+                    print("SELFTEST FAIL: there is no Book screen to check")
+                    exit(1)
+                }
+                guard case .ok(let afterBook) = store.load(), afterBook == profile else {
+                    print("SELFTEST FAIL: typing a book changed the profile on disk")
+                    exit(1)
+                }
                 // The status item's mark, before the summary. A template
                 // image is only ever read for its alpha, so one that draws
                 // nothing is not a faint icon — it is an empty menu-bar slot,
@@ -1977,7 +2021,7 @@ enum Diagnostics {
                 print(
                     "SELFTEST OK: typed \(typeable.count) chars — "
                         + "\(Int(metrics.netWpm)) wpm, \(Int(metrics.accuracy))% accuracy, "
-                        + "\(profile.results.count) run(s) on disk; play: \(played)")
+                        + "\(profile.results.count) run(s) on disk; play: \(played); book: \(read)")
                 exit(0)
             }
         }

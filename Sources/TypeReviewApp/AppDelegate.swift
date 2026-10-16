@@ -9,7 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow?
     var practice: PracticeViewController?
     var play: PlayViewController?
-    /// Holds Practice and Play, and shows one. See `MainScreenController`.
+    var book: BookViewController?
+    /// The books, the place in each, and the reading log. Nil when the folder
+    /// beside the profile could not be opened; the Book screen says so.
+    private(set) var books: BookStore?
+    private var booksSheet: BooksSheetController?
+    /// Holds Practice, Play and Book, and shows one. See `MainScreenController`.
     var screens: MainScreenController?
     // Built in applicationDidFinishLaunching, for the same reason the stats
     // controller is: a main-actor default value cannot be initialised from
@@ -28,6 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The menu holding ⌘N, whose title and item follow the screen.
     var screenCommandsMenu: NSMenu?
     var newTextMenuItem: NSMenuItem?
+    /// Hear Sentence and Hear Word, shown only while Book is.
+    var bookMenuItems: [NSMenuItem] = []
     private var preferencesObserver: NSObjectProtocol?
     private var windowCloseObserver: NSObjectProtocol?
     private var fullScreenExitObserver: NSObjectProtocol?
@@ -117,7 +124,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let play = PlayViewController()
         self.play = play
         play.planSource = { [weak practice] in practice?.nextLessonPlan }
-        let screens = MainScreenController(practice: practice, play: play)
+        let books = try? BookStore.standard()
+        self.books = books
+        books?.start()
+        let book = BookViewController()
+        book.store = books
+        book.settings = { [weak practice] in practice?.currentSettings ?? .default }
+        book.keyStats = { [weak practice, weak books] in
+            aggregatePerKey(
+                combinedRuns(
+                    practice: practice?.history ?? [], reading: books?.reading ?? ReadingLog(),
+                    calendar: localStatisticsCalendar()))
+        }
+        book.onShowBooks = { [weak self] in self?.showBooks(nil) }
+        self.book = book
+        let screens = MainScreenController(practice: practice, play: play, book: book)
         self.screens = screens
 
         // `defer: true`, and it is the whole reason this is not
@@ -156,6 +177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         toolbarController.onNewGame = { [weak self] in self?.play?.newGame() }
         toolbarController.onChoosePlayMode = { [weak self] mode in self?.play?.newGame(mode: mode) }
         toolbarController.onChoosePlayRules = { [weak self] gentle in self?.play?.newGame(gentle: gentle) }
+        toolbarController.onShowBooks = { [weak self] in self?.showBooks(nil) }
+        toolbarController.onSpeakSentence = { [weak self] in self?.book?.speakSentence() }
         toolbarController.currentPlay = { [weak self] in
             (self?.play?.mode ?? .words, self?.play?.gentle ?? true)
         }
@@ -285,6 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.applySoundPreferences()
                 self.practice?.applyTypingPreferences()
                 self.play?.applyTypingPreferences()
+                self.book?.applyTypingPreferences()
                 if changed == nil || changed == AppPreferences.soundShortcut.keyCodeKey
                     || changed == AppPreferences.summonShortcut.keyCodeKey
                 {
@@ -334,12 +358,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch checks.first {
         case "--soundcheck": Diagnostics.runSoundCheck()
         case "--selftest":
-            Diagnostics.runSelfTest(practice: practice) { [weak self] in
-                guard let self, let play = self.play, let screens = self.screens else { return nil }
-                return Diagnostics.checkPlay(
-                    play: play, practice: practice, screens: screens,
-                    show: { self.show($0, remember: false) })
-            }
+            Diagnostics.runSelfTest(
+                practice: practice,
+                playCheck: { [weak self] in
+                    guard let self, let play = self.play, let screens = self.screens else { return nil }
+                    return Diagnostics.checkPlay(
+                        play: play, practice: practice, screens: screens,
+                        show: { self.show($0, remember: false) })
+                },
+                bookCheck: { [weak self] in
+                    guard let self, let book = self.book, let screens = self.screens else { return nil }
+                    return Diagnostics.checkBook(
+                        book: book, store: self.books, screens: screens,
+                        show: { self.show($0, remember: false) })
+                })
         case "--speechbench": Diagnostics.runSpeechBench(practice: practice)
         case "--screenshots": Diagnostics.runScreenshots(app: self)
         case .some(let flag):
@@ -560,13 +592,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
 
-    /// ⌘N: new text on Practice, a new game on Play.
+    /// ⌘N: new text on Practice, a new game on Play, the Books sheet on Book.
     @objc func newText(_ sender: Any?) {
-        if screens?.current == .play {
-            play?.newGame()
-        } else {
-            practice?.startFreshRun()
+        switch screens?.current {
+        case .play: play?.newGame()
+        case .book: showBooks(sender)
+        case .practice, nil: practice?.startFreshRun()
         }
+    }
+
+    /// Book ▸ Hear Sentence.
+    @objc func speakSentence(_ sender: Any?) { book?.speakSentence() }
+
+    /// Book ▸ Hear Word.
+    @objc func speakWord(_ sender: Any?) { book?.speakWord() }
+
+    /// The Books sheet: the shelf, with Continue, Import… and Remove. On the
+    /// main window, over the Book screen, which it shows first.
+    @objc func showBooks(_ sender: Any?) {
+        showMainWindow(nil)
+        show(.book)
+        guard let window, let books, let book, window.attachedSheet == nil else { return }
+        let sheet = BooksSheetController(store: books)
+        sheet.onOpen = { [weak book] id in book?.open(id) }
+        sheet.onShelfChanged = { [weak book] in book?.shelfChanged() }
+        sheet.readingWpm = { [weak books] in books.flatMap { readingWpm($0.reading) } }
+        booksSheet = sheet
+        sheet.present(on: window) { [weak self] in self?.booksSheet = nil }
     }
 
     /// View ▸ Practice and View ▸ Play. The main window comes forward first:
@@ -589,11 +641,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// to light a key on it.
     func show(_ screen: MainScreen, remember: Bool = true) {
         guard let screens else { return }
-        if screen == .practice { play?.leave() }
+        // Every screen but the one arriving is left: a game pauses, a sentence
+        // being read aloud stops.
+        if screen != .play { play?.leave() }
+        if screen != .book { book?.leave() }
         screens.show(screen)
         toolbarController?.show(screen)
         practice?.keyboard = screen == .practice ? drawer?.keyboard : nil
         play?.keyboard = screen == .play ? drawer?.keyboard : nil
+        book?.keyboard = screen == .book ? drawer?.keyboard : nil
         markScreenMenus(screen)
         if remember { AppPreferences.mainScreen.value = screen }
     }
@@ -854,6 +910,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Play is the same window's other screen, so the same switch.
         play?.onKeyStruck = practice?.onKeyStruck
         play?.onKeyReleased = practice?.onKeyReleased
+        book?.onKeyStruck = practice?.onKeyStruck
+        book?.onKeyReleased = practice?.onKeyReleased
         // Outside the switch above, and that is the point of it. Everything
         // `coveredElsewhere` governs is a question of which path sounds a key
         // that both paths can see. The error tone is not: the monitor sees key
@@ -869,6 +927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // and the controller reads it.
         practice?.onMistype = { [weak self] in self?.sounds.playMistype() }
         play?.onMistype = practice?.onMistype
+        book?.onMistype = practice?.onMistype
         // Warmed here, where switching the feature on happens, rather than on
         // the first wrong key. See `prepareMistype`.
         if AppPreferences.mistypeSound.value { sounds.prepareMistype() }
@@ -1001,6 +1060,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard AppPreferences.countKeystrokes.value else { return nil }
             return self?.keystrokes?.snapshot()
         }
+        controller.reading = { [weak self] in self?.books?.reading ?? ReadingLog() }
+        controller.shelf = { [weak self] in self?.books?.shelf() ?? [] }
         controller.refresh()
         if statsWindow == nil { statsWindow = Self.makeStatsWindow(for: controller) }
         statsWindow?.makeKeyAndOrderFront(nil)

@@ -164,6 +164,23 @@ final class SpeechPlayer: NSObject {
         wordsSpoken += 1
     }
 
+    /// A whole sentence, asked for on the Book screen.
+    ///
+    /// Interrupts at once, unlike a word: somebody asked to hear this, and
+    /// letting the last word finish first is a delay with nothing to protect.
+    /// Never reached from a keystroke — a menu item, a toolbar button, or a
+    /// sentence arriving with Read Each Sentence First on.
+    func speak(sentence: String) {
+        resolveVoice()
+        synthesizer.stopSpeaking(at: .immediate)
+        synthesizer.speak(utterance(sentence))
+        sentencesSpoken += 1
+    }
+
+    /// Sentences handed to the synthesizer, for `--speechbench`, as
+    /// `wordsSpoken` is for words.
+    private(set) var sentencesSpoken = 0
+
     /// Silences everything. Safe to call when nothing is speaking.
     func stop() {
         // The built one, not the accessor: reaching through the accessor would

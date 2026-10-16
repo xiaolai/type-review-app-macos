@@ -3,10 +3,10 @@ import AppKit
 /// Which screen the main window is showing, in the order the toolbar's switch
 /// and the View menu list them.
 enum MainScreen: String, CaseIterable {
-    case practice, play
+    case practice, play, book
 }
 
-/// Practice and Play, as the two screens of the main window.
+/// Practice, Play and Book, as the screens of the main window.
 ///
 /// Screens of one window rather than two windows, and rather than macOS
 /// window tabs. Statistics has a window of its own because it is worth seeing
@@ -23,14 +23,17 @@ enum MainScreen: String, CaseIterable {
 final class MainScreenController: NSViewController {
     let practice: PracticeViewController
     let play: PlayViewController
+    let book: BookViewController
     private(set) var current: MainScreen?
 
-    init(practice: PracticeViewController, play: PlayViewController) {
+    init(practice: PracticeViewController, play: PlayViewController, book: BookViewController) {
         self.practice = practice
         self.play = play
+        self.book = book
         super.init(nibName: nil, bundle: nil)
         addChild(practice)
         addChild(play)
+        addChild(book)
     }
 
     @available(*, unavailable)
@@ -41,21 +44,26 @@ final class MainScreenController: NSViewController {
         view.wantsLayer = true
     }
 
+    func controller(for screen: MainScreen) -> NSViewController {
+        switch screen {
+        case .practice: return practice
+        case .play: return play
+        case .book: return book
+        }
+    }
+
     func show(_ screen: MainScreen) {
         guard screen != current else { return }
         current = screen
-        let incoming: NSViewController
-        let outgoing: NSViewController
-        let focus: NSView
-        switch screen {
-        case .practice: (incoming, outgoing, focus) = (practice, play, practice.focusView)
-        case .play: (incoming, outgoing, focus) = (play, practice, play.focusView)
-        }
+        let incoming = controller(for: screen)
         // Only a screen that was ever shown has anything to take away. Asking
         // one that was not for its view loads it — and loading Play before
         // Practice started its first game before Practice had read the
         // profile, so Letters planned for a typist with no history.
-        if outgoing.isViewLoaded { outgoing.view.removeFromSuperview() }
+        for outgoing in [practice, play, book] as [NSViewController]
+        where outgoing !== incoming && outgoing.isViewLoaded {
+            outgoing.view.removeFromSuperview()
+        }
         incoming.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(incoming.view)
         NSLayoutConstraint.activate([
@@ -64,6 +72,12 @@ final class MainScreenController: NSViewController {
             incoming.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             incoming.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
+        let focus: NSView
+        switch screen {
+        case .practice: focus = practice.focusView
+        case .play: focus = play.focusView
+        case .book: focus = book.focusView
+        }
         view.window?.makeFirstResponder(focus)
     }
 }

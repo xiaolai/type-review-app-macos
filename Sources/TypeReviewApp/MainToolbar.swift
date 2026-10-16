@@ -15,9 +15,9 @@ import TypeReviewKit
 /// user can do, and words-per-minute is not one of them — it is what the run is
 /// producing, so it stays with the text it describes.
 ///
-/// The switch between Practice and Play sits in the middle. The two items
-/// leading it belong to the screen showing — Source and New Text, or Game and
-/// New Game — and swap with it; the three trailing it open the same windows
+/// The switch between the screens sits in the middle. The two items leading
+/// it belong to the screen showing — Source and New Text, Game and New Game,
+/// or Books and Hear Sentence — and swap with it; the three trailing it open the same windows
 /// from either screen, so they never move.
 ///
 /// Its own type rather than an extension on `AppDelegate`: the delegate is
@@ -35,6 +35,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     var onNewGame: () -> Void = {}
     var onChoosePlayMode: (PlayMode) -> Void = { _ in }
     var onChoosePlayRules: (_ gentle: Bool) -> Void = { _ in }
+    var onShowBooks: () -> Void = {}
+    var onSpeakSentence: () -> Void = {}
     /// Read rather than stored, like `currentChannel`.
     var currentPlay: () -> (mode: PlayMode, gentle: Bool) = { (.words, true) }
     /// Read rather than stored, so the checkmark reflects the channel even when
@@ -64,9 +66,9 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     func show(_ screen: MainScreen) {
         screenSwitch?.selectedSegment = Self.segment(of: screen)
         guard screen != self.screen, let toolbar else { return }
+        let leaving = Self.lead(for: self.screen)
+        let arriving = Self.lead(for: screen)
         self.screen = screen
-        let (leaving, arriving) =
-            screen == .play ? (Self.practiceLead, Self.playLead) : (Self.playLead, Self.practiceLead)
         for identifier in leaving {
             if let index = toolbar.items.firstIndex(where: { $0.itemIdentifier == identifier }) {
                 toolbar.removeItem(at: index)
@@ -112,6 +114,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     private static let screenSwitch = NSToolbarItem.Identifier("screen")
     private static let game = NSToolbarItem.Identifier("game")
     private static let newGame = NSToolbarItem.Identifier("newGame")
+    private static let books = NSToolbarItem.Identifier("books")
+    private static let speakSentence = NSToolbarItem.Identifier("speakSentence")
 
     // Source and new-text lead, because they decide what you are about to type;
     // on Play, what falls and a new game do the same job. The three windows sit
@@ -120,6 +124,17 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     // capsule. See `TitleMarkController`.
     private static let practiceLead: [NSToolbarItem.Identifier] = [source, newText]
     private static let playLead: [NSToolbarItem.Identifier] = [game, newGame]
+    /// On Book, which book and hearing the sentence: the two things a child
+    /// reaches for there.
+    private static let bookLead: [NSToolbarItem.Identifier] = [books, speakSentence]
+
+    private static func lead(for screen: MainScreen) -> [NSToolbarItem.Identifier] {
+        switch screen {
+        case .practice: return practiceLead
+        case .play: return playLead
+        case .book: return bookLead
+        }
+    }
     private static let trailing: [NSToolbarItem.Identifier] = [keyboard, library, stats]
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -127,7 +142,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        Self.practiceLead + Self.playLead + [.flexibleSpace, Self.screenSwitch] + Self.trailing
+        Self.practiceLead + Self.playLead + Self.bookLead + [.flexibleSpace, Self.screenSwitch]
+            + Self.trailing
     }
 
     func toolbar(
@@ -149,6 +165,14 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
             return button(
                 identifier, label: "New Game", symbol: "arrow.counterclockwise",
                 tip: "Start again (⇥)", action: #selector(newGamePressed))
+        case Self.books:
+            return button(
+                identifier, label: "Books", symbol: "book.closed",
+                tip: "Choose, import or remove a book (⌘N)", action: #selector(booksPressed))
+        case Self.speakSentence:
+            return button(
+                identifier, label: "Hear Sentence", symbol: "speaker.wave.2",
+                tip: "Read the sentence aloud (⌘R)", action: #selector(speakSentencePressed))
         case Self.keyboard:
             return makeKeyboardItem()
         case Self.library:
@@ -283,6 +307,8 @@ final class MainToolbarController: NSObject, NSToolbarDelegate {
 
     @objc private func newTextPressed() { onNewText() }
     @objc private func newGamePressed() { onNewGame() }
+    @objc private func booksPressed() { onShowBooks() }
+    @objc private func speakSentencePressed() { onSpeakSentence() }
 
     @objc private func screenPicked(_ sender: NSSegmentedControl) {
         let screens = MainScreen.allCases

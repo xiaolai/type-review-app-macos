@@ -138,7 +138,9 @@ extension AppDelegate {
         switch screen {
         case .practice: newTextMenuItem?.title = "New Text"
         case .play: newTextMenuItem?.title = "New Game"
+        case .book: newTextMenuItem?.title = "Books…"
         }
+        for item in bookMenuItems { item.isHidden = screen != .book }
     }
 
     /// Three surfaces offer the keyboard toggle, so all three show its state.
@@ -241,6 +243,16 @@ extension AppDelegate {
         let newText = practiceMenu.addItem(
             withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "n")
         newText.target = self
+        // Book's own two, shown only on Book. ⌘R as in "read"; nothing else in
+        // the app uses it, and ⇧ narrows it from the sentence to the word.
+        let speakSentence = practiceMenu.addItem(
+            withTitle: "Hear Sentence", action: #selector(speakSentence(_:)), keyEquivalent: "r")
+        speakSentence.target = self
+        let speakWord = practiceMenu.addItem(
+            withTitle: "Hear Word", action: #selector(speakWord(_:)), keyEquivalent: "r")
+        speakWord.keyEquivalentModifierMask = [.command, .shift]
+        speakWord.target = self
+        bookMenuItems = [speakSentence, speakWord]
         practiceItem.submenu = practiceMenu
         root.addItem(practiceItem)
         // Renamed with the screen: Practice ▸ New Text, or Play ▸ New Game.
@@ -382,7 +394,12 @@ extension AppDelegate: NSMenuItemValidation {
     /// equivalents with it. Enabled there, a pick reached a practice screen
     /// nobody could see and threw away the run waiting on it.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(chooseSource(_:)) { return screens?.current != .play }
+        // Source is Practice's alone: on Play and on Book a pick would reach a
+        // screen nobody can see.
+        if menuItem.action == #selector(chooseSource(_:)) { return screens?.current == .practice }
+        if menuItem.action == #selector(speakSentence(_:)) || menuItem.action == #selector(speakWord(_:)) {
+            return screens?.current == .book && book?.canSpeak == true
+        }
         return true
     }
 }
