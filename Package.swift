@@ -24,6 +24,9 @@ let package = Package(
         // Builds the starter shelf from public-domain texts: `make shelf`.
         // Never linked into the app.
         .executableTarget(name: "make-shelf", dependencies: ["TypeReviewKit"], path: "Tools/MakeShelf"),
+        // `make epub-corpus`: the EPUB reader measured over the books on
+        // this Mac. Local only, never in CI; not part of the app.
+        .executableTarget(name: "EpubCorpus", dependencies: ["TypeReviewKit"]),
         .testTarget(
             name: "TypeReviewKitTests",
             dependencies: ["TypeReviewKit"],
