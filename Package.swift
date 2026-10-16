@@ -26,7 +26,7 @@ let package = Package(
             dependencies: ["TypeReviewKit"],
             // Golden vectors generated from the TypeScript engine. They are
             // the contract between the two implementations.
-            resources: [.copy("Vectors")]
+            resources: [.copy("Vectors"), .copy("Fixtures")]
         ),
     ]
 )
