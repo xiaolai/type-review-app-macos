@@ -33,7 +33,7 @@ public enum ArchiveError: Error, Equatable, CustomStringConvertible {
     case badChecksum(String)
     case missing(String)
     case readLimitExceeded
-    case ambiguousEnd
+    case ambiguousEnd(Int)
 
     public var description: String {
         switch self {
@@ -51,7 +51,7 @@ public enum ArchiveError: Error, Equatable, CustomStringConvertible {
         case .badChecksum(let name): return "\(name) fails its checksum"
         case .missing(let name): return "\(name) is missing"
         case .readLimitExceeded: return "its text inflates past \(maxArchiveReadBytes >> 20) MB"
-        case .ambiguousEnd: return "it ends in more directory records than any ZIP writer leaves"
+        case .ambiguousEnd(let count): return "it ends in \(count) ZIP indexes, where a real one has one"
         }
     }
 }
@@ -100,6 +100,12 @@ private struct EndRecord {
     /// The directory ends where the record begins, as every writer lays it
     /// out.
     var isTight: Bool { directoryOffset + directorySize == position }
+
+    /// Laid out as a writer lays out the real record: tight against its
+    /// directory, and its comment ending the file. A signature that happens
+    /// to sit in a comment or in an entry's bytes almost never is both, so
+    /// only a deliberate forgery competes with the real record here.
+    var isConsistent: Bool { isTight && endsFile }
 }
 
 /// A ZIP read from memory, without extracting anything.
@@ -133,42 +139,70 @@ public final class ZipArchive: BookArchive {
         (entries, names) = try Self.index(data)
     }
 
-    /// How many end-record candidates a file may hold. A real EPUB has one;
-    /// a second is a signature that happens to sit in the last 64 KB. More
-    /// than this is a file built to be read more than one way, and is
-    /// refused rather than read the way that happens to come first.
-    private static let maxEndCandidates = 8
+    /// How many candidates of each kind are parsed. A real EPUB has one
+    /// consistent record; a second is a forgery. Consistent records are all
+    /// parsed, and a file with more than this many is refused as made to be
+    /// ambiguous — capping the parses instead let the ninth forgery push the
+    /// real record out of reach. Inconsistent candidates are only a fallback,
+    /// and a comment of ordinary bytes can hold thousands, so for them the
+    /// cap bounds the work and refuses nothing: a parse can walk a directory
+    /// of thousands of records.
+    private static let maxEndParses = 8
 
-    /// The directory that names the most files, of every candidate end
-    /// record that parses.
+    /// The directory the archive's end record names.
     ///
     /// A forged record can sit in the archive's comment or inside an entry's
-    /// stored bytes, and claim no entries — or a directory of its own. What
-    /// it cannot do is take entries away from the real directory, so the
-    /// reading that finds the most files is the one that hides none. Any
+    /// stored bytes, and claim no entries — or a directory of its own. Any
     /// rule by position alone is beaten by one of the two places: earliest
     /// first lost to a record in a stored entry, latest first to one in the
-    /// comment. On a tie, a directory laid out the way writers lay it out
-    /// wins, then one whose comment ends the file, then the one nearest the
-    /// end. A candidate that fails to parse is passed over; when none parses,
+    /// comment. So the consistent records are read first, all of them, and
+    /// the one naming the most distinct files wins: a forgery cannot take
+    /// entries away from the real directory, and counting names once stops a
+    /// directory repeating one name from outcounting a real one. Only when no
+    /// consistent record parses are the others tried, likeliest first —
+    /// tight, then ending the file, then nearest the end — which is how a
+    /// book with bytes appended after it still opens. When nothing parses,
     /// the failure of the likeliest is reported.
+    ///
+    /// What this cannot do is tell a real record from a consistent forgery
+    /// naming more files: a file built that carefully says what its author
+    /// wants it to say, and reading it is reading the book they made.
     private static func index(_ data: Data) throws -> ([String: ZipEntry], [String]) {
         let (candidates, sawZip64) = endRecords(data)
-        guard candidates.count <= maxEndCandidates else { throw ArchiveError.ambiguousEnd }
-        func rank(_ end: EndRecord) -> (Int, Int, Int) { (end.isTight ? 1 : 0, end.endsFile ? 1 : 0, end.position) }
-        let ordered = candidates.sorted { rank($0) > rank($1) }
-        var best: ([String: ZipEntry], [String])?
-        var firstFailure: Error?
-        for end in ordered {
-            do {
-                guard end.total <= maxArchiveEntries else { throw ArchiveError.tooManyEntries(end.total) }
-                let parsed = try directory(data, end)
-                if best == nil || parsed.1.count > best!.1.count { best = parsed }
-            } catch {
-                firstFailure = firstFailure ?? error
-            }
+        // Tiers, each read only when the one before parsed nothing. A record
+        // tight against its directory is laid out as a writer lays one out,
+        // whether or not bytes follow it, so tight records are read in full
+        // like consistent ones, and refused past the cap the same way:
+        // capping them let tight forgeries push the real record of a book
+        // with bytes appended out of reach. Only the loose rest is capped.
+        let consistent = candidates.filter(\.isConsistent)
+        let tight = candidates.filter { $0.isTight && !$0.isConsistent }
+        for tier in [consistent, tight] where tier.count > maxEndParses {
+            throw ArchiveError.ambiguousEnd(tier.count)
         }
-        if let best { return best }
+        func rank(_ end: EndRecord) -> (Int, Int) { (end.endsFile ? 1 : 0, end.position) }
+        let loose = candidates.filter { !$0.isTight }.sorted { rank($0) > rank($1) }.prefix(maxEndParses)
+        var firstFailure: Error?
+        // A directory naming nothing never ends the search: no book has one,
+        // and an empty record is the cheapest forgery there is — one placed
+        // to end the file outranked a real record with a byte after it. It
+        // is kept as the answer only when no tier names anything.
+        var empty: ([String: ZipEntry], [String])?
+        for group in [consistent, tight, Array(loose)].map({ $0.sorted { $0.position > $1.position } }) {
+            var best: ([String: ZipEntry], [String])?
+            for end in group {
+                do {
+                    guard end.total <= maxArchiveEntries else { throw ArchiveError.tooManyEntries(end.total) }
+                    let parsed = try directory(data, end)
+                    if best == nil || parsed.1.count > best!.1.count { best = parsed }
+                } catch {
+                    firstFailure = firstFailure ?? error
+                }
+            }
+            if let best, !best.1.isEmpty { return best }
+            empty = empty ?? best
+        }
+        if let empty { return empty }
         throw firstFailure ?? (sawZip64 ? ArchiveError.zip64 : ArchiveError.truncated)
     }
 
@@ -228,10 +262,12 @@ public final class ZipArchive: BookArchive {
             let name = String(data: rawName, encoding: .utf8) ?? String(decoding: rawName, as: UTF8.self)
             guard isSafeArchiveName(name) else { throw ArchiveError.unsafeName(name) }
             if !name.hasSuffix("/") {
+                // A name listed twice is read as its last record, as before,
+                // and listed once.
+                if entries[name] == nil { names.append(name) }
                 entries[name] = ZipEntry(
                     flags: data.le16(cursor + 8), method: data.le16(cursor + 10), crc: data.le32(cursor + 16),
                     compressedSize: Int(compressedSize), size: Int(size), localOffset: Int(localOffset))
-                names.append(name)
             }
             cursor += recordLength
         }
@@ -345,9 +381,9 @@ public final class FolderArchive: BookArchive {
     /// book dragged out of Apple Books can arrive, so the root itself may be
     /// one. Nothing below it may.
     public init(root: URL) throws {
-        let resolved = root.resolvingSymlinksInPath().standardizedFileURL
-        let rootPath = resolved.path.hasSuffix("/") ? resolved.path : resolved.path + "/"
-        rootDescriptor = try Self.openRoot(root)
+        let (descriptor, resolvedPath) = try Self.openRoot(root)
+        rootDescriptor = descriptor
+        let resolved = URL(fileURLWithPath: resolvedPath, isDirectory: true)
         var found: [String] = []
         if let enumerator = FileManager.default.enumerator(
             at: resolved, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [])
@@ -355,9 +391,12 @@ public final class FolderArchive: BookArchive {
             for case let url as URL in enumerator {
                 let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
                 guard values?.isRegularFile == true, values?.isSymbolicLink != true else { continue }
-                let path = url.standardizedFileURL.path
-                guard path.hasPrefix(rootPath) else { continue }
-                found.append(String(path.dropFirst(rootPath.count)))
+                // The name is the last `level` components. Matching a prefix
+                // of the path does not work: realpath answers /private/var
+                // where the enumerator reports /var.
+                let components = url.standardizedFileURL.pathComponents
+                guard enumerator.level >= 1, enumerator.level < components.count else { continue }
+                found.append(components.suffix(enumerator.level).joined(separator: "/"))
                 if found.count > maxArchiveEntries {
                     close(rootDescriptor)
                     throw ArchiveError.tooManyEntries(found.count)
@@ -369,22 +408,31 @@ public final class FolderArchive: BookArchive {
 
     deinit { close(rootDescriptor) }
 
-    /// The root, resolved and then opened without following a link, and
+    /// The root, resolved once and then opened without following a link, and
     /// refused unless what was opened is what was resolved. Resolving and
     /// opening are two steps, and a folder on the way swapped for a link
-    /// between them would otherwise be opened in its place.
-    private static func openRoot(_ root: URL) throws -> Int32 {
+    /// between them would otherwise be opened in its place. The listing walks
+    /// the same resolved path, not a second resolution of the original.
+    ///
+    /// What remains: the listing walks that path by name, so a folder swapped
+    /// after this check could make it list names from elsewhere. It cannot
+    /// make a read follow them — every read is from the held descriptor, link
+    /// by link refused — so a swap costs the book its files, never a file
+    /// outside it.
+    private static func openRoot(_ root: URL) throws -> (descriptor: Int32, path: String) {
         guard let real = realpath(root.path, nil) else { throw ArchiveError.missing(root.lastPathComponent) }
         let resolved = String(cString: real)
         free(real)
         let descriptor = Darwin.open(resolved, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
         guard descriptor >= 0 else { throw ArchiveError.missing(root.lastPathComponent) }
         var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-        guard fcntl(descriptor, F_GETPATH, &buffer) == 0, String(cString: buffer) == resolved else {
+        let gotPath = fcntl(descriptor, F_GETPATH, &buffer) == 0
+        let opened = String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        guard gotPath, opened == resolved else {
             close(descriptor)
             throw ArchiveError.unsafeName(root.lastPathComponent)
         }
-        return descriptor
+        return (descriptor, resolved)
     }
 
     /// A descriptor for a regular file under the root, reached without

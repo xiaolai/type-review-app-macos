@@ -104,12 +104,150 @@ final class EpubArchiveTests: XCTestCase {
         XCTAssertEqual(try ZipArchive(data: writer.build()).names, ["a.txt"])
     }
 
-    func testATailPackedWithEndRecordsIsRefused() {
+    func testACommentHoldingManyEndRecordsIsReadPast() throws {
         var writer = ZipWriter()
         writer.add("a.txt", "the real entry")
         let forged = Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 18))
-        writer.comment = (0..<9).reduce(Data()) { data, _ in data + forged }
-        XCTAssertEqual(refusal(writer.build()), .ambiguousEnd)
+        writer.comment = (0..<500).reduce(Data()) { data, _ in data + forged }
+        let archive = try ZipArchive(data: writer.build())
+        XCTAssertEqual(archive.names, ["a.txt"])
+        XCTAssertEqual(String(decoding: try archive.read("a.txt"), as: UTF8.self), "the real entry")
+    }
+
+    func testAForgedDirectoryRepeatingOneNameDoesNotOutcountTheRealOne() throws {
+        // A stored entry holding a directory of three records for "a.txt",
+        // and an end record for it whose comment runs to the end of the file.
+        var real = ZipWriter()
+        real.add("a.txt", "the real entry")
+        let single = real.build()
+        let recordStart = try XCTUnwrap(single.range(of: Data([0x50, 0x4B, 0x01, 0x02]))).lowerBound
+        let endStart = try XCTUnwrap(single.range(of: Data([0x50, 0x4B, 0x05, 0x06]))).lowerBound
+        let record = single.subdata(in: recordStart..<endStart)
+        func build(commentLength: UInt16, payloadOffset: UInt32) -> Data {
+            var writer = ZipWriter()
+            writer.add("a.txt", "the real entry")
+            var payload = record + record + record
+            var end = Data([0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 3, 0, 3, 0])
+            end.append(contentsOf: withUnsafeBytes(of: UInt32(payload.count).littleEndian, Array.init))
+            end.append(contentsOf: withUnsafeBytes(of: payloadOffset.littleEndian, Array.init))
+            end.append(contentsOf: withUnsafeBytes(of: commentLength.littleEndian, Array.init))
+            payload.append(end)
+            writer.add("b.bin", data: payload)
+            return writer.build()
+        }
+        let draft = build(commentLength: 0, payloadOffset: 0)
+        let payloadAt = try XCTUnwrap(draft.range(of: record + record)).lowerBound
+        let forgedEnd = payloadAt + record.count * 3
+        let data = build(commentLength: UInt16(draft.count - (forgedEnd + 22)), payloadOffset: UInt32(payloadAt))
+        XCTAssertEqual(data.count, draft.count)
+        let archive = try ZipArchive(data: data)
+        XCTAssertEqual(Set(archive.names), ["a.txt", "b.bin"])
+    }
+
+    /// An end record of no entries at `position`, tight against an empty
+    /// directory there, whose comment runs to `fileEnd`.
+    private func consistentEmptyEnd(at position: Int, fileEnd: Int) -> Data {
+        var end = Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 12))
+        end.append(contentsOf: withUnsafeBytes(of: UInt32(position).littleEndian, Array.init))
+        end.append(contentsOf: withUnsafeBytes(of: UInt16(fileEnd - position - 22).littleEndian, Array.init))
+        return end
+    }
+
+    func testAFileEndingInManyConsistentIndexesIsRefused() throws {
+        // Nine forged records in the comment, each laid out exactly as a real
+        // one is: no parse cap can be trusted to reach the real record, and a
+        // real EPUB has one, so the file is refused rather than guessed at.
+        func build(_ comment: Data) -> Data {
+            var writer = ZipWriter()
+            writer.add("a.txt", "the real entry")
+            writer.comment = comment
+            return writer.build()
+        }
+        let placeholder = Data(count: 9 * 22)
+        let count = build(placeholder).count
+        let commentStart = count - placeholder.count
+        let comment = (0..<9).reduce(Data()) { data, index in
+            data + consistentEmptyEnd(at: commentStart + index * 22, fileEnd: count)
+        }
+        XCTAssertEqual(refusal(build(comment)), .ambiguousEnd(10))
+    }
+
+    func testTightForgeriesBeforeAnAppendedByteAreAllReadOrRefused() throws {
+        // A byte after the archive takes the real record off the end of the
+        // file, so no record is consistent and the tight ones are the tier
+        // read. Capped, eight tight forgeries pushed the real one out.
+        func build(forgeries: Int) throws -> Data {
+            func archive(_ comment: Data) -> Data {
+                var writer = ZipWriter()
+                writer.add("a.txt", "the real entry")
+                writer.comment = comment
+                return writer.build()
+            }
+            let placeholder = Data(count: forgeries * 22)
+            let count = archive(placeholder).count
+            let commentStart = count - placeholder.count
+            let comment = (0..<forgeries).reduce(Data()) { data, index in
+                data + consistentEmptyEnd(at: commentStart + index * 22, fileEnd: count)
+            }
+            return archive(comment) + Data([0])
+        }
+        XCTAssertEqual(try ZipArchive(data: build(forgeries: 7)).names, ["a.txt"])
+        XCTAssertEqual(refusal(try build(forgeries: 8)), .ambiguousEnd(9))
+    }
+
+    func testAnEmptyForgeryEndingTheFileDoesNotOutrankARealRecordBeforeIt() throws {
+        // The real record is followed by a byte; a forged empty one in the
+        // comment claims that byte as its own comment, so it alone ends the
+        // file. It names nothing, and the real directory is read.
+        var writer = ZipWriter()
+        writer.add("a.txt", "the real entry")
+        writer.add("b.bin", "more")
+        let placeholder = Data(count: 22)
+        writer.comment = placeholder
+        let count = writer.build().count
+        writer.comment = consistentEmptyEnd(at: count - 22, fileEnd: count + 1)
+        let data = writer.build() + Data([0])
+        XCTAssertEqual(try ZipArchive(data: data).names.sorted(), ["a.txt", "b.bin"])
+    }
+
+    func testInconsistentForgedIndexesNamingMoreFilesDoNotHideTheRealOne() throws {
+        // Eight forged directories in the comment, each naming three files
+        // the real one does not, each with an end record tight against it but
+        // not ending the file — a byte after the last keeps even that one off
+        // the end. The real record is the only consistent one; ranked by
+        // layout alone, all eight came first and their three names won.
+        var single = ZipWriter()
+        single.add("a.txt", "the real entry")
+        let built = single.build()
+        let recordStart = try XCTUnwrap(built.range(of: Data([0x50, 0x4B, 0x01, 0x02]))).lowerBound
+        let endStart = try XCTUnwrap(built.range(of: Data([0x50, 0x4B, 0x05, 0x06]))).lowerBound
+        let record = built.subdata(in: recordStart..<endStart)
+        func renamed(_ name: String) -> Data {
+            var copy = record
+            copy.replaceSubrange((copy.startIndex + 46)..<(copy.startIndex + 51), with: Data(name.utf8))
+            return copy
+        }
+        let directory = renamed("c.txt") + renamed("d.txt") + renamed("e.txt")
+        func build(_ comment: Data) -> Data {
+            var writer = ZipWriter()
+            writer.add("a.txt", "the real entry")
+            writer.comment = comment
+            return writer.build()
+        }
+        let unit = directory.count + 22
+        let placeholder = Data(count: 8 * unit + 1)
+        let commentStart = build(placeholder).count - placeholder.count
+        let comment = (0..<8).reduce(Data()) { data, index in
+            let directoryAt = commentStart + index * unit
+            var end = Data([0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 3, 0, 3, 0])
+            end.append(contentsOf: withUnsafeBytes(of: UInt32(directory.count).littleEndian, Array.init))
+            end.append(contentsOf: withUnsafeBytes(of: UInt32(directoryAt).littleEndian, Array.init))
+            end.append(contentsOf: [0, 0])
+            return data + directory + end
+        } + Data([0x20])
+        let archive = try ZipArchive(data: build(comment))
+        XCTAssertEqual(archive.names, ["a.txt"])
+        XCTAssertEqual(String(decoding: try archive.read("a.txt"), as: UTF8.self), "the real entry")
     }
 
     func testAFolderReachedThroughALinkToItIsRead() throws {
