@@ -11,6 +11,29 @@ public let maxReadingHistogramDays = 400
 /// so a day holds at most 144; the ceiling is what keeps a damaged file from
 /// asking the statistics to build a run per sitting by the trillion.
 public let maxReadingSittingsPerDay = 200
+/// Books one day may name. Nobody types a hundred books in a day; a file
+/// that says so was not written by this app.
+public let maxReadingBooksPerDay = 100
+
+/// How many runs each of a day's books becomes in the statistics. The day's
+/// sittings, all books together, are held to the per-day ceiling, since one
+/// person sat down; every book still gets one run, which is what carries its
+/// characters and time. Only the runs are capped: the tallies themselves —
+/// typing and listening totals — are kept whole, so a day the app wrote is
+/// never cut short on reading back.
+func sittingRuns(_ row: [String: ReadingTally]) -> [String: Int] {
+    var budget = maxReadingSittingsPerDay
+    var runs: [String: Int] = [:]
+    for book in row.keys.sorted() {
+        let tally = row[book]!
+        guard tally.sentences > 0 else { continue }
+        let count = max(1, min(tally.sittings, budget))
+        budget = max(budget - count, 0)
+        runs[book] = count
+    }
+    return runs
+}
+
 /// Sittings the whole log may hold, newest kept: ten years at a sitting
 /// every two hours of a waking day, or centuries at one a day. A run is built
 /// per sitting, and the day ceiling alone still allows millions when every
@@ -231,20 +254,15 @@ public func decodeReadingLog(_ data: Data) throws -> ReadingLog {
     for (day, value) in object {
         guard isCalendarDayKey(day), let books = value as? [String: Any] else { continue }
         var row: [String: ReadingTally] = [:]
-        // One person, one day: the per-day ceiling holds across books too.
-        var daySittings = 0
         for book in books.keys.sorted() where isValidBookId(book) {
-            guard let tally = decodeTally(books[book]!),
-                daySittings + max(tally.sittings, 1) <= maxReadingSittingsPerDay
-            else { continue }
-            daySittings += max(tally.sittings, 1)
-            row[book] = tally
+            guard row.count < maxReadingBooksPerDay else { break }
+            if let tally = decodeTally(books[book]!) { row[book] = tally }
         }
         if !row.isEmpty { days[day] = row }
     }
     var total = 0
     for day in days.keys.sorted().reversed() {
-        total += days[day]!.values.reduce(0) { $0 + max($1.sittings, 1) }
+        total += sittingRuns(days[day]!).values.reduce(0, +)
         if total > maxReadingSittings { days.removeValue(forKey: day) }
     }
     var log = ReadingLog(days: days)
@@ -325,10 +343,11 @@ public func readingRuns(_ log: ReadingLog, calendar: Calendar) -> [RunResult] {
     var index = -1
     for day in log.days.keys.sorted() {
         guard let timestamp = noon(of: day, calendar: calendar), let books = log.days[day] else { continue }
+        let runCounts = sittingRuns(books)
         for book in books.keys.sorted() {
             let tally = books[book]!
-            guard tally.sentences > 0 else { continue }
-            for sitting in 0..<max(tally.sittings, 1) {
+            guard let count = runCounts[book] else { continue }
+            for sitting in 0..<count {
                 let first = sitting == 0
                 let minutes = tally.activeMs / msPerMinute
                 let metrics = RunMetrics(

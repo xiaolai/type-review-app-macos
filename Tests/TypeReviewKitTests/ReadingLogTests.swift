@@ -108,11 +108,33 @@ final class ReadingLogTests: XCTestCase {
             object[formatter.string(from: start.addingTimeInterval(Double(offset) * 86_400))] = ["b-1": tally]
         }
         let log = try decodeReadingLog(JSONSerialization.data(withJSONObject: object))
-        let perDay = log.days.values.map { $0.values.reduce(0) { $0 + $1.sittings } }
-        XCTAssertLessThanOrEqual(perDay.max() ?? 0, maxReadingSittingsPerDay)
+        let perDay = log.days.values.map { sittingRuns($0).values.reduce(0, +) }
+        XCTAssertLessThanOrEqual(perDay.max() ?? 0, maxReadingSittingsPerDay + 2, "one run more per extra book")
         XCTAssertLessThanOrEqual(perDay.reduce(0, +), maxReadingSittings)
         XCTAssertNotNil(log.days[formatter.string(from: start.addingTimeInterval(600 * 86_400))], "the newest are kept")
         XCTAssertLessThanOrEqual(readingRuns(log, calendar: calendar("Europe/London")).count, maxReadingSittings)
+    }
+
+    func testADayTheAppWroteReadsBackWhole() throws {
+        var log = ReadingLog()
+        for _ in 0..<maxReadingSittingsPerDay { log.record(sentence(sitting: true), on: "2026-05-02") }
+        log.record(sentence(book: "b-2", sitting: true), on: "2026-05-02")
+        XCTAssertEqual(try decodeReadingLog(try encodeReadingLog(log)), log, "the second book's totals survive")
+        let runs = readingRuns(log, calendar: calendar("Europe/London"))
+        XCTAssertEqual(runs.count, maxReadingSittingsPerDay + 1, "the first book's sittings, and one for the second")
+    }
+
+    func testADayNamingTooManyBooksIsCut() throws {
+        let good = try JSONSerialization.jsonObject(with: try encodeReadingLog({
+            var log = ReadingLog()
+            log.record(sentence(sitting: true), on: "2026-05-01")
+            return log
+        }())) as! [String: Any]
+        let tally = (good["2026-05-01"] as! [String: Any])["b-1"] as! [String: Any]
+        var row: [String: Any] = [:]
+        for index in 0..<(maxReadingBooksPerDay * 3) { row["b-\(index)"] = tally }
+        let log = try decodeReadingLog(JSONSerialization.data(withJSONObject: ["2026-05-01": row]))
+        XCTAssertEqual(log.days["2026-05-01"]?.count, maxReadingBooksPerDay)
     }
 
     func testALongLightHistoryIsKeptWhole() throws {
