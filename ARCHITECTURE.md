@@ -778,8 +778,8 @@ pauses. Window tabs were the other way to put them in one frame, and are the
 wrong one: tabs are for documents, and each could be closed, dragged out or
 multiplied. The two leading toolbar items belong to the screen showing and swap
 with it; the three trailing ones open windows from either screen and never move.
-The shortcuts are ⌥⌘1 and ⌥⌘2 because every free ⌘-digit is taken — ⌘2 and ⌘3
-open windows and ⌘4 to ⌘8 pick a source.
+The shortcuts are ⌥⌘1, ⌥⌘2 and ⌥⌘3 (Book) because every free ⌘-digit is taken —
+⌘2 and ⌘3 open windows and ⌘4 to ⌘8 pick a source.
 
 **The rules are in the Kit.** `FallingGame` has no AppKit and no clock: time
 arrives through `update(dt:)`, keys through `type(_:)`, and every random choice
@@ -823,6 +823,88 @@ sentence must read as English on its own: judged together, all of Play's text
 with three German sentences mixed in still reads as English at 0.998, while one
 sentence at a time names French, Spanish, German, Italian and Dutch correctly.
 "the cat sat on the mat." read as Turkish and was rephrased.
+
+## Book
+
+A parent imports a novel and a child types it, one sentence at a time, over
+weeks. It is the third screen of the main window (⌥⌘3), for the reasons Play is
+a screen: one keyboard, one drawer, never wanted beside the others.
+
+**Splitting happens once, at import, and is stored.** `NLTokenizer`'s output
+can change between macOS versions, and a stored place must not shift when it
+does. The pipeline is the Kit's (`Sources/TypeReviewKit/Book/`): a reader —
+plain text or EPUB — makes
+blocks — heading, paragraph, verse line, scene break — `repairBlocks` fixes what
+the corpus run found (mojibake, one printed line per paragraph, label
+paragraphs, page numbers, Gutenberg licence text), invisible formatting is
+stripped *before* `sanitize` so it is not counted as lost, and each paragraph is
+split on its raw text and cleaned one sentence at a time, because `sanitize`
+cuts at 5,000 characters and must never meet a chapter. No unit is empty or
+over 300 characters. The parent then reviews the parts in a sheet — story
+ticked, the rest listed unticked with the reason — and nothing is saved until
+Import.
+
+**EPUB is untrusted input, read in two shapes.** A ZIP file, and the folder
+named `*.epub` that Apple Books keeps — both behind one `BookArchive`, with the
+same limits: 64 MB in all, 10,000 entries, 16 MB an entry, a compression ratio
+of 100, CRC checked, ZIP64 and unsafe names refused. Every XML file goes
+through one parsing function with external entities off, and any file whose
+DOCTYPE has an internal subset or that declares an entity is refused before it
+is parsed; a test fails if a second `XMLDocument` call appears in the Kit.
+`XMLDocument` silently deletes undeclared entities such as `&nbsp;` when the
+XHTML DTD is declared, which the corpus run found in 353 books, so named
+entities are replaced before parsing. Each part of the spine is classified
+with the rule that fired — the book's own tags first, then its guide and
+landmarks, then the shape of the page — and the review sheet shows that
+reason. Copy-protected, fixed-layout and picture-only books are refused with
+a message. Every rule has a fixture built from public-domain or hand-written
+text; none is cut from a copyrighted book.
+
+**Book typing never enters the profile.** Each sentence is a `Session` run with
+passage id `book:<id>:<index>`, over a scratch profile that is never saved: a
+session records every run into its own profile, the profile is pinned to the
+website byte for byte, and its 500-run cap would push all practice out of it
+within days of a novel. What a sentence leaves goes to `BookStore` instead:
+
+| File | Holds | Written |
+|---|---|---|
+| `books/index.json` | id, title, author, sentence count, imported date | On import and on removal |
+| `books/<id>.json` | chapters and sentences, cleaned | Once, on import |
+| `books/<id>.progress.json` | the next sentence | After every sentence |
+| `reading.json` | per day per book: time, sentences, characters, keys, errors, sittings, sentences heard, bigrams | Every 60 s, on quit and on sleep |
+
+Every write is `writeDurably`, and a file that exists and cannot be read is
+never written over — the `LibraryStore` rule. The self-test corrupts each of
+the four, and `keystrokes.json`, and requires the bytes unchanged.
+
+**It counts in the statistics by merging, not by writing.** `readingRuns` turns
+each day of the log into synthetic runs — one per sitting, at noon local time,
+so daylight-saving days land on their date — and `combinedRuns` hands those
+with the practice runs to the website's own `streak`, `dailyCounts`,
+`charactersPerDay` and `aggregatePerKey`, which stay untouched and pinned by
+their vectors. The summary line's speeds stay practice-only, and the lesson
+planner sees practice runs only: feeding it book data would change which
+lessons a child gets, and that wants real data first. Reading speed is not
+measured; typing speed is not reading speed.
+
+**Enter and Tab throw nothing away.** On Practice they start a new run; here
+they are wired to nothing, and a finished sentence moves on by itself. A space
+typed out of habit before a sentence is ignored, since the space between
+sentences is never asked for. A half-typed sentence is not saved.
+
+**The voice is help the child asks for.** Hear Sentence (⌘R) and Hear Word
+(⇧⌘R) speak through the same `SpeechPlayer`, on demand. Read Each Sentence
+First, on the Sound pane, is off by default, because a sentence heard before
+every attempt turns reading into listening. Sentences heard are counted in the
+reading log so a parent can see which is happening. Speech that follows a
+keystroke is spoken on the next turn of the run loop, as Practice's is;
+`--speechbench` checks that typing a sentence speaks nothing on its stack.
+
+**The starter shelf** is two public-domain books, pre-split by `make shelf`
+into `Resources/shelf/` with `index.json` naming each one's source and date.
+`ShelfTextTests` is its gate. *Peter Pan* was left out deliberately: public
+domain in the United States, but the United Kingdom grants Great Ormond Street
+Hospital a perpetual royalty on it.
 
 ## The library
 

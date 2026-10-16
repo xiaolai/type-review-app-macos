@@ -132,6 +132,15 @@ final class TypingView: NSView, @preconcurrency NSTextInputClient {
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
 
+    /// Caret shape, whitespace marks and which keyboards may type, from the
+    /// preferences. Practice and Book read the same three, so they read them
+    /// here.
+    func applyTypingPreferences() {
+        caretStyle = AppPreferences.caretStyle.value
+        showsWhitespace = AppPreferences.showWhitespace.value
+        latinInputOnly = AppPreferences.latinInputOnly.value
+    }
+
     /// Replaces the passage. Rebuilds layout — the only time that happens.
     func setPassage(_ text: String, statuses: [CharStatus], cursor: Int) {
         let passageChanged = text != expected

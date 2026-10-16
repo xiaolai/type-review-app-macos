@@ -1,0 +1,18 @@
+[
+  {
+    "author" : "Lewis Carroll",
+    "id" : "shelf-alice-in-wonderland",
+    "license" : "Public domain",
+    "published" : 1865,
+    "source" : "https://www.gutenberg.org/ebooks/11",
+    "title" : "Alice's Adventures in Wonderland"
+  },
+  {
+    "author" : "L. Frank Baum",
+    "id" : "shelf-wizard-of-oz",
+    "license" : "Public domain",
+    "published" : 1900,
+    "source" : "https://www.gutenberg.org/ebooks/55",
+    "title" : "The Wonderful Wizard of Oz"
+  }
+]

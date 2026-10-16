@@ -56,7 +56,7 @@ public func makeUserPassage(
 
 /// The first `count` UTF-16 code units of `string`, matching JavaScript's
 /// `String.prototype.slice`.
-private func prefixByCodeUnits(_ string: String, _ count: Int) -> String {
+func prefixByCodeUnits(_ string: String, _ count: Int) -> String {
     let units = Array(string.utf16)
     guard units.count > count else { return string }
     return String(utf16CodeUnits: Array(units.prefix(count)), count: count)

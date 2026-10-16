@@ -122,8 +122,12 @@ final class SpeechPlayer: NSObject {
     /// forgets the old voice, leaving the new one to be resolved by whoever
     /// gets there first — `prepare()` normally, and the first thing to speak
     /// if preparation was somehow missed.
-    func setPassage(_ text: String) {
-        stop()
+    ///
+    /// `interrupting: false` lets the word in flight finish: the Book screen
+    /// moves to the next sentence on the keystroke that completes the last
+    /// word, and stopping there cut that word off.
+    func setPassage(_ text: String, interrupting: Bool = true) {
+        if interrupting { stop() }
         passage = text
         voice = nil
         voiceIsResolved = false
@@ -160,9 +164,112 @@ final class SpeechPlayer: NSObject {
         // immediate stop cuts the end off the word being spoken, and the end of
         // an English word is where its plural lives.
         synthesizer.stopSpeaking(at: .word)
-        synthesizer.speak(utterance(word))
+        trimToSpeaking()
+        hand(utterance(word), as: .word)
         wordsSpoken += 1
     }
+
+    /// A whole sentence, asked for on the Book screen.
+    ///
+    /// Never reached from a keystroke — a menu item, a toolbar button, or a
+    /// sentence arriving with Read Each Sentence First on.
+    ///
+    /// `interrupting: false` is a sentence read as it arrives. It waits for
+    /// the last word of the one before rather than cutting it off — any stop,
+    /// even at a word boundary, empties the synthesizer's queue, and the
+    /// finished word waiting there was never heard — but it is held here, not
+    /// queued there, and a newer one replaces it. Queued, a child typing
+    /// faster than the voice reads built a backlog of sentences still being
+    /// read long after they were typed. A sentence still being read when the
+    /// next arrives is stale, and stops at its next word boundary.
+    ///
+    /// Asked for by hand, the sentence is wanted now: whatever is speaking
+    /// stops at its next word boundary, and a held sentence is dropped.
+    func speak(sentence: String, interrupting: Bool = true) {
+        resolveVoice()
+        if interrupting {
+            heldSentence = nil
+            synthesizer.stopSpeaking(at: .word)
+            trimToSpeaking()
+            hand(utterance(sentence), as: .sentence)
+            sentencesSpoken += 1
+            return
+        }
+        if builtSynthesizer?.isSpeaking != true { (inFlight, kinds) = ([], [:]) }
+        guard !inFlight.isEmpty else {
+            // Older than this one, whatever was held: dropped, or it would be
+            // read after the sentence that replaced it.
+            heldSentence = nil
+            hand(utterance(sentence), as: .sentence)
+            sentencesSpoken += 1
+            return
+        }
+        // Stopped only when it is all there is. Anything queued behind it
+        // was queued by a call that stopped it already — a finished word —
+        // and stopping again would flush that word unheard.
+        if inFlight.count == 1, inFlight.first?.kind == .sentence {
+            synthesizer.stopSpeaking(at: .word)
+            trimToSpeaking()
+        }
+        heldSentence = sentence
+    }
+
+    /// What has been handed to the synthesizer and not yet reported ended, in
+    /// the order it will be spoken.
+    private enum Kind { case word, sentence }
+    ///
+    /// Each by its utterance's serial, so a callback for one already dropped
+    /// from the count — a stop discards what had not begun, and it may still
+    /// be reported later — touches nothing: removing whatever was first let a
+    /// late cancellation remove the utterance that replaced it.
+    private var inFlight: [(serial: Int, kind: Kind)] = []
+    /// The serial of the utterance reported to have begun and not yet ended.
+    private var startedSerial: Int?
+    private var nextSerial = 0
+    /// What each handed utterance is, until it ends — including those a stop
+    /// dropped from `inFlight`, whose start may still be reported.
+    private var kinds: [Int: Kind] = [:]
+    /// The highest serial reported to begin. The synthesizer speaks in the
+    /// order it was handed, and serials only rise, so a start reported for a
+    /// lower one — after the one that followed it — is stale.
+    private var highestStarted = 0
+    /// The newest sentence waiting for what is in flight to end. At most one.
+    private var heldSentence: String?
+
+    private func hand(_ utterance: SerialUtterance, as kind: Kind) {
+        inFlight.append((utterance.serial, kind))
+        kinds[utterance.serial] = kind
+        synthesizer.speak(utterance)
+    }
+
+    /// After a stop only the utterance being spoken can still end; the rest
+    /// of the queue is gone, and may never be reported — so one that had not
+    /// begun is not waited for either.
+    private func trimToSpeaking() {
+        inFlight = inFlight.first.map { $0.serial == startedSerial } == true ? Array(inFlight.prefix(1)) : []
+    }
+
+    /// An utterance ended. When nothing is left in flight, the held sentence
+    /// is spoken.
+    private func utteranceDone(_ serial: Int) {
+        inFlight.removeAll { $0.serial == serial }
+        kinds[serial] = nil
+        if startedSerial == serial { startedSerial = nil }
+        // The count is bookkeeping; the synthesizer is the truth. Idle, there
+        // is nothing to wait for, whatever the count says.
+        if builtSynthesizer?.isSpeaking != true { (inFlight, kinds) = ([], [:]) }
+        guard inFlight.isEmpty, let sentence = heldSentence else { return }
+        heldSentence = nil
+        hand(utterance(sentence), as: .sentence)
+        sentencesSpoken += 1
+    }
+
+    /// Whether anything is speaking or waiting to, for `--speechbench`.
+    var isBusy: Bool { !inFlight.isEmpty || heldSentence != nil }
+
+    /// Sentences handed to the synthesizer, for `--speechbench`, as
+    /// `wordsSpoken` is for words.
+    private(set) var sentencesSpoken = 0
 
     /// Silences everything. Safe to call when nothing is speaking.
     func stop() {
@@ -171,14 +278,17 @@ final class SpeechPlayer: NSObject {
         // which is exactly the work `prepare()` exists to keep off other
         // people's stacks — and `stop()` runs at the start of every run.
         builtSynthesizer?.stopSpeaking(at: .immediate)
+        heldSentence = nil
+        trimToSpeaking()
     }
 
     /// Speech rides the app's existing sound volume, so one slider governs
     /// everything audible. Read per utterance rather than cached: it is one
     /// `UserDefaults` lookup against an utterance that is about to be
     /// synthesised, and a stale volume is a slider that does nothing.
-    private func utterance(_ text: String) -> AVSpeechUtterance {
-        let utterance = AVSpeechUtterance(string: text)
+    private func utterance(_ text: String) -> SerialUtterance {
+        nextSerial += 1
+        let utterance = SerialUtterance(string: text, serial: nextSerial)
         utterance.voice = voice
         utterance.volume = Float(AppPreferences.soundVolume.value)
         return utterance
@@ -225,7 +335,9 @@ final class SpeechPlayer: NSObject {
         // here for free.
         resolveVoice()
         synthesizer.stopSpeaking(at: .immediate)
-        synthesizer.speak(utterance(voice?.name ?? "Automatic"))
+        heldSentence = nil
+        trimToSpeaking()
+        hand(utterance(voice?.name ?? "Automatic"), as: .word)
     }
 
     /// The best installed voice for a language tag, or nil for the system
@@ -309,41 +421,83 @@ enum SpeechVoices {
 }
 
 extension SpeechPlayer: AVSpeechSynthesizerDelegate {
-    /// `nonisolated`, and it carries nothing across the hop at all.
+    /// `nonisolated`, and it carries one integer across the hop: the
+    /// utterance's serial, read here.
     ///
     /// Not the utterance, which is not `Sendable`, and not its identity either:
     /// an `ObjectIdentifier` is an address, and the object it names can be
-    /// released and its address reused before the hop lands. Nothing here needs
-    /// to know *which* utterance ended — only how long it lasted, and that is
-    /// timed on the main actor from `utteranceStartedAt`, which is where the
-    /// duration that tells a whole word from a clipped one comes from.
+    /// released and its address reused before the hop lands. The serial is a
+    /// number nothing reuses, and says which entry of `inFlight` ended. How
+    /// long it lasted is timed on the main actor from `utteranceStartedAt`,
+    /// which is where the duration that tells a whole word from a clipped one
+    /// comes from.
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance
     ) {
-        Task { @MainActor [weak self] in self?.utteranceBegan() }
+        let serial = (utterance as? SerialUtterance)?.serial ?? -1
+        Task { @MainActor [weak self] in self?.utteranceBegan(serial) }
     }
 
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance
     ) {
-        Task { @MainActor [weak self] in self?.utteranceEnded() }
+        let serial = (utterance as? SerialUtterance)?.serial ?? -1
+        Task { @MainActor [weak self] in self?.utteranceEnded(serial) }
     }
 
     /// A cancelled utterance ends too, and is reported for the same reason.
     nonisolated func speechSynthesizer(
         _ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance
     ) {
-        Task { @MainActor [weak self] in self?.utteranceEnded() }
+        let serial = (utterance as? SerialUtterance)?.serial ?? -1
+        Task { @MainActor [weak self] in self?.utteranceEnded(serial) }
     }
 
-    private func utteranceBegan() {
+    /// The synthesizer is the truth: an utterance reported to begin is
+    /// speaking, even one a stop had already dropped from the count before
+    /// its start was reported, so it goes back to the head. A start for one
+    /// already ended — the callbacks hop to the main actor one by one, and
+    /// nothing promises their order — or for one the player no longer knows
+    /// is stale, and changes nothing: taking it as speaking let a later stop
+    /// keep it and discard the utterance actually speaking. So is a start for
+    /// one older than an utterance already begun.
+    private func utteranceBegan(_ serial: Int) {
+        guard serial > highestStarted, let kind = kinds[serial] else { return }
+        highestStarted = serial
+        if let index = inFlight.firstIndex(where: { $0.serial == serial }) {
+            inFlight.remove(at: index)
+        }
+        inFlight.insert((serial, kind), at: 0)
+        startedSerial = serial
         utteranceStartedAt = Date()
         onWordStarted?()
     }
 
-    private func utteranceEnded() {
-        guard let startedAt = utteranceStartedAt else { return }
+    /// Timed only when it is the one that began: the end of one dropped
+    /// before it ever started says nothing about how long the one speaking
+    /// has lasted.
+    private func utteranceEnded(_ serial: Int) {
+        let wasSpeaking = serial == startedSerial
+        utteranceDone(serial)
+        guard wasSpeaking, let startedAt = utteranceStartedAt else { return }
         utteranceStartedAt = nil
         onWordEnded?(Int(Date().timeIntervalSince(startedAt) * 1000))
+    }
+}
+
+/// An utterance with a number of its own, so a callback says which one it
+/// is about. The number crosses to the main actor; the utterance, which is
+/// not `Sendable`, never does, and no address is ever compared.
+final class SerialUtterance: AVSpeechUtterance {
+    let serial: Int
+
+    init(string: String, serial: Int) {
+        self.serial = serial
+        super.init(string: string)
+    }
+
+    required init?(coder: NSCoder) {
+        serial = -1
+        super.init(coder: coder)
     }
 }

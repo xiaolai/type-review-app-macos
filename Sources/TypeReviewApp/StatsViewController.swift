@@ -58,8 +58,41 @@ final class StatsViewController: NSViewController {
     /// on. Nil rather than an empty log, so "off" and "nothing typed" stay
     /// distinguishable — they draw the same grid otherwise.
     var keystrokes: () -> KeystrokeLog? = { nil }
+    /// Book typing per day. It counts here — in the streak, the grid and the
+    /// key tables — merged in by `combinedRuns`, never written into the
+    /// profile. The summary line's speeds stay practice runs only: a sentence
+    /// is not a practice run, and averaging the two would describe neither.
+    var reading: () -> ReadingLog = { ReadingLog() }
+    /// The books on the shelf and the next sentence in each.
+    var shelf: () -> [(summary: BookSummary, sentence: Int)] = { [] }
+    /// The Books section: one line and one speed curve per book typed.
+    private let booksHeading = NSTextField(labelWithString: "Books")
+    private let booksStack = NSStackView()
+    /// The rows scroll inside a bounded band, so a long shelf cannot push the
+    /// key table off the bottom of the window.
+    private let booksScroll = NSScrollView()
+    ///
+    /// The band gives way before the key table does: its preferred height
+    /// yields to the table's floor, down to a floor of its own that still
+    /// shows a row. At the window's minimum height the header had taken it
+    /// all and left the table none.
+    private lazy var booksScrollHeight: NSLayoutConstraint = {
+        let height = booksScroll.heightAnchor.constraint(equalToConstant: 0)
+        height.priority = .defaultHigh
+        return height
+    }()
+    private lazy var booksScrollFloor = booksScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+    private static let booksMaxHeight: CGFloat = 132
+    private static let booksMinHeight: CGFloat = 40
+    /// The least of the key table ever shown: a header and a few rows. Held
+    /// by a required constraint, so the window stops shrinking before the
+    /// table disappears.
+    static let keyTableMinHeight: CGFloat = 96
     private var runObserver: NSObjectProtocol?
     private var dayObserver: NSObjectProtocol?
+    private var bookObserver: NSObjectProtocol?
+    /// The key table's scroll view, once installed.
+    private weak var keyScroll: NSScrollView?
 
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
@@ -111,6 +144,33 @@ final class StatsViewController: NSViewController {
         return scroll
     }
 
+    /// The Books section: its heading, and its rows in a scroll view of their
+    /// own, which gives way before the key table does.
+    private func configureBooks() {
+        booksHeading.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        booksStack.orientation = .vertical
+        booksStack.alignment = .leading
+        booksStack.spacing = 6
+        let books = FlippedView()
+        booksStack.translatesAutoresizingMaskIntoConstraints = false
+        books.addSubview(booksStack)
+        books.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            booksStack.topAnchor.constraint(equalTo: books.topAnchor),
+            booksStack.leadingAnchor.constraint(equalTo: books.leadingAnchor),
+            booksStack.trailingAnchor.constraint(equalTo: books.trailingAnchor),
+            booksStack.bottomAnchor.constraint(equalTo: books.bottomAnchor),
+        ])
+        booksScroll.documentView = books
+        booksScroll.hasVerticalScroller = true
+        booksScroll.autohidesScrollers = true
+        booksScroll.drawsBackground = false
+        booksScroll.borderType = .noBorder
+        books.widthAnchor.constraint(equalTo: booksScroll.contentView.widthAnchor).isActive = true
+        booksScrollHeight.isActive = true
+        booksScrollFloor.isActive = true
+    }
+
     private func makeHeader() -> NSStackView {
         grouping.selectedSegment = 0
         grouping.target = self
@@ -137,7 +197,8 @@ final class StatsViewController: NSViewController {
         metric.isBordered = false
         metric.controlSize = .small
         metric.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        let header = NSStackView(views: [summary, streakLabel, metric, calendar])
+        configureBooks()
+        let header = NSStackView(views: [summary, streakLabel, metric, calendar, booksHeading, booksScroll])
         header.orientation = .vertical
         header.alignment = .leading
         header.spacing = 6
@@ -145,9 +206,11 @@ final class StatsViewController: NSViewController {
         // of it, so it gets air the two labels do not.
         header.setCustomSpacing(14, after: streakLabel)
         header.setCustomSpacing(6, after: metric)
+        header.setCustomSpacing(16, after: calendar)
         // Full width, so the grid has room for all twenty columns rather than
         // being squeezed to the width of the longest label above it.
         calendar.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
+        booksScroll.widthAnchor.constraint(equalTo: header.widthAnchor).isActive = true
         header.translatesAutoresizingMaskIntoConstraints = false
         return header
     }
@@ -163,18 +226,30 @@ final class StatsViewController: NSViewController {
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 20),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -20),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -20),
+            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.keyTableMinHeight),
         ])
+        keyScroll = scroll
     }
 
     /// Re-reads and redisplays. Called when the window opens and whenever a
     /// run finishes while it is open.
     func refresh() { present(results: history()) }
 
+    /// The Books section's lines, for `--selftest`.
+    var bookLines: [String] {
+        booksStack.isHidden ? [] : booksStack.arrangedSubviews.compactMap {
+            ($0 as? NSStackView)?.arrangedSubviews.compactMap { ($0 as? NSTextField)?.stringValue }.first
+        }
+    }
+
     // MARK: - Probes
     //
     // Read by `--selftest` and by nothing else. The Statistics window is built
     // lazily when somebody clicks, so everything in it is one refactor away
     // from being broken in a build that otherwise passes.
+
+    /// How tall the key table is laid out, for `--selftest`.
+    var keyTableHeight: CGFloat { keyScroll?.frame.height ?? 0 }
 
     /// Whether the practice grid is showing, and how many cells it holds.
     var calendarState: (hidden: Bool, cells: Int) { (calendar.isHidden, calendar.cellCount) }
@@ -203,18 +278,26 @@ final class StatsViewController: NSViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
+        // And book typing, which finishes no practice run: a sentence typed or
+        // heard, a book added or removed.
+        bookObserver = NotificationCenter.default.addObserver(
+            forName: BookStore.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }
     }
 
     override func viewDidDisappear() {
         super.viewDidDisappear()
-        // Both, from one list. Removing them one named field at a time is how
+        // All three, from one list. Removing them one named field at a time is how
         // the second one gets forgotten — which it was, the moment it was
         // added a few lines above.
-        for observer in [runObserver, dayObserver].compactMap({ $0 }) {
+        for observer in [runObserver, dayObserver, bookObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(observer)
         }
         runObserver = nil
         dayObserver = nil
+        bookObserver = nil
     }
 
     func present(results: [RunResult]) {
@@ -223,7 +306,15 @@ final class StatsViewController: NSViewController {
         // where the heading is the only thing on screen saying what the empty
         // table would have contained.
         table.tableColumns.first?.title = grouping.selectedSegment == 1 ? "Finger" : "Key"
-        guard !results.isEmpty else {
+        // Named to avoid shadowing the calendar *view* this controller now
+        // holds. The two are one letter apart and mean entirely different
+        // things.
+        let statsCalendar = localStatisticsCalendar()
+        let log = reading()
+        // Practice and book typing together, for everything below the summary.
+        let combined = combinedRuns(practice: results, reading: log, calendar: statsCalendar)
+        presentBooks(log)
+        guard !combined.isEmpty else {
             summary.stringValue = "No runs yet."
             streakLabel.stringValue = ""
             calendar.isHidden = true
@@ -236,20 +327,20 @@ final class StatsViewController: NSViewController {
         metric.isHidden = false
         markMetric()
 
-        let best = results.map(\.metrics.netWpm).max() ?? 0
-        let recent = results.suffix(10).map(\.metrics.netWpm)
-        let average = recent.reduce(0, +) / Double(recent.count)
-        summary.stringValue = String(
-            format: "%d runs · best %.0f wpm · last 10 average %.0f wpm", results.count, best,
-            average)
+        if results.isEmpty {
+            summary.stringValue = "No practice runs yet."
+        } else {
+            let best = results.map(\.metrics.netWpm).max() ?? 0
+            let recent = results.suffix(10).map(\.metrics.netWpm)
+            let average = recent.reduce(0, +) / Double(recent.count)
+            summary.stringValue = String(
+                format: "%d runs · best %.0f wpm · last 10 average %.0f wpm", results.count, best,
+                average)
+        }
 
-        // Named to avoid shadowing the calendar *view* this controller now
-        // holds. The two are one letter apart and mean entirely different
-        // things.
-        let statsCalendar = localStatisticsCalendar()
         let now = Date().timeIntervalSince1970 * 1000
-        let days = streak(results, now: now, calendar: statsCalendar)
-        let practiceDays = dailyCounts(results, calendar: statsCalendar).count
+        let days = streak(combined, now: now, calendar: statsCalendar)
+        let practiceDays = dailyCounts(combined, calendar: statsCalendar).count
         // The preference, not the control. `makeHeader` is what seeds the
         // segment, and it runs lazily on first view access -- so anything
         // asking before the window is on screen read segment 0 and got
@@ -259,14 +350,15 @@ final class StatsViewController: NSViewController {
         // says "All keystrokes" reads as "you have typed nothing", not as
         // "this is switched off".
         var chosen = AppPreferences.statsMetric.value
-        let log = chosen == .keystrokes ? keystrokes() : nil
-        if chosen == .keystrokes, log == nil { chosen = .characters }
+        let counted = chosen == .keystrokes ? keystrokes() : nil
+        if chosen == .keystrokes, counted == nil { chosen = .characters }
 
         let perDay: OrderedMap<Int>
         switch chosen {
-        case .sessions: perDay = dailyCounts(results, calendar: statsCalendar)
-        case .characters: perDay = charactersPerDay(results, calendar: statsCalendar)
-        case .keystrokes: perDay = log?.countsByDay() ?? OrderedMap<Int>()
+        case .sessions: perDay = dailyCounts(combined, calendar: statsCalendar)
+        case .characters: perDay = charactersPerDay(combined, calendar: statsCalendar)
+        case .keystrokes: perDay = counted?.countsByDay() ?? OrderedMap<Int>()
+        case .bookMinutes: perDay = readingMinutesPerDay(log)
         }
         calendar.show(
             practiceCalendar(
@@ -279,7 +371,7 @@ final class StatsViewController: NSViewController {
 
         // Sorted slowest first: the table is a list of what to work on, so the
         // useful row is at the top rather than wherever the alphabet puts it.
-        let perKey = aggregatePerKey(results)
+        let perKey = aggregatePerKey(combined)
         if grouping.selectedSegment == 1 {
             // Left in the hand's own order rather than sorted slowest-first.
             // Nine rows read as a pair of hands when they are laid out like
@@ -306,6 +398,57 @@ final class StatsViewController: NSViewController {
                 }
         }
         table.reloadData()
+    }
+
+    /// One line per book typed: how far, how long, how long to go, and the
+    /// speed curve from the first chapter to the last. Typing speed, not
+    /// reading speed — this app does not measure reading, and a number that
+    /// pretended to would be worse than none.
+    private func presentBooks(_ log: ReadingLog) {
+        for view in booksStack.arrangedSubviews { view.removeFromSuperview() }
+        for (book, sentence) in shelf() {
+            let totals = bookTotals(log, bookId: book.id)
+            guard totals.sentences > 0 || sentence > 0 else { continue }
+            let percent = book.sentenceCount > 0 ? min(100, sentence * 100 / book.sentenceCount) : 0
+            var parts = [
+                "\(book.title) — \(percent)%",
+                "\(totals.sentences.formatted()) \(totals.sentences == 1 ? "sentence" : "sentences")",
+                Self.duration(minutes: totals.activeMs / 60_000),
+            ]
+            if let left = estimatedMinutesLeft(sentencesLeft: book.sentenceCount - sentence, totals: totals),
+                sentence < book.sentenceCount
+            {
+                parts.append("about \(Self.duration(minutes: left)) left")
+            }
+            if let wpm = totals.wpm { parts.append(String(format: "%.0f wpm", wpm)) }
+            if totals.sentencesHeard > 0 { parts.append("heard \(totals.sentencesHeard)") }
+            let label = NSTextField(labelWithString: parts.joined(separator: " · "))
+            label.font = Theme.statFont
+            label.textColor = Theme.secondaryText
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let curve = ChapterSpeedView(speeds: chapterSpeeds(log, bookId: book.id).map(\.wpm))
+            let row = NSStackView(views: [label, curve])
+            row.spacing = 10
+            row.alignment = .centerY
+            booksStack.addArrangedSubview(row)
+        }
+        let empty = booksStack.arrangedSubviews.isEmpty
+        booksStack.isHidden = empty
+        booksScroll.isHidden = empty
+        booksHeading.isHidden = empty
+        booksStack.layoutSubtreeIfNeeded()
+        let rows = booksStack.fittingSize.height
+        booksScrollHeight.constant = min(rows, Self.booksMaxHeight)
+        booksScrollFloor.constant = min(rows, Self.booksMinHeight)
+    }
+
+    /// "25 min", "3 h 10 min".
+    static func duration(minutes: Double) -> String {
+        let whole = max(0, Int(minutes.rounded()))
+        if whole < 60 { return "\(whole) min" }
+        let rest = whole % 60
+        return rest == 0 ? "\(whole / 60) h" : "\(whole / 60) h \(rest) min"
     }
 
     @objc private func metricChanged() {
@@ -435,4 +578,48 @@ extension StatsViewController: NSTableViewDataSource, NSTableViewDelegate {
         if identifier == "err", entry.errorRate > 0.05 { label.textColor = Theme.incorrect }
         return label
     }
+}
+
+/// Typing speed by chapter, first to last, as one small line. Tells a parent
+/// whether the child is getting faster through the book, which is the
+/// question; the numbers are in the tooltip for anyone who wants them.
+final class ChapterSpeedView: NSView {
+    let speeds: [Double]
+
+    init(speeds: [Double]) {
+        self.speeds = speeds
+        super.init(frame: NSRect(x: 0, y: 0, width: 120, height: 22))
+        toolTip = speeds.isEmpty
+            ? nil : "Typing speed by chapter: " + speeds.map { String(format: "%.0f", $0) }.joined(separator: " → ") + " wpm"
+        setAccessibilityLabel(toolTip)
+        isHidden = speeds.count < 2
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: 120, height: 22) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard speeds.count >= 2, let low = speeds.min(), let high = speeds.max() else { return }
+        let span = max(high - low, 1)
+        let inset = bounds.insetBy(dx: 2, dy: 3)
+        let path = NSBezierPath()
+        for (index, speed) in speeds.enumerated() {
+            let point = NSPoint(
+                x: inset.minX + inset.width * CGFloat(index) / CGFloat(speeds.count - 1),
+                y: inset.minY + inset.height * CGFloat((speed - low) / span))
+            index == 0 ? path.move(to: point) : path.line(to: point)
+        }
+        path.lineWidth = 1.5
+        path.lineJoinStyle = .round
+        Theme.caret.setStroke()
+        path.stroke()
+    }
+}
+
+/// A view whose origin is its top-left, so a stack inside a scroll view
+/// starts at the top rather than the bottom.
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

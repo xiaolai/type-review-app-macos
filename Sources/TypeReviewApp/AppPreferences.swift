@@ -130,6 +130,16 @@ enum AppPreferences {
     /// is: that schema is shared with the website and pinned by golden vector.
     static let speakWords = Flag(key: "SpeakWords")
 
+    /// Whether the Book screen reads each sentence aloud as it appears.
+    ///
+    /// Off by default, and that is the design rather than caution. The book is
+    /// there to be read: a sentence heard before every attempt turns reading
+    /// into listening, and the child copies what they heard. On demand — Speak
+    /// Sentence — is the help; this is for a child who cannot yet read the
+    /// book alone. The reading log counts sentences heard either way, so a
+    /// parent can see which is happening.
+    static let readSentencesFirst = Flag(key: "ReadSentencesFirst")
+
     /// Which voice reads the words, by `AVSpeechSynthesisVoice.identifier`.
     ///
     /// Empty means automatic — follow the language of the passage, which is
@@ -181,6 +191,18 @@ enum AppPreferences {
     /// speech, typing preferences and the drawer on every switch of screen.
     static let mainScreen = Choice<MainScreen>(key: "MainScreen", default: .practice, announces: false)
 
+    /// The book the Book screen showed last, by id, so it opens on it.
+    /// Remembered, not observed, like `mainScreen`. Never written by a check
+    /// — see `BookViewController.remember(_:)`.
+    enum lastBook {
+        static let key = "LastBook"
+
+        static var value: String? {
+            get { UserDefaults.standard.string(forKey: key) }
+            set { UserDefaults.standard.set(newValue, forKey: key) }
+        }
+    }
+
     /// What Play drops: letters, words or sentences.
     static let playMode = Choice<PlayMode>(key: "PlayMode", default: .words, announces: false)
 
@@ -203,12 +225,15 @@ enum AppPreferences {
         case characters = "Characters"
         /// Keys pressed anywhere, when `countKeystrokes` is on.
         case keystrokes = "Keystrokes"
+        /// Minutes spent typing a book that day.
+        case bookMinutes = "BookMinutes"
 
         var label: String {
             switch self {
             case .sessions: return "Sessions"
             case .characters: return "Characters here"
             case .keystrokes: return "All keystrokes"
+            case .bookMinutes: return "Minutes reading"
             }
         }
     }

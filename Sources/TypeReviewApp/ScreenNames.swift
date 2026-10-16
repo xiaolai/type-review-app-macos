@@ -1,7 +1,7 @@
 import AppKit
 import TypeReviewKit
 
-/// What the two screens and Play's modes are called and how they are reached,
+/// What the screens and Play's modes are called and how they are reached,
 /// written once. The toolbar's switch and tooltips, the View menu and the
 /// status bar all read these; written out in each, they would drift.
 extension MainScreen {
@@ -9,6 +9,7 @@ extension MainScreen {
         switch self {
         case .practice: return "Practice"
         case .play: return "Play"
+        case .book: return "Book"
         }
     }
 
@@ -18,6 +19,7 @@ extension MainScreen {
         switch self {
         case .practice: return "1"
         case .play: return "2"
+        case .book: return "3"
         }
     }
 

@@ -243,7 +243,7 @@ endif
 
 .DEFAULT_GOAL := all
 
-.PHONY: all run selftest soundcheck speechbench quit-running test remote runner-test icon clean notarize password-managers version appstore zip release pkg verify-pkg validate upload
+.PHONY: all run selftest soundcheck speechbench quit-running test remote runner-test icon clean notarize password-managers epub-corpus version appstore zip release pkg verify-pkg validate upload shelf
 
 all: $(APP)
 
@@ -789,6 +789,20 @@ version:
 	@printf 'tree      : %s\n' \
 		"$$(test -z "$$(git status --porcelain 2>/dev/null)" && echo clean || echo 'DIRTY — a build from this is not reproducible')"
 
+# The EPUB reader run over every EPUB Spotlight finds on this Mac, the probe's
+# measurements as a gate: it exits non-zero if any unit is empty or over the
+# sentence cap, any piece was cut, or English books start more than 3 units in
+# 1,000 with a lower-case letter. Books iCloud has not downloaded are skipped,
+# not fetched, and copies are read once.
+#
+# Local only, and never in CI: the books are private and mostly copyrighted.
+# It prints numbers and the paths of failing books, and writes nothing beyond
+# the build products every target leaves in .build. Pass paths to measure
+# just those: `make epub-corpus EPUBS="a.epub b.epub"`.
+epub-corpus:
+	swift build -c $(CONFIG) --product EpubCorpus $(LINK_SDK)
+	"$(BIN_DIR)/EpubCorpus" $(EPUBS)
+
 # Re-check the password-manager list against Homebrew and the App Store.
 #
 # Not part of `make test`: it needs the network, and a gate that goes red
@@ -801,6 +815,26 @@ password-managers:
 	trap 'rm -rf "$$work"' EXIT; \
 	swiftc -O Tools/password-managers.swift -o "$$work/check"; \
 	"$$work/check"
+
+# Rebuilds the starter shelf from Project Gutenberg's plain text: each book
+# read the way Import reads one, then written into the Kit's resources with its
+# line in index.json. Network, so not part of `make test`; `ShelfTextTests` is
+# the gate on what it writes. A book that draws any warning is refused. The
+# download goes to its own empty folder and is deleted afterwards.
+SHELF_DIR = Sources/TypeReviewKit/Resources/shelf
+SHELF_BOOKS = shelf-wizard-of-oz:55:1900 shelf-alice-in-wonderland:11:1865
+shelf:
+	@set -e; \
+	work=$$(mktemp -d); \
+	trap 'rm -rf "$$work"' EXIT; \
+	swift build -c release --product make-shelf; \
+	for book in $(SHELF_BOOKS); do \
+		id=$${book%%:*}; rest=$${book#*:}; number=$${rest%%:*}; year=$${rest#*:}; \
+		mkdir "$$work/$$number"; \
+		curl -sSfL -o "$$work/$$number/pg$$number.txt" "https://gutenberg.pglaf.org/cache/epub/$$number/pg$$number.txt"; \
+		.build/release/make-shelf "$$id" "$$work/$$number/pg$$number.txt" \
+			"https://www.gutenberg.org/ebooks/$$number" "$$year" $(SHELF_DIR); \
+	done
 
 notarize: $(APP)
 	@security find-identity -v -p codesigning | grep -q "$(SIGN_ID)" \

@@ -307,6 +307,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
                 grid, "Speak words", self.flagToggle(AppPreferences.speakWords),
                 hint: "A word is read aloud when it is finished and correct. "
                     + "Not in code or generated drills.")
+            // One row and no caption: the pane is at the window's height
+            // budget, and a caption is a second row. What the setting costs
+            // is said in the checkbox's own title instead.
+            let readFirst = self.flagToggle(AppPreferences.readSentencesFirst)
+            (readFirst as? NSButton)?.title = "Read each sentence first — they listen instead of reading"
+            self.addRow(grid, "Book", readFirst)
             self.addRow(
                 grid, "Voice", self.speechVoicePopup(),
                 hint: "Automatic follows the language of the text. Picking one says its name.")
