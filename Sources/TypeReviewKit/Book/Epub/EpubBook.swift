@@ -128,7 +128,8 @@ private func loadSpineItems(
 }
 
 private func spineFacts(_ spine: SpineItem, text: ChapterText, label: String, package: EpubPackage) -> SpineFacts {
-    let joined = text.blocks.flatMap(\.lines).joined(separator: " ")
+    // A line apiece, so a Gutenberg marker still begins its line.
+    let joined = text.blocks.flatMap(\.lines).joined(separator: "\n")
     var facts = SpineFacts()
     facts.linear = spine.linear
     facts.isNavigation = spine.path == package.navigationPath || spine.path == package.ncxPath

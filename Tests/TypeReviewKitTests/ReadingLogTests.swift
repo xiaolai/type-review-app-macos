@@ -124,6 +124,22 @@ final class ReadingLogTests: XCTestCase {
         XCTAssertEqual(runs.count, maxReadingSittingsPerDay + 1, "the first book's sittings, and one for the second")
     }
 
+    func testDaysOfListeningOnlyAreBoundedToo() throws {
+        var heard = ReadingLog()
+        heard.recordHeard(bookId: "b-1", on: "2026-05-01")
+        let tally = (try JSONSerialization.jsonObject(with: try encodeReadingLog(heard)) as! [String: Any])["2026-05-01"]!
+        let start = Date(timeIntervalSince1970: 0)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        var object: [String: Any] = [:]
+        for offset in 0..<(maxReadingSittings + 500) {
+            object[formatter.string(from: start.addingTimeInterval(Double(offset) * 86_400))] = tally
+        }
+        let log = try decodeReadingLog(JSONSerialization.data(withJSONObject: object))
+        XCTAssertEqual(log.days.count, maxReadingSittings, "each day costs one, newest kept")
+    }
+
     func testADayNamingTooManyBooksIsCut() throws {
         let good = try JSONSerialization.jsonObject(with: try encodeReadingLog({
             var log = ReadingLog()

@@ -98,10 +98,15 @@ private let numberOnly = try! NSRegularExpression(pattern: "^[\\[(]?\\d{1,4}[\\]
 /// rest of its line, to the closing stars when there are any. One pair, used
 /// both to cut a chapter file and to tell a whole short book from a licence,
 /// so a book kept for its markers always has them cut.
+///
+/// A marker begins its line. Unanchored, "a weekend of Project Gutenberg
+/// reading" was an end marker, and everything after it was cut.
 let gutenbergStart = try! NSRegularExpression(
-    pattern: "START OF TH[A-Z]*\\s+PROJECT GUTENBERG(?:[^*]{0,200}\\*{3})?", options: [.caseInsensitive])
+    pattern: "^[ \\t]*(?:\\*{3}\\s*)?START OF TH[A-Z]*\\s+PROJECT GUTENBERG(?:[^*\\n]{0,200}\\*{3})?",
+    options: [.caseInsensitive, .anchorsMatchLines])
 let gutenbergEnd = try! NSRegularExpression(
-    pattern: "(?:\\*{3}\\s*)?END OF (?:TH[A-Z]*\\s+)?PROJECT GUTENBERG", options: [.caseInsensitive])
+    pattern: "^[ \\t]*(?:\\*{3}\\s*)?END OF (?:TH[A-Z]*\\s+)?PROJECT GUTENBERG",
+    options: [.caseInsensitive, .anchorsMatchLines])
 
 /// Repairs one file's blocks before they are split into sentences.
 ///

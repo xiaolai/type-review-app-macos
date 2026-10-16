@@ -121,12 +121,8 @@ func isCasedAsTitle(_ text: String) -> Bool {
     return isTitleCased(text)
 }
 
-/// Two printed lines of one paragraph, joined. A word broken across them keeps
-/// its hyphen and loses the space; a dash ("--") is not a broken word.
-func joinWrapped(_ before: String, _ after: String) -> String {
-    before + wrapGlue(after: before) + after
-}
-
+/// What joins two printed lines of one paragraph. A word broken across them
+/// keeps its hyphen and loses the space; a dash ("--") is not a broken word.
 func wrapGlue(after before: String) -> String {
     before.hasSuffix("-") && !before.hasSuffix("--") ? "" : " "
 }

@@ -282,6 +282,14 @@ final class BookRepairTests: XCTestCase {
         XCTAssertEqual(blocks.first, .heading("THE TITLE"))
     }
 
+    func testProseNamingProjectGutenbergIsNotAMarker() {
+        let input: [BookBlock] = [
+            .paragraph("She spent a weekend of Project Gutenberg reading."),
+            .paragraph("At the end of Project Gutenberg's list she found it."), .paragraph("Then she slept."),
+        ]
+        XCTAssertEqual(repairBlocks(input).blocks, input)
+    }
+
     func testEveryGutenbergEndMarkerIsCut() {
         for marker in ["END OF PROJECT GUTENBERG'S THE BOAT", "End of the Project Gutenberg EBook of The Boat"] {
             let (blocks, _) = repairBlocks([.paragraph("The river ran fast."), .paragraph(marker), .paragraph("License.")])

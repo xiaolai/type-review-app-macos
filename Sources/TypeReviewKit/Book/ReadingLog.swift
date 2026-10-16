@@ -262,7 +262,9 @@ public func decodeReadingLog(_ data: Data) throws -> ReadingLog {
     }
     var total = 0
     for day in days.keys.sorted().reversed() {
-        total += sittingRuns(days[day]!).values.reduce(0, +)
+        // At least one a day: a day of listening only builds no run, and
+        // charged nothing it let a damaged file keep days by the million.
+        total += max(1, sittingRuns(days[day]!).values.reduce(0, +))
         if total > maxReadingSittings { days.removeValue(forKey: day) }
     }
     var log = ReadingLog(days: days)
