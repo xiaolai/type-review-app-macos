@@ -201,14 +201,19 @@ public final class Session {
     /// A one-off run over caller-supplied text — the inline "custom text"
     /// affordance. Nothing is persisted; the next `start()` returns to the
     /// corpus pipeline.
-    public func startWithText(_ text: String) throws {
+    ///
+    /// `passageId` names where the text came from when the caller knows: the
+    /// Book screen passes `book:<id>:<sentence>`, so the result says which
+    /// sentence it was and the speech gate sees prose. Nil keeps the
+    /// `custom:` id the website writes.
+    public func startWithText(_ text: String, passageId: String? = nil) throws {
         let cleaned = stripSurrogates(text).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
         // Same commit-last discipline as `start()`: `makePassage` and
         // `TextInput` both throw, and a half-applied custom run would leave the
         // previous one recordable again.
         let nextPassage = try makePassage(
-            id: "custom:\(JSONWriter.stringify(.fromDouble(now())))", text: cleaned)
+            id: passageId ?? "custom:\(JSONWriter.stringify(.fromDouble(now())))", text: cleaned)
         let nextInput = try TextInput(
             expected: cleaned, stopOnError: profile.settings.stopOnError,
             noBackspace: profile.settings.noBackspace)
@@ -258,6 +263,11 @@ public final class Session {
 
     /// Keystrokes committed in the current run — 0 before the first character.
     public var keystrokes: Int { textInput?.steps.count ?? 0 }
+
+    /// Keystrokes in the current run that were wrong when they were typed,
+    /// including any corrected since. The final statuses cannot say this: a
+    /// typo put right with backspace leaves a correct character behind.
+    public var typos: Int { textInput?.steps.reduce(0) { $0 + ($1.typo ? 1 : 0) } ?? 0 }
 
     /// Replaces settings without restarting, so a change mid-run costs the
     /// user nothing. Takes effect on the next `start()`.

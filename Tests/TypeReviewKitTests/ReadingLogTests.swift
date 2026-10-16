@@ -165,5 +165,10 @@ final class ReadingLogTests: XCTestCase {
             sentences: [String(repeating: "a", count: 100), String(repeating: "b", count: 100)])
         XCTAssertEqual(estimatedMinutesLeft(book: book, from: 1, wpm: 20), 1)
         XCTAssertNil(estimatedMinutesLeft(book: book, from: 0, wpm: nil))
+
+        // 150 characters over two sentences is 75 a sentence, at 15 wpm: four
+        // more sentences are 300 characters, 60 words, four minutes.
+        XCTAssertEqual(estimatedMinutesLeft(sentencesLeft: 4, totals: totals), 4)
+        XCTAssertNil(estimatedMinutesLeft(sentencesLeft: 4, totals: BookTotals()))
     }
 }

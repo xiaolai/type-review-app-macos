@@ -302,3 +302,33 @@ public func splitIntoSentences(_ blocks: [BookBlock]) -> SentenceSplit {
     }
     return split
 }
+
+/// The word at a UTF-16 offset in a sentence, for Speak Word: the run of
+/// letters, digits and apostrophes the offset is in. Between words it is the
+/// word that follows, and after the last word the last one. Nil for a
+/// sentence with no word in it.
+public func word(in text: String, atUTF16Offset offset: Int) -> String? {
+    let units = Array(text.utf16)
+    func isWordUnit(_ index: Int) -> Bool {
+        guard let scalar = Unicode.Scalar(units[index]) else { return false }
+        return scalar == "'" || CharacterSet.alphanumerics.contains(scalar)
+    }
+    guard !units.isEmpty else { return nil }
+    var at = min(max(0, offset), units.count - 1)
+    if !isWordUnit(at) {
+        if let next = (at..<units.count).first(where: isWordUnit) {
+            at = next
+        } else if let previous = (0..<at).last(where: isWordUnit) {
+            at = previous
+        } else {
+            return nil
+        }
+    }
+    var start = at
+    while start > 0, isWordUnit(start - 1) { start -= 1 }
+    var end = at
+    while end + 1 < units.count, isWordUnit(end + 1) { end += 1 }
+    let word = String(decoding: units[start...end], as: UTF16.self)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "'"))
+    return word.isEmpty ? nil : word
+}

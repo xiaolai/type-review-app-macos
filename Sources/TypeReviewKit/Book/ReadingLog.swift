@@ -389,3 +389,14 @@ public func estimatedMinutesLeft(book: Book, from sentence: Int, wpm: Double?) -
         .reduce(0) { $0 + $1.utf16.count }
     return Double(remaining) / charsPerWord / wpm
 }
+
+/// Minutes left in a book without reading its file: the sentences still to
+/// type, at the length of the sentences typed so far, at the speed they were
+/// typed at. Nil before the first sentence. The Statistics window asks this
+/// for every book on every refresh, and loading each book to count its
+/// characters would read megabytes to draw one line.
+public func estimatedMinutesLeft(sentencesLeft: Int, totals: BookTotals) -> Double? {
+    guard totals.sentences > 0, let wpm = totals.wpm, wpm > 0 else { return nil }
+    let charactersPerSentence = Double(totals.correctChars) / Double(totals.sentences)
+    return Double(max(0, sentencesLeft)) * charactersPerSentence / charsPerWord / wpm
+}
