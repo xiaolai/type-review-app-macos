@@ -20,6 +20,7 @@ enum ClassificationRule: String, Sendable, Equatable {
     case shortPageBeforeStory
     case shortPageAfterStory
     case defaultStory
+    case wholeBookShort
 }
 
 struct Classification: Sendable, Equatable {
@@ -78,12 +79,12 @@ private let skipTitle = try! NSRegularExpression(
         + "(about|meet) the (author|authors|publisher|illustrator)s?)[\\s.:!]*$"
         + "|^(also by|(other )?books by|praise for|(an )?invitation from|by the same author|excerpt from|"
         + "sneak peek|a sneak peek|reading group|discussion (questions|guide)|if you enjoyed|keep reading|"
-        + "don't miss)\\b")
+        + "don['’]t miss)\\b")
 private let optionalTitle = try! NSRegularExpression(
-    pattern: "(?i)^(preface|foreword|introduction|afterword|author'?s note|a note (on|from)|note on the text|translator)")
+    pattern: "(?i)^(preface|foreword|introduction|afterword|author['’]?s note|a note (on|from)|note on the text|translator)")
 private let publisherWords = try! NSRegularExpression(
-    pattern: "(?i)copyright|all rights reserved|\\bisbn\\b|also by|published by|first published|printed in|"
-        + "cataloging|library of congress|find us on|follow us|sign up|newsletter|we hope you enjoyed")
+    pattern: "(?i)\\b(copyright(s|ed)?|all rights reserved|isbn|also by|published by|first published|printed in|"
+        + "cataloging|library of congress|find us on|follow us|sign up|newsletter|we hope you enjoyed)\\b")
 
 private func named(_ types: Set<String>) -> String {
     types.sorted().map { $0.replacingOccurrences(of: "doc-", with: "").replacingOccurrences(of: "-", with: " ") }
@@ -162,6 +163,15 @@ func classifySequence(_ verdicts: [Classification], characters: [Int], bodyStart
         for index in out.indices where index < bodyStart && out[index].rule == .defaultStory {
             out[index] = Classification(
                 kind: .optional, rule: .beforeBodyStart, reason: "before where the book says the story starts")
+        }
+    }
+    // A book this short — a picture book's text, a fable — has no part over
+    // the length a chapter needs, and refusing it as "no text" refused a
+    // story a parent meant a child to type. When nothing else is story, the
+    // parts skipped only for their length are.
+    if !out.contains(where: { $0.kind == .story }) {
+        for index in out.indices where out[index].rule == .tooShort {
+            out[index] = Classification(kind: .story, rule: .wholeBookShort, reason: "the whole book is this short")
         }
     }
     let story = out.indices.filter { out[$0].kind == .story }

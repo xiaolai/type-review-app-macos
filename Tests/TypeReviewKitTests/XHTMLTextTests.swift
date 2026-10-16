@@ -48,6 +48,25 @@ final class XHTMLTextTests: XCTestCase {
         }
     }
 
+    func testThePrePassLeavesWhatTheParserReadsAsWritten() throws {
+        XCTAssertEqual(
+            try entityPrePass("<p><![CDATA[Use &nbsp; literally.]]> a&nbsp;b</p>"),
+            "<p><![CDATA[Use &nbsp; literally.]]> a&#160;b</p>")
+        XCTAssertEqual(
+            try entityPrePass("<!-- &madeup; --><?pi &other;?><p>a&mdash;b</p>"),
+            "<!-- &madeup; --><?pi &other;?><p>a&#8212;b</p>")
+        // A comment opener inside an attribute value is not a comment, and
+        // one left open protects nothing.
+        XCTAssertThrowsError(try entityPrePass("<a title=\"<!--\">&madeup;</a> -->")) {
+            XCTAssertEqual($0 as? MarkupError, .unknownEntity("madeup"))
+        }
+        XCTAssertThrowsError(try entityPrePass("<!-- open &madeup;")) {
+            XCTAssertEqual($0 as? MarkupError, .unknownEntity("madeup"))
+        }
+        let text = try chapterOf("<!-- &madeup; --><p><![CDATA[Use &nbsp; literally.]]></p>")
+        XCTAssertEqual(blockTexts(text), ["Use &nbsp; literally."])
+    }
+
     func testHTMLThatIsNotXMLFallsBackToTidy() throws {
         let html = "<html><body><p>One paragraph<p>Another paragraph<br>with a break</body></html>"
         let text = chapterText(try parseMarkup(Data(html.utf8)))
@@ -190,6 +209,126 @@ final class XHTMLTextTests: XCTestCase {
             blockTexts(text),
             ["This was the start.", "Once there was a fox.", "When the sun rose."])
         XCTAssertEqual(text.dropCaps, 3)
+    }
+
+    func testProseBeforeAPoemIsNotReadAsVerse() throws {
+        let text = try chapterOf(
+            "<div>A prose line<br/>wrapped by hand<div class=\"poem\"><p>The owl<br/>the cat</p></div></div>")
+        XCTAssertEqual(text.blocks.map(\.kind), [.paragraph, .verse])
+        XCTAssertEqual(text.blocks[0].lines, ["A prose line wrapped by hand"])
+        XCTAssertEqual(text.blocks[1].lines, ["The owl", "the cat"])
+    }
+
+    func testAVerseClassIsAWordNotLettersInsideOne() throws {
+        let text = try chapterOf(
+            """
+            <div class="reversed"><p>A prose line<br/>wrapped by hand</p></div>
+            <div class="songbird"><p>Another prose line<br/>wrapped by hand</p></div>
+            <div class="poemLine"><p>The owl<br/>the cat</p></div>
+            <div class="line-group"><p>The pea<br/>green boat</p></div>
+            """)
+        XCTAssertEqual(text.blocks.map(\.kind), [.paragraph, .paragraph, .verse, .verse])
+        XCTAssertEqual(classWords("poem-line2 stanzaFirst x_VERSE"), ["poem", "line", "stanza", "first", "x", "verse"])
+    }
+
+    func testAParagraphHoldingOnlyAnInlineTitleIsAHeading() throws {
+        let text = try chapterOf(
+            """
+            <p><span epub:type="title">Chapter One</span></p>
+            <p>He read <span epub:type="title">Moby Dick</span> twice.</p>
+            """)
+        XCTAssertEqual(text.firstHeading, "Chapter One")
+        XCTAssertEqual(blockTexts(text), ["He read Moby Dick twice."])
+    }
+
+    func testTextDroppedAnywayDoesNotMakeADataTableLayout() throws {
+        let hidden = String(repeating: "Hidden words that are never read. ", count: 60)
+        let text = try chapterOf(
+            "<p>" + String(repeating: "The story goes on. ", count: 5) + "</p>"
+                + "<div hidden=\"hidden\">\(hidden)</div><script>\(hidden)</script>"
+                + "<table><tr><td>Year</td><td>Event</td></tr></table>")
+        XCTAssertEqual(text.tablesDropped, 1)
+        XCTAssertFalse(text.layoutTables)
+        XCTAssertFalse(blockTexts(text).joined().contains("Year"))
+    }
+
+    func testALinkedDropCapIsStillNavigation() throws {
+        let text = try chapterOf(
+            """
+            <p><a href="ch2.xhtml"><span class="dropcap">S</span>tart Reading</a></p>
+            <p><span class="dropcap">T</span>he story.</p>
+            """)
+        XCTAssertEqual(blockTexts(text), ["The story."])
+        XCTAssertEqual(text.navigationParagraphs, 1)
+    }
+
+    func testProseBeforeAPoemInAnUnknownElementIsNotReadAsVerse() throws {
+        let text = try chapterOf(
+            "<div>A prose line<br/>wrapped by hand<details class=\"poem\"><p>The owl<br/>the cat</p></details>"
+                + "and prose again<br/>after it</div>")
+        XCTAssertEqual(text.blocks.map(\.kind), [.paragraph, .verse, .paragraph])
+        XCTAssertEqual(text.blocks[0].lines, ["A prose line wrapped by hand"])
+        XCTAssertEqual(text.blocks[2].lines, ["and prose again after it"])
+    }
+
+    func testVerseInAnInlineElementEndsAsVerse() throws {
+        let text = try chapterOf("<p>Prose first.<span class=\"poem\">The owl<br/>the cat</span></p>")
+        XCTAssertEqual(text.blocks.map(\.kind), [.paragraph, .verse])
+        XCTAssertEqual(text.blocks[1].lines, ["The owl", "the cat"])
+    }
+
+    func testAnInlineTitleBrokenFromTheProseUnderItIsAHeading() throws {
+        let text = try chapterOf(
+            "<p><span epub:type=\"title\">Chapter One</span><br/>It was a cold day in the hills.</p>")
+        XCTAssertEqual(text.firstHeading, "Chapter One")
+        XCTAssertEqual(text.blocks.map(\.kind), [.heading, .paragraph])
+        XCTAssertEqual(blockTexts(text), ["It was a cold day in the hills."])
+    }
+
+    func testADataTableAmongLayoutTablesIsStillDroppedAndCounted() throws {
+        let page = (0..<6).map { "<tr><td><p>Row \($0) of the page. The fox ran across the field.</p></td></tr>" }
+        let text = try chapterOf(
+            "<p>Page 4</p><table>" + page.joined() + "</table>"
+                + "<table><tr><th>Year</th><th>Event</th></tr><tr><td>1850</td><td>A thing</td></tr></table>"
+                + "<table><tr><td>Mon</td><td>9</td><td>Tue</td></tr><tr><td>Wed</td><td>10</td><td>Thu</td></tr></table>")
+        XCTAssertTrue(text.layoutTables)
+        XCTAssertEqual(text.tablesDropped, 2)
+        let all = blockTexts(text).joined(separator: " ")
+        XCTAssertTrue(all.contains("The fox ran across the field."))
+        XCTAssertFalse(all.contains("1850"))
+        XCTAssertFalse(all.contains("Wed"))
+    }
+
+    func testTheDataTableRuleNeverTakesAPage() throws {
+        let table = { (body: String) in
+            try XCTUnwrap(try makeDocument(Data("<table>\(body)</table>".utf8), tidy: false).rootElement())
+        }
+        let page = (0..<6).map { "<tr><td>Row \($0) of the page. The fox ran across the field.</td></tr>" }.joined()
+        let columns = "<tr><td>" + String(repeating: "Left column words. ", count: 10) + "</td><td>"
+            + String(repeating: "Right column words. ", count: 10) + "</td></tr>"
+        XCTAssertFalse(isDataTable(try table(page)))
+        XCTAssertFalse(isDataTable(try table(columns + columns)))
+        XCTAssertTrue(isDataTable(try table("<caption>Prices</caption><tr><td>a</td></tr>")))
+    }
+
+    func testHiddenTextInACellDoesNotMakeADataTableLookLikeAPage() throws {
+        let table = { (body: String) in
+            try XCTUnwrap(try makeDocument(Data("<table>\(body)</table>".utf8), tidy: false).rootElement())
+        }
+        let hidden = "<span hidden=\"hidden\">" + String(repeating: "padding words ", count: 10) + "</span>"
+        let note = "<aside class=\"footnote\">" + String(repeating: "a long note ", count: 10) + "</aside>"
+        let grid = (0..<3).map { "<tr><td>Mon\(hidden)</td><td>\($0)\(note)</td></tr>" }.joined()
+        XCTAssertTrue(isDataTable(try table(grid)))
+    }
+
+    func testADropCapThatIsItselfALinkIsNavigation() throws {
+        let text = try chapterOf(
+            """
+            <p><a class="dropcap" href="x.xhtml">Go</a></p>
+            <p><span class="dropcap">T</span>he story.</p>
+            """)
+        XCTAssertEqual(blockTexts(text), ["The story."])
+        XCTAssertEqual(text.navigationParagraphs, 1)
     }
 
     func testVerseKeepsItsLinesOnlyWhereTheMarkupSaysVerse() throws {

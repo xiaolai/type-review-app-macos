@@ -37,9 +37,92 @@ final class EpubArchiveTests: XCTestCase {
     }
 
     func testAnEmptyDeflatedEntryReadsAsEmpty() throws {
+        // The two-byte stream a deflater writes for nothing: 03 00.
+        var writer = ZipWriter()
+        writer.entries.append(.init(name: "empty", data: Data([0x03, 0x00]), method: 8, crc: 0, size: 0))
+        XCTAssertEqual(try ZipArchive(data: writer.build()).read("empty"), Data())
+    }
+
+    func testADeflatedEntryWithNoStreamAtAllIsRefused() {
         var writer = ZipWriter()
         writer.entries.append(.init(name: "empty", data: Data(), method: 8, compressedSize: 0))
-        XCTAssertEqual(try ZipArchive(data: writer.build()).read("empty"), Data())
+        XCTAssertEqual(refusal(writer.build(), reading: "empty"), .inflateFailed("empty"))
+    }
+
+    func testAForgedEndRecordThatFailsToParseIsPassedOver() throws {
+        var writer = ZipWriter()
+        writer.add("a.txt", "the real entry")
+        var data = writer.build()
+        // Bytes after the archive, ending in a forged record that ends the
+        // file exactly — so it is tried before the real one — and claims one
+        // entry at the real directory, in a size too small to hold it.
+        let directoryOffset = UInt32(data.count - 22 - 51)
+        var fake = Data([0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 1, 0, 1, 0])
+        fake.append(contentsOf: [10, 0, 0, 0])
+        fake.append(contentsOf: withUnsafeBytes(of: directoryOffset.littleEndian, Array.init))
+        fake.append(contentsOf: [0, 0])
+        data.append(fake)
+        let archive = try ZipArchive(data: data)
+        XCTAssertEqual(archive.names, ["a.txt"])
+        XCTAssertEqual(String(decoding: try archive.read("a.txt"), as: UTF8.self), "the real entry")
+    }
+
+    func testAForgedEmptyEndRecordDoesNotHideTheEntries() throws {
+        var writer = ZipWriter()
+        writer.add("a.txt", "the real entry")
+        // A forged record claiming no entries, whose own comment ends the file.
+        writer.comment = Data("note ".utf8) + Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 18))
+        let archive = try ZipArchive(data: writer.build())
+        XCTAssertEqual(archive.names, ["a.txt"])
+    }
+
+    func testAForgedEmptyEndRecordInsideAnEntryDoesNotHideTheEntries() throws {
+        // A stored entry whose bytes are an end record claiming no entries,
+        // with a comment length that runs it exactly to the end of the file.
+        func build(commentLength: UInt16) -> Data {
+            var writer = ZipWriter()
+            writer.add("a.txt", "the real entry")
+            var forged = Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 16))
+            forged.append(contentsOf: withUnsafeBytes(of: commentLength.littleEndian, Array.init))
+            writer.add("b.bin", data: forged)
+            return writer.build()
+        }
+        let draft = build(commentLength: 0)
+        let signature = Data([0x50, 0x4B, 0x05, 0x06])
+        let forgedAt = try XCTUnwrap(draft.range(of: signature)).lowerBound
+        let data = build(commentLength: UInt16(draft.count - (forgedAt + 22)))
+        XCTAssertEqual(data.count, draft.count)
+        let archive = try ZipArchive(data: data)
+        XCTAssertEqual(Set(archive.names), ["a.txt", "b.bin"])
+        XCTAssertEqual(String(decoding: try archive.read("a.txt"), as: UTF8.self), "the real entry")
+    }
+
+    func testAnArchiveCommentIsReadPast() throws {
+        var writer = ZipWriter()
+        writer.add("a.txt", "the real entry")
+        writer.comment = Data("Made by a writer that leaves a comment.".utf8)
+        XCTAssertEqual(try ZipArchive(data: writer.build()).names, ["a.txt"])
+    }
+
+    func testATailPackedWithEndRecordsIsRefused() {
+        var writer = ZipWriter()
+        writer.add("a.txt", "the real entry")
+        let forged = Data([0x50, 0x4B, 0x05, 0x06] + [UInt8](repeating: 0, count: 18))
+        writer.comment = (0..<9).reduce(Data()) { data, _ in data + forged }
+        XCTAssertEqual(refusal(writer.build()), .ambiguousEnd)
+    }
+
+    func testAFolderReachedThroughALinkToItIsRead() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("linked-\(UUID().uuidString).epub")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("mime".utf8).write(to: root.appendingPathComponent("mimetype"))
+        let link = FileManager.default.temporaryDirectory.appendingPathComponent("link-\(UUID().uuidString).epub")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root)
+        defer { try? FileManager.default.removeItem(at: link) }
+        let archive = try FolderArchive(root: link)
+        XCTAssertEqual(archive.names, ["mimetype"])
+        XCTAssertEqual(try archive.read("mimetype"), Data("mime".utf8))
     }
 
     func testAFolderReadsLikeAnArchive() throws {
@@ -62,6 +145,96 @@ final class EpubArchiveTests: XCTestCase {
         XCTAssertThrowsError(try archive.read("OEBPS/link.xhtml"))
         XCTAssertThrowsError(try archive.read("../" + outside.lastPathComponent)) {
             XCTAssertEqual($0 as? ArchiveError, .unsafeName("../" + outside.lastPathComponent))
+        }
+    }
+
+    func testAnEndSignatureInsideTheCommentIsPassedOver() throws {
+        var writer = ZipWriter()
+        writer.add("a.txt", "the real entry")
+        // A fake end record in the comment, nearer the end than the real one,
+        // claiming one entry at offset zero with a comment far too long.
+        var fake = Data([0x50, 0x4B, 0x05, 0x06])
+        fake.append(Data(repeating: 0, count: 6))
+        fake.append(contentsOf: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF])
+        writer.comment = Data("note ".utf8) + fake
+        let archive = try ZipArchive(data: writer.build())
+        XCTAssertEqual(archive.names, ["a.txt"])
+        XCTAssertEqual(String(decoding: try archive.read("a.txt"), as: UTF8.self), "the real entry")
+    }
+
+    func testARecordRunningPastTheDeclaredDirectoryIsRefused() {
+        var writer = ZipWriter()
+        writer.add("a.txt", "text")
+        writer.directorySize = 40  // shorter than the one 51-byte record
+        XCTAssertEqual(refusal(writer.build()), .truncated)
+    }
+
+    func testAStreamLongerThanItsHeaderSaysIsRefused() {
+        // The header claims the first five bytes, with their checksum: a
+        // one-shot decode filled five bytes, matched, and passed.
+        let text = String(repeating: "The kite rose over the hill. ", count: 20)
+        var writer = ZipWriter()
+        writer.add("a.xhtml", text, deflate: true)
+        writer.entries[0].size = 5
+        writer.entries[0].crc = crc32(Data(text.utf8.prefix(5)))
+        XCTAssertEqual(refusal(writer.build(), reading: "a.xhtml"), .inflateFailed("a.xhtml"))
+    }
+
+    func testAStreamCutShortIsRefused() {
+        let text = String(repeating: "The kite rose over the hill. ", count: 20)
+        let stream = rawDeflate(Data(text.utf8))
+        var writer = ZipWriter()
+        writer.entries.append(.init(name: "a.xhtml", data: stream.prefix(stream.count / 2), method: 8))
+        writer.entries[0].size = UInt32(text.utf8.count)
+        writer.entries[0].crc = crc32(Data(text.utf8))
+        XCTAssertEqual(refusal(writer.build(), reading: "a.xhtml"), .inflateFailed("a.xhtml"))
+    }
+
+    func testAFolderRefusesALinkEvenToAFileInsideIt() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-\(UUID().uuidString).epub")
+        let text = root.appendingPathComponent("OEBPS/text")
+        try FileManager.default.createDirectory(at: text, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("one".utf8).write(to: text.appendingPathComponent("a.xhtml"))
+        try FileManager.default.createSymbolicLink(
+            at: root.appendingPathComponent("OEBPS/b.xhtml"), withDestinationURL: text.appendingPathComponent("a.xhtml"))
+        // A linked folder, as a middle component.
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("linked"), withDestinationURL: text)
+
+        let archive = try FolderArchive(root: root)
+        XCTAssertEqual(try archive.read("OEBPS/text/a.xhtml"), Data("one".utf8))
+        XCTAssertTrue(archive.contains("OEBPS/text/a.xhtml"))
+        for name in ["OEBPS/b.xhtml", "linked/a.xhtml"] {
+            XCTAssertFalse(archive.contains(name), name)
+            XCTAssertThrowsError(try archive.read(name), name) {
+                XCTAssertEqual($0 as? ArchiveError, .unsafeName(name))
+            }
+        }
+        XCTAssertFalse(archive.contains("OEBPS/text"), "a folder is not a file")
+        XCTAssertThrowsError(try archive.read("OEBPS/none.xhtml")) {
+            XCTAssertEqual($0 as? ArchiveError, .missing("OEBPS/none.xhtml"))
+        }
+    }
+
+    func testAFolderBoundsWhatItReadsNotWhatItWasTold() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("folder-\(UUID().uuidString).epub")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let big = root.appendingPathComponent("big.xhtml")
+        FileManager.default.createFile(atPath: big.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: big)
+        try handle.truncate(atOffset: UInt64(maxArchiveEntryBytes + 1))
+        try handle.close()
+        let small = root.appendingPathComponent("small.xhtml")
+        try Data(count: 15 << 20).write(to: small)
+
+        let archive = try FolderArchive(root: root)
+        XCTAssertThrowsError(try archive.read("big.xhtml")) {
+            XCTAssertEqual($0 as? ArchiveError, .entryTooLarge("big.xhtml"))
+        }
+        for _ in 0..<4 { _ = try archive.read("small.xhtml") }
+        XCTAssertThrowsError(try archive.read("small.xhtml")) {
+            XCTAssertEqual($0 as? ArchiveError, .readLimitExceeded)
         }
     }
 

@@ -106,6 +106,24 @@ final class EpubClassifyTests: XCTestCase {
             "looks like a table of contents")
     }
 
+    func testPublisherWordsAreMatchedAsWholeWords() {
+        // "also bypassed" holds "also by", and "design update" holds "sign up".
+        for head in ["The road also bypassed the town.", "The design update came late."] {
+            assertRule(.defaultStory, .story, facts { $0.characters = 900; $0.head = head })
+        }
+        assertRule(.publisherWords, .skip, facts { $0.characters = 900; $0.head = "Also by the same writer." })
+        assertRule(.publisherWords, .skip, facts { $0.characters = 900; $0.head = "Text copyrighted 1999." })
+    }
+
+    func testTitlesMatchEitherApostrophe() {
+        for title in ["Author's Note", "Author\u{2019}s Note"] {
+            assertRule(.titleOptional, .optional, facts { $0.title = title })
+        }
+        for title in ["Don't Miss Book Two", "Don\u{2019}t Miss Book Two"] {
+            assertRule(.titleSkip, .skip, facts { $0.title = title })
+        }
+    }
+
     func testRule10BeforeTheBodyStart() {
         let story = classifySpineItem(facts())
         let verdicts = classifySequence([story, story, story], characters: [4_000, 8_000, 8_000], bodyStart: 1)
@@ -142,6 +160,90 @@ final class EpubClassifyTests: XCTestCase {
         let draft = try book.draft()
         XCTAssertEqual(draft.chapters.map(\.kind), [.story, .story, .story])
         XCTAssertTrue(draft.chapters.allSatisfy(\.included))
+    }
+
+    func testAnUntaggedHeadingNamesTheFileEvenAfterAnOrnament() throws {
+        var book = EpubBuilder()
+        book.chapters = [
+            BuiltChapter("preface.xhtml", "<p>For my brother, who knew the river.</p><h2>Preface</h2>" + storyParagraphs(3))
+        ] + (1...3).map { BuiltChapter("ch\($0).xhtml", "<h2>Chapter \($0)</h2>" + storyParagraphs(8, seed: $0)) }
+        let draft = try book.draft()
+        XCTAssertEqual(draft.chapters[0].title, "Preface")
+        XCTAssertEqual(draft.chapters[0].kind, .optional, draft.chapters[0].reason)
+        XCTAssertFalse(draft.chapters[0].included)
+    }
+
+    func testAnUnreadableBodyStartStillMarksTheFrontMatter() throws {
+        var book = EpubBuilder()
+        book.version = "2.0"
+        book.chapters = [
+            BuiltChapter("front.xhtml", storyParagraphs(3)),
+            BuiltChapter("start.xhtml", "", raw: "<p>&madeup; text</p>"),
+        ] + (1...3).map { BuiltChapter("ch\($0).xhtml", storyParagraphs(8, seed: $0)) }
+        book.guide = "<guide><reference type=\"text\" href=\"start.xhtml\"/></guide>"
+        let draft = try book.draft()
+        XCTAssertTrue(draft.warnings.contains(.unreadableFiles(["OEBPS/start.xhtml"])), "\(draft.warnings)")
+        XCTAssertEqual(draft.chapters.map(\.kind), [.optional, .story, .story, .story])
+        XCTAssertEqual(draft.chapters[0].reason, "before where the book says the story starts")
+    }
+
+    func testABookShorterThanAChapterIsStillTheStory() throws {
+        var book = EpubBuilder()
+        book.chapters = [
+            BuiltChapter("story.xhtml", "<p>The fox ran into the wood.</p><p>The hen sat on her eggs.</p>")
+        ]
+        let draft = try book.draft()
+        XCTAssertEqual(draft.chapters.map(\.kind), [.story])
+        XCTAssertEqual(draft.chapters[0].sentences, ["The fox ran into the wood.", "The hen sat on her eggs."])
+    }
+
+    func testAShortPageBesideAStoryIsStillSkipped() {
+        let short = Classification(kind: .skip, rule: .tooShort, reason: "")
+        let story = Classification(kind: .story, rule: .defaultStory, reason: "")
+        XCTAssertEqual(
+            classifySequence([short, story], characters: [50, 9_000], bodyStart: nil).map(\.kind), [.skip, .story])
+    }
+
+    func testAShortGutenbergBookInOneFileIsTheStory() throws {
+        var book = EpubBuilder()
+        book.chapters = [
+            BuiltChapter(
+                "story.xhtml",
+                """
+                <p>The Project Gutenberg eBook of The Boat, by A. Tester.</p>
+                <p>This ebook is for the use of anyone anywhere, under the terms of the Project Gutenberg License.</p>
+                <p>*** START OF THE PROJECT GUTENBERG EBOOK THE BOAT ***</p>
+                \(storyParagraphs(4))
+                <p>*** END OF THE PROJECT GUTENBERG EBOOK THE BOAT ***</p>
+                <p>Updated editions will replace the previous one. START: FULL LICENSE</p>
+                """)
+        ]
+        let draft = try book.draft()
+        XCTAssertEqual(draft.chapters.map(\.kind), [.story], draft.chapters.map(\.reason).joined())
+        let typed = draft.chapters[0].sentences
+        XCTAssertEqual(typed.first, "The river ran fast and brown after the night of rain.")
+        XCTAssertFalse(typed.contains { $0.contains("Gutenberg") || $0.contains("LICENSE") }, "\(typed)")
+    }
+
+    func testAShortGutenbergBookWithTheOlderUnstarredMarkersIsTheStory() throws {
+        var book = EpubBuilder()
+        book.chapters = [
+            BuiltChapter(
+                "story.xhtml",
+                """
+                <p>The Project Gutenberg EBook of The Boat, by A. Tester.</p>
+                <p>This eBook is for the use of anyone anywhere, under the terms of the Project Gutenberg License.</p>
+                <p>START OF THIS PROJECT GUTENBERG EBOOK THE BOAT</p>
+                \(storyParagraphs(4))
+                <p>End of Project Gutenberg's The Boat, by A. Tester</p>
+                <p>Updated editions will replace the previous one. START: FULL LICENSE</p>
+                """)
+        ]
+        let draft = try book.draft()
+        XCTAssertEqual(draft.chapters.map(\.kind), [.story], draft.chapters.map(\.reason).joined())
+        let typed = draft.chapters[0].sentences
+        XCTAssertEqual(typed.first, "The river ran fast and brown after the night of rain.")
+        XCTAssertFalse(typed.contains { $0.contains("Gutenberg") || $0.contains("LICENSE") }, "\(typed)")
     }
 
     func testTheUntaggedFixture() throws {

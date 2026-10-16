@@ -171,6 +171,42 @@ final class EpubPackageTests: XCTestCase {
         XCTAssertEqual(importError(book), .unreadable(EpubPackageError.hrefEscapes("../../outside.xhtml").description))
     }
 
+    func testARemoteResourceInTheManifestIsPassedOver() throws {
+        var book = EpubBuilder()
+        book.chapters = chapters(1)
+        book.manifest = """
+            <item id="f1" href="//fonts.example.com/serif.woff" media-type="font/woff"/>
+            <item id="f2" href="data:font/woff;base64,AAAA" media-type="font/woff"/>
+            """
+        XCTAssertEqual(try readPackage(try book.archive()).spine.count, 1)
+    }
+
+    func testAnEncryptionListThatCannotBeReadRefusesTheBook() throws {
+        var book = EpubBuilder()
+        book.chapters = chapters(2)
+        book.extraFiles = [("META-INF/encryption.xml", Data("<encryption/>".utf8))]
+        var writer = book.zip()
+        let index = try XCTUnwrap(writer.entries.firstIndex { $0.name == "META-INF/encryption.xml" })
+        writer.entries[index].crc = 0xDEAD_BEEF
+        // Read and dropped, it would have let a protected book through.
+        XCTAssertThrowsError(try readEpubBook(try ZipArchive(data: writer.build()), fallbackTitle: "x")) {
+            XCTAssertEqual(
+                $0 as? BookImportError, .unreadable(ArchiveError.badChecksum("META-INF/encryption.xml").description))
+        }
+    }
+
+    func testADamagedNavigationFileStillImportsTheBook() throws {
+        var book = EpubBuilder()
+        book.chapters = chapters(2)
+        book.navigation = "<nav epub:type=\"toc\"><ol><li><a href=\"ch1.xhtml\">One</a></li></ol></nav>"
+        var writer = book.zip()
+        let index = try XCTUnwrap(writer.entries.firstIndex { $0.name == "OEBPS/nav.xhtml" })
+        writer.entries[index].crc = 0xDEAD_BEEF
+        let package = try readPackage(try ZipArchive(data: writer.build()))
+        XCTAssertEqual(package.spine.count, 2)
+        XCTAssertTrue(package.tableOfContentsLabels.isEmpty)
+    }
+
     func testAMissingContainerIsRefusedByName() {
         var writer = ZipWriter()
         writer.add("mimetype", "application/epub+zip")
@@ -184,5 +220,9 @@ final class EpubPackageTests: XCTestCase {
         XCTAssertEqual(try resolveHref("./c.xhtml", base: "OEBPS"), "OEBPS/c.xhtml")
         XCTAssertThrowsError(try resolveHref("../../x", base: "OEBPS"))
         XCTAssertThrowsError(try resolveHref("http://example.com/x", base: ""))
+        for href in ["data:text/html,x", "file:ch.xhtml", "//host/ch.xhtml", "mailto:a@b.c", "urn:isbn:1"] {
+            XCTAssertThrowsError(try resolveHref(href, base: "OEBPS"), href)
+        }
+        XCTAssertEqual(try resolveHref("a:b/c.xhtml".replacingOccurrences(of: ":", with: "%3A"), base: ""), "a:b/c.xhtml")
     }
 }

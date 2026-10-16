@@ -24,6 +24,9 @@ struct ZipWriter {
     /// Overrides for the end-of-central-directory record.
     var totalEntries: UInt16?
     var directoryOffset: UInt32?
+    var directorySize: UInt32?
+    /// The archive comment, after the end record.
+    var comment = Data()
 
     mutating func add(_ name: String, _ text: String, deflate: Bool = false) {
         entries.append(Entry(name: name, data: Data(text.utf8), deflate: deflate))
@@ -83,9 +86,10 @@ struct ZipWriter {
         out.append(le16(0))
         out.append(le16(totalEntries ?? UInt16(entries.count)))
         out.append(le16(totalEntries ?? UInt16(entries.count)))
-        out.append(le32(UInt32(directory.count)))
+        out.append(le32(directorySize ?? UInt32(directory.count)))
         out.append(le32(directoryOffset ?? directoryStart))
-        out.append(le16(0))
+        out.append(le16(UInt16(comment.count)))
+        out.append(comment)
         return out
     }
 

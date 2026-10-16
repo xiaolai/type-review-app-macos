@@ -33,6 +33,7 @@ public enum ArchiveError: Error, Equatable, CustomStringConvertible {
     case badChecksum(String)
     case missing(String)
     case readLimitExceeded
+    case ambiguousEnd
 
     public var description: String {
         switch self {
@@ -50,6 +51,7 @@ public enum ArchiveError: Error, Equatable, CustomStringConvertible {
         case .badChecksum(let name): return "\(name) fails its checksum"
         case .missing(let name): return "\(name) is missing"
         case .readLimitExceeded: return "its text inflates past \(maxArchiveReadBytes >> 20) MB"
+        case .ambiguousEnd: return "it ends in more directory records than any ZIP writer leaves"
         }
     }
 }
@@ -77,7 +79,6 @@ func isSafeArchiveName(_ name: String) -> Bool {
 }
 
 struct ZipEntry {
-    let name: String
     let flags: UInt16
     let method: UInt16
     let crc: UInt32
@@ -86,17 +87,32 @@ struct ZipEntry {
     let localOffset: Int
 }
 
+/// Where the central directory is, as the end record says.
+private struct EndRecord {
+    let total: Int
+    let directoryOffset: Int
+    let directorySize: Int
+    /// Where the record itself starts.
+    let position: Int
+    /// Its comment ends exactly at the end of the file.
+    let endsFile: Bool
+
+    /// The directory ends where the record begins, as every writer lays it
+    /// out.
+    var isTight: Bool { directoryOffset + directorySize == position }
+}
+
 /// A ZIP read from memory, without extracting anything.
 ///
 /// The central directory is the index; each entry is inflated with the
 /// Compression framework, whose `COMPRESSION_ZLIB` is raw DEFLATE — what ZIP
-/// stores — so there is no dependency. Every inflated entry is checked
-/// against its CRC-32, because a decoder that fills its buffer silently
-/// truncates a longer stream and a checksum is what notices.
+/// stores — so there is no dependency. A deflated entry must end its stream
+/// at exactly the size its header declares, and every entry is checked
+/// against its CRC-32.
 public final class ZipArchive: BookArchive {
     private let data: Data
-    private var entries: [String: ZipEntry] = [:]
-    public private(set) var names: [String] = []
+    private let entries: [String: ZipEntry]
+    public let names: [String]
     private var bytesRead = 0
 
     public convenience init(contentsOf url: URL) throws {
@@ -112,59 +128,114 @@ public final class ZipArchive: BookArchive {
         self.data = data
         guard data.count <= maxEpubBytes else { throw ArchiveError.tooLarge(data.count) }
         guard data.count >= 22 else { throw ArchiveError.notZip }
-        let first = u32(0)
+        let first = data.le32(0)
         guard first == 0x0403_4b50 || first == 0x0605_4b50 else { throw ArchiveError.notZip }
+        (entries, names) = try Self.index(data)
+    }
 
-        // The end-of-central-directory record, searched for from the end: it
-        // may be followed by a comment of up to 65,535 bytes.
-        var eocd = -1
+    /// How many end-record candidates a file may hold. A real EPUB has one;
+    /// a second is a signature that happens to sit in the last 64 KB. More
+    /// than this is a file built to be read more than one way, and is
+    /// refused rather than read the way that happens to come first.
+    private static let maxEndCandidates = 8
+
+    /// The directory that names the most files, of every candidate end
+    /// record that parses.
+    ///
+    /// A forged record can sit in the archive's comment or inside an entry's
+    /// stored bytes, and claim no entries — or a directory of its own. What
+    /// it cannot do is take entries away from the real directory, so the
+    /// reading that finds the most files is the one that hides none. Any
+    /// rule by position alone is beaten by one of the two places: earliest
+    /// first lost to a record in a stored entry, latest first to one in the
+    /// comment. On a tie, a directory laid out the way writers lay it out
+    /// wins, then one whose comment ends the file, then the one nearest the
+    /// end. A candidate that fails to parse is passed over; when none parses,
+    /// the failure of the likeliest is reported.
+    private static func index(_ data: Data) throws -> ([String: ZipEntry], [String]) {
+        let (candidates, sawZip64) = endRecords(data)
+        guard candidates.count <= maxEndCandidates else { throw ArchiveError.ambiguousEnd }
+        func rank(_ end: EndRecord) -> (Int, Int, Int) { (end.isTight ? 1 : 0, end.endsFile ? 1 : 0, end.position) }
+        let ordered = candidates.sorted { rank($0) > rank($1) }
+        var best: ([String: ZipEntry], [String])?
+        var firstFailure: Error?
+        for end in ordered {
+            do {
+                guard end.total <= maxArchiveEntries else { throw ArchiveError.tooManyEntries(end.total) }
+                let parsed = try directory(data, end)
+                if best == nil || parsed.1.count > best!.1.count { best = parsed }
+            } catch {
+                firstFailure = firstFailure ?? error
+            }
+        }
+        if let best { return best }
+        throw firstFailure ?? (sawZip64 ? ArchiveError.zip64 : ArchiveError.truncated)
+    }
+
+    /// Every end-of-central-directory candidate. The record may be followed
+    /// by a comment of up to 65,535 bytes, and that comment may itself hold
+    /// the signature. A candidate counts only when its comment fits the file
+    /// and its directory lies before it.
+    private static func endRecords(_ data: Data) -> (candidates: [EndRecord], sawZip64: Bool) {
+        var sawZip64 = false
+        var candidates: [EndRecord] = []
         var position = data.count - 22
         let floor = max(0, data.count - 22 - 65_535)
         while position >= floor {
-            if u32(position) == 0x0605_4b50 {
-                eocd = position
-                break
+            defer { position -= 1 }
+            guard data.le32(position) == 0x0605_4b50 else { continue }
+            let total = Int(data.le16(position + 10))
+            let directorySize = Int(data.le32(position + 12))
+            let directoryOffset = Int(data.le32(position + 16))
+            let commentLength = Int(data.le16(position + 20))
+            if total == 0xFFFF || directorySize == 0xFFFF_FFFF || directoryOffset == 0xFFFF_FFFF
+                || (position >= 20 && data.le32(position - 20) == 0x0706_4b50)
+            {
+                sawZip64 = true
+                continue
             }
-            position -= 1
+            guard position + 22 + commentLength <= data.count,
+                directoryOffset + directorySize <= position,
+                total == 0 || data.le32(directoryOffset) == 0x0201_4b50
+            else { continue }
+            candidates.append(
+                EndRecord(
+                    total: total, directoryOffset: directoryOffset, directorySize: directorySize,
+                    position: position, endsFile: position + 22 + commentLength == data.count))
         }
-        guard eocd >= 0 else { throw ArchiveError.truncated }
-        let total = Int(u16(eocd + 10))
-        let directorySize = Int(u32(eocd + 12))
-        let directoryOffset = Int(u32(eocd + 16))
-        if total == 0xFFFF || directorySize == 0xFFFF_FFFF || directoryOffset == 0xFFFF_FFFF {
-            throw ArchiveError.zip64
-        }
-        if eocd >= 20 && u32(eocd - 20) == 0x0706_4b50 { throw ArchiveError.zip64 }
-        guard total <= maxArchiveEntries else { throw ArchiveError.tooManyEntries(total) }
-        guard directoryOffset + directorySize <= data.count else { throw ArchiveError.truncated }
+        return (candidates, sawZip64)
+    }
 
-        var cursor = directoryOffset
-        for _ in 0..<total {
-            guard cursor + 46 <= data.count, u32(cursor) == 0x0201_4b50 else { throw ArchiveError.truncated }
-            let flags = u16(cursor + 8)
-            let method = u16(cursor + 10)
-            let crc = u32(cursor + 16)
-            let compressedSize = u32(cursor + 20)
-            let size = u32(cursor + 24)
-            let nameLength = Int(u16(cursor + 28))
-            let extraLength = Int(u16(cursor + 30))
-            let commentLength = Int(u16(cursor + 32))
-            let localOffset = u32(cursor + 42)
+    /// The central directory's records, every one whole inside the range
+    /// the end record declares.
+    private static func directory(_ data: Data, _ end: EndRecord) throws -> ([String: ZipEntry], [String]) {
+        var entries: [String: ZipEntry] = [:]
+        var names: [String] = []
+        let limit = end.directoryOffset + end.directorySize
+        var cursor = end.directoryOffset
+        for _ in 0..<end.total {
+            guard cursor + 46 <= limit, data.le32(cursor) == 0x0201_4b50 else { throw ArchiveError.truncated }
+            let compressedSize = data.le32(cursor + 20)
+            let size = data.le32(cursor + 24)
+            let nameLength = Int(data.le16(cursor + 28))
+            let recordLength = 46 + nameLength + Int(data.le16(cursor + 30)) + Int(data.le16(cursor + 32))
+            let localOffset = data.le32(cursor + 42)
             if compressedSize == 0xFFFF_FFFF || size == 0xFFFF_FFFF || localOffset == 0xFFFF_FFFF {
                 throw ArchiveError.zip64
             }
-            guard cursor + 46 + nameLength <= data.count else { throw ArchiveError.truncated }
+            guard cursor + recordLength <= limit else { throw ArchiveError.truncated }
             let rawName = data.subdata(in: (data.startIndex + cursor + 46)..<(data.startIndex + cursor + 46 + nameLength))
             let name = String(data: rawName, encoding: .utf8) ?? String(decoding: rawName, as: UTF8.self)
             guard isSafeArchiveName(name) else { throw ArchiveError.unsafeName(name) }
             if !name.hasSuffix("/") {
                 entries[name] = ZipEntry(
-                    name: name, flags: flags, method: method, crc: crc, compressedSize: Int(compressedSize),
-                    size: Int(size), localOffset: Int(localOffset))
+                    flags: data.le16(cursor + 8), method: data.le16(cursor + 10), crc: data.le32(cursor + 16),
+                    compressedSize: Int(compressedSize), size: Int(size), localOffset: Int(localOffset))
                 names.append(name)
             }
-            cursor += 46 + nameLength + extraLength + commentLength
+            cursor += recordLength
         }
+        return (entries, names)
     }
 
     public func contains(_ name: String) -> Bool { entries[name] != nil }
@@ -175,8 +246,8 @@ public final class ZipArchive: BookArchive {
         guard entry.size <= maxArchiveEntryBytes else { throw ArchiveError.entryTooLarge(name) }
         guard bytesRead + entry.size <= maxArchiveReadBytes else { throw ArchiveError.readLimitExceeded }
         let local = entry.localOffset
-        guard local + 30 <= data.count, u32(local) == 0x0403_4b50 else { throw ArchiveError.truncated }
-        let start = local + 30 + Int(u16(local + 26)) + Int(u16(local + 28))
+        guard local + 30 <= data.count, data.le32(local) == 0x0403_4b50 else { throw ArchiveError.truncated }
+        let start = local + 30 + Int(data.le16(local + 26)) + Int(data.le16(local + 28))
         guard start + entry.compressedSize <= data.count else { throw ArchiveError.truncated }
         let ratio = Double(entry.size) / Double(max(entry.compressedSize, 1))
         if entry.size > 1 << 20 && ratio > maxArchiveRatio { throw ArchiveError.suspiciousRatio(name) }
@@ -188,25 +259,12 @@ public final class ZipArchive: BookArchive {
             guard entry.compressedSize == entry.size else { throw ArchiveError.inflateFailed(name) }
             out = source
         case 8:
-            if entry.size == 0 {
-                out = Data()
-                break
-            }
-            // Nothing to inflate from, and an empty buffer has no address.
-            guard entry.compressedSize > 0 else { throw ArchiveError.inflateFailed(name) }
-            // Sized from the header, never from the stream, so a lie in the
-            // header cannot allocate more than the entry limit allows.
-            var destination = Data(count: entry.size)
-            let written = destination.withUnsafeMutableBytes { target in
-                source.withUnsafeBytes { input in
-                    compression_decode_buffer(
-                        target.bindMemory(to: UInt8.self).baseAddress!, entry.size,
-                        input.bindMemory(to: UInt8.self).baseAddress!, entry.compressedSize, nil,
-                        COMPRESSION_ZLIB)
-                }
-            }
-            guard written == entry.size else { throw ArchiveError.inflateFailed(name) }
-            out = destination
+            // Even an empty entry has a stream to end: two bytes, 03 00. No
+            // writer was found leaving it out — the two empty deflated
+            // entries among the EPUBs measured both carry it — so zero
+            // bytes is a broken entry, refused like any other.
+            guard let inflated = inflate(source, size: entry.size) else { throw ArchiveError.inflateFailed(name) }
+            out = inflated
         default:
             throw ArchiveError.unsupportedMethod(entry.method, name)
         }
@@ -214,36 +272,82 @@ public final class ZipArchive: BookArchive {
         bytesRead += out.count
         return out
     }
+}
 
-    private func u16(_ offset: Int) -> UInt16 {
-        guard offset >= 0, offset + 2 <= data.count else { return 0 }
-        let base = data.startIndex + offset
-        return UInt16(data[base]) | UInt16(data[base + 1]) << 8
+/// Raw DEFLATE inflated through a stream, or nil unless the stream ends
+/// having written exactly `size` bytes. The buffer is sized from the header,
+/// never from the stream, so a lie in the header cannot allocate more than
+/// the entry limit allows; the one byte over is how a longer stream is
+/// noticed, where a one-shot decode would fill the buffer and stop silently.
+func inflate(_ source: Data, size: Int) -> Data? {
+    guard !source.isEmpty else { return nil }
+    var destination = Data(count: size + 1)
+    var stream = compression_stream(
+        dst_ptr: UnsafeMutablePointer<UInt8>(bitPattern: 1)!, dst_size: 0,
+        src_ptr: UnsafePointer<UInt8>(bitPattern: 1)!, src_size: 0, state: nil)
+    guard compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK
+    else { return nil }
+    defer { compression_stream_destroy(&stream) }
+    let written: Int? = destination.withUnsafeMutableBytes { target in
+        source.withUnsafeBytes { input in
+            stream.dst_ptr = target.bindMemory(to: UInt8.self).baseAddress!
+            stream.dst_size = size + 1
+            stream.src_ptr = input.bindMemory(to: UInt8.self).baseAddress!
+            stream.src_size = source.count
+            while true {
+                let before = (stream.src_size, stream.dst_size)
+                let status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+                if status == COMPRESSION_STATUS_END { return size + 1 - stream.dst_size }
+                // Still going with no room left, or with no progress made:
+                // longer than declared, or cut short.
+                guard status == COMPRESSION_STATUS_OK, stream.dst_size > 0,
+                    (stream.src_size, stream.dst_size) != before
+                else { return nil }
+            }
+        }
+    }
+    guard let written, written == size else { return nil }
+    return destination.prefix(size)
+}
+
+extension Data {
+    /// Little-endian integers at an offset from the start, zero past the end.
+    fileprivate func le16(_ offset: Int) -> UInt16 {
+        guard offset >= 0, offset + 2 <= count else { return 0 }
+        let base = startIndex + offset
+        return UInt16(self[base]) | UInt16(self[base + 1]) << 8
     }
 
-    private func u32(_ offset: Int) -> UInt32 {
-        guard offset >= 0, offset + 4 <= data.count else { return 0 }
-        let base = data.startIndex + offset
-        return UInt32(data[base]) | UInt32(data[base + 1]) << 8 | UInt32(data[base + 2]) << 16
-            | UInt32(data[base + 3]) << 24
+    fileprivate func le32(_ offset: Int) -> UInt32 {
+        guard offset >= 0, offset + 4 <= count else { return 0 }
+        let base = startIndex + offset
+        return UInt32(self[base]) | UInt32(self[base + 1]) << 8 | UInt32(self[base + 2]) << 16
+            | UInt32(self[base + 3]) << 24
     }
 }
 
 /// An EPUB kept as a folder, the way Apple Books keeps them.
 ///
-/// The same limits as a ZIP. Paths are resolved and must stay under the
-/// root, so a symbolic link inside the folder cannot hand the importer a file
-/// from elsewhere on the disk.
+/// The same limits as a ZIP. Every file is opened one path component at a
+/// time from the root, refusing a symbolic link at each step, and read from
+/// that descriptor with the limits counted against what was actually read —
+/// so neither a link inside the folder nor a file swapped or grown after it
+/// was checked can hand the importer more, or something from elsewhere.
 public final class FolderArchive: BookArchive {
-    private let root: URL
-    private let rootPath: String
+    /// The root, opened once. Every file is reached from this descriptor, so
+    /// the folder — or a folder above it — renamed or replaced by a link
+    /// after the archive was opened cannot send a read anywhere else.
+    private let rootDescriptor: Int32
     public let names: [String]
     private var bytesRead = 0
 
+    /// The root is resolved once, here: a link to an EPUB folder is how a
+    /// book dragged out of Apple Books can arrive, so the root itself may be
+    /// one. Nothing below it may.
     public init(root: URL) throws {
         let resolved = root.resolvingSymlinksInPath().standardizedFileURL
-        self.root = resolved
-        rootPath = resolved.path.hasSuffix("/") ? resolved.path : resolved.path + "/"
+        let rootPath = resolved.path.hasSuffix("/") ? resolved.path : resolved.path + "/"
+        rootDescriptor = try Self.openRoot(root)
         var found: [String] = []
         if let enumerator = FileManager.default.enumerator(
             at: resolved, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [])
@@ -254,31 +358,88 @@ public final class FolderArchive: BookArchive {
                 let path = url.standardizedFileURL.path
                 guard path.hasPrefix(rootPath) else { continue }
                 found.append(String(path.dropFirst(rootPath.count)))
-                if found.count > maxArchiveEntries { throw ArchiveError.tooManyEntries(found.count) }
+                if found.count > maxArchiveEntries {
+                    close(rootDescriptor)
+                    throw ArchiveError.tooManyEntries(found.count)
+                }
             }
         }
         names = found
     }
 
-    private func location(_ name: String) throws -> URL {
+    deinit { close(rootDescriptor) }
+
+    /// The root, resolved and then opened without following a link, and
+    /// refused unless what was opened is what was resolved. Resolving and
+    /// opening are two steps, and a folder on the way swapped for a link
+    /// between them would otherwise be opened in its place.
+    private static func openRoot(_ root: URL) throws -> Int32 {
+        guard let real = realpath(root.path, nil) else { throw ArchiveError.missing(root.lastPathComponent) }
+        let resolved = String(cString: real)
+        free(real)
+        let descriptor = Darwin.open(resolved, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { throw ArchiveError.missing(root.lastPathComponent) }
+        var buffer = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        guard fcntl(descriptor, F_GETPATH, &buffer) == 0, String(cString: buffer) == resolved else {
+            close(descriptor)
+            throw ArchiveError.unsafeName(root.lastPathComponent)
+        }
+        return descriptor
+    }
+
+    /// A descriptor for a regular file under the root, reached without
+    /// following a link. The caller closes it.
+    private func open(_ name: String) throws -> Int32 {
         guard isSafeArchiveName(name) else { throw ArchiveError.unsafeName(name) }
-        let url = root.appendingPathComponent(name).resolvingSymlinksInPath().standardizedFileURL
-        guard url.path.hasPrefix(rootPath) else { throw ArchiveError.unsafeName(name) }
-        return url
+        var directory = dup(rootDescriptor)
+        guard directory >= 0 else { throw ArchiveError.missing(name) }
+        let components = name.split(separator: "/").map(String.init).filter { $0 != "." }
+        for (index, component) in components.enumerated() {
+            let last = index == components.count - 1
+            let flags = O_RDONLY | O_NOFOLLOW | O_CLOEXEC | (last ? O_NONBLOCK : O_DIRECTORY)
+            let next = openat(directory, component, flags)
+            let failure = errno
+            close(directory)
+            guard next >= 0 else {
+                throw failure == ELOOP || failure == ENOTDIR ? ArchiveError.unsafeName(name) : ArchiveError.missing(name)
+            }
+            directory = next
+        }
+        var status = stat()
+        guard !components.isEmpty, fstat(directory, &status) == 0, status.st_mode & S_IFMT == S_IFREG else {
+            close(directory)
+            throw ArchiveError.missing(name)
+        }
+        return directory
     }
 
     public func contains(_ name: String) -> Bool {
-        guard let url = try? location(name) else { return false }
-        return FileManager.default.fileExists(atPath: url.path)
+        guard let descriptor = try? open(name) else { return false }
+        close(descriptor)
+        return true
     }
 
     public func read(_ name: String) throws -> Data {
-        let url = try location(name)
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size <= maxArchiveEntryBytes else { throw ArchiveError.entryTooLarge(name) }
-        guard bytesRead + size <= maxArchiveReadBytes else { throw ArchiveError.readLimitExceeded }
-        guard let data = try? Data(contentsOf: url) else { throw ArchiveError.missing(name) }
-        bytesRead += data.count
+        let descriptor = try open(name)
+        defer { close(descriptor) }
+        // One byte past whichever limit is nearer, so going over either is seen.
+        let allowance = min(maxArchiveEntryBytes, maxArchiveReadBytes - bytesRead)
+        var data = Data(count: allowance + 1)
+        var filled = 0
+        while filled < data.count {
+            let count = data.withUnsafeMutableBytes { buffer in
+                Darwin.read(descriptor, buffer.baseAddress! + filled, buffer.count - filled)
+            }
+            if count < 0 && errno == EINTR { continue }
+            guard count >= 0 else { throw ArchiveError.missing(name) }
+            if count == 0 { break }
+            filled += count
+        }
+        if filled > allowance {
+            throw filled > maxArchiveEntryBytes ? ArchiveError.entryTooLarge(name) : ArchiveError.readLimitExceeded
+        }
+        data.count = filled
+        bytesRead += filled
         return data
     }
 }

@@ -123,25 +123,103 @@ private let xmlPredefinedEntities: Set<String> = ["amp", "lt", "gt", "quot", "ap
 /// The table is generated:
 /// `python3 -I -c 'from html.entities import name2codepoint'`, minus the five.
 func entityPrePass(_ text: String) throws -> String {
-    let source = text as NSString
     let out = NSMutableString()
     var last = 0
-    for match in namedEntity.matches(in: text, range: NSRange(location: 0, length: source.length)) {
-        let name = source.substring(with: match.range(at: 1))
-        if xmlPredefinedEntities.contains(name) { continue }
-        guard let codePoint = htmlEntityCodePoints[name] else { throw MarkupError.unknownEntity(name) }
-        out.append(source.substring(with: NSRange(location: last, length: match.range.location - last)))
+    let source = text as NSString
+    for reference in references(in: text) {
+        if xmlPredefinedEntities.contains(reference.name) { continue }
+        guard let codePoint = htmlEntityCodePoints[reference.name] else {
+            throw MarkupError.unknownEntity(reference.name)
+        }
+        out.append(source.substring(with: NSRange(location: last, length: reference.range.location - last)))
         out.append("&#\(codePoint);")
-        last = match.range.location + match.range.length
+        last = NSMaxRange(reference.range)
     }
     out.append(source.substring(from: last))
     let result = out as String
     // The assertion, checked on the output rather than trusted from the loop.
-    for match in namedEntity.matches(in: result, range: NSRange(location: 0, length: (result as NSString).length)) {
-        let name = (result as NSString).substring(with: match.range(at: 1))
-        if !xmlPredefinedEntities.contains(name) { throw MarkupError.unknownEntity(name) }
+    for reference in references(in: result) where !xmlPredefinedEntities.contains(reference.name) {
+        throw MarkupError.unknownEntity(reference.name)
     }
     return result
+}
+
+/// Every named reference the parser would expand: those in comments, CDATA
+/// sections and processing instructions are left alone, because the parser
+/// reads them as written. `Use &nbsp; literally` in a CDATA section stays so.
+private func references(in text: String) -> [(range: NSRange, name: String)] {
+    let source = text as NSString
+    let literal = literalRanges(text)
+    var next = 0
+    var out: [(range: NSRange, name: String)] = []
+    for match in namedEntity.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+        while next < literal.count, NSMaxRange(literal[next]) <= match.range.location { next += 1 }
+        if next < literal.count, literal[next].location <= match.range.location { continue }
+        out.append((match.range, source.substring(with: match.range(at: 1))))
+    }
+    return out
+}
+
+/// Where the parser expands no reference — comments, CDATA sections and
+/// processing instructions — as UTF-16 ranges, in order.
+///
+/// Found by walking the markup, so a `<!--` inside a quoted attribute value
+/// is not taken for a comment. One left open is not a range: the parser
+/// refuses it, and whatever follows still gets the pre-pass.
+func literalRanges(_ text: String) -> [NSRange] {
+    let units = Array(text.utf16)
+    let literals: [(open: [UInt16], close: [UInt16])] = [
+        (Array("<!--".utf16), Array("-->".utf16)),
+        (Array("<![CDATA[".utf16), Array("]]>".utf16)),
+        (Array("<?".utf16), Array("?>".utf16)),
+    ]
+    func starts(_ prefix: [UInt16], at index: Int) -> Bool {
+        index + prefix.count <= units.count && units[index..<index + prefix.count].elementsEqual(prefix)
+    }
+    /// The index just past the first `close` at or after `index`.
+    func end(of close: [UInt16], from index: Int) -> Int? {
+        var at = index
+        while at + close.count <= units.count {
+            if starts(close, at: at) { return at + close.count }
+            at += 1
+        }
+        return nil
+    }
+    let lessThan = UInt16(UInt8(ascii: "<"))
+    let greaterThan = UInt16(UInt8(ascii: ">"))
+    let quotes: Set<UInt16> = [UInt16(UInt8(ascii: "\"")), UInt16(UInt8(ascii: "'"))]
+    var ranges: [NSRange] = []
+    var index = 0
+    scan: while index < units.count {
+        guard units[index] == lessThan else {
+            index += 1
+            continue
+        }
+        for literal in literals where starts(literal.open, at: index) {
+            if let close = end(of: literal.close, from: index + literal.open.count) {
+                ranges.append(NSRange(location: index, length: close - index))
+                index = close
+            } else {
+                index += literal.open.count
+            }
+            continue scan
+        }
+        // A tag, or a declaration: to its `>`, past quoted values.
+        index += 1
+        var quote: UInt16?
+        while index < units.count {
+            let unit = units[index]
+            index += 1
+            if let open = quote {
+                if unit == open { quote = nil }
+            } else if quotes.contains(unit) {
+                quote = unit
+            } else if unit == greaterThan {
+                break
+            }
+        }
+    }
+    return ranges
 }
 
 /// A chapter file as a tree: strict XML after the pre-pass, then tidied HTML
@@ -274,7 +352,6 @@ private let verseTypes: Set<String> = ["poem", "verse", "song", "lyrics", "hymn"
 private let noteMarker = try! NSRegularExpression(
     pattern: "^\\s*[\\[(]?\\s*(\\d{1,4}|[*†‡§]+|[ivxlc]{1,6})\\s*[\\])]?\\s*$")
 private let sceneBreakText = try! NSRegularExpression(pattern: "^[\\s*·•#~—–\\-_.oO◊❧☙⁂✻✽❦]+$")
-private let verseClass = try! NSRegularExpression(pattern: "(?i)poem|verse|stanza|song|lyric|poetry|lines?-?group")
 private let noteClass = try! NSRegularExpression(
     pattern: "(?i)(^|[^a-z])(foot|end|side)-?notes?([^a-z]|$)|footnote-content")
 private let dropCapClass = try! NSRegularExpression(pattern: "(?i)drop|initial|first-?letter|big-?cap|lettrine")
@@ -290,38 +367,168 @@ func isSceneBreakText(_ text: String) -> Bool {
     return matches(sceneBreakText, trimmed)
 }
 
+/// The words of a class attribute, lower-cased: split at spaces, hyphens,
+/// underscores, digits, and where lower case turns to upper, so
+/// "poem-line2 stanzaFirst" is "poem", "line", "stanza", "first".
+func classWords(_ classes: String) -> [String] {
+    var words: [String] = []
+    var current = ""
+    var previousLower = false
+    for character in classes {
+        guard character.isLetter else {
+            if !current.isEmpty { words.append(current) }
+            current = ""
+            previousLower = false
+            continue
+        }
+        if character.isUppercase && previousLower {
+            words.append(current)
+            current = ""
+        }
+        current.append(character)
+        previousLower = character.isLowercase
+    }
+    if !current.isEmpty { words.append(current) }
+    return words.map { $0.lowercased() }
+}
+
+private let verseWords: Set<String> = [
+    "poem", "poems", "poetry", "verse", "verses", "stanza", "stanzas", "song", "songs", "lyric", "lyrics",
+    "linegroup", "linesgroup",
+]
+
+/// A class that names verse by one of its words — "poem", "stanza",
+/// "line-group" — and not by letters inside another word: "reversed" and
+/// "songbird" are not verse.
+func isVerseClass(_ classes: String) -> Bool {
+    let words = classWords(classes)
+    if words.contains(where: verseWords.contains) { return true }
+    return zip(words, words.dropFirst()).contains { verseWords.contains($0 + $1) }
+}
+
 /// Reads one chapter file into blocks, dropping everything §3.4 lists.
 ///
 /// `readLayoutTables` is the second pass: a table holding most of a file's
 /// text is page layout — PDF conversions set every page as one — and
 /// dropping it emptied *Gödel, Escher, Bach* entirely on the first probe run.
+///
+/// "Most of a file's text" is measured by reading the file again with its
+/// tables in, under the same rules, so text that is dropped either way — the
+/// head, scripts, notes, hidden text — does not count toward the tables.
 func chapterText(_ document: XMLDocument, readLayoutTables: Bool = false) -> ChapterText {
-    var x = ChapterText()
+    let first = ChapterReader(readLayoutTables: readLayoutTables).read(document)
+    guard !readLayoutTables, first.tablesDropped > 0 else { return first }
+    var layout = ChapterReader(readLayoutTables: true).read(document)
+    guard first.characters * 10 < layout.characters * 3 else { return first }
+    layout.layoutTables = true
+    return layout
+}
+
+/// The block being read: its lines, and where its characters came from.
+private struct BlockBuffer {
     var lines: [String] = [""]
     var kind: BookBlockKind = .paragraph
-    var inVerse = false
-    var blockCharacters = 0
-    var blockLinkCharacters = 0
-    var eatSpace = false
+    var characters = 0
+    var linkCharacters = 0
+    /// Characters inside an inline title: `<span epub:type="title">`.
+    var titleCharacters = 0
+    /// The same two counts line by line, so a title on the first lines of a
+    /// paragraph can be told from the prose under it.
+    var lineCharacters = [0]
+    var lineTitleCharacters = [0]
 
-    func flush() {
-        let cleaned = lines.map(collapseWhitespace).filter { !$0.isEmpty }
-        lines = [""]
-        let allLink = blockCharacters > 0 && blockLinkCharacters == blockCharacters
-        blockCharacters = 0
-        blockLinkCharacters = 0
-        defer { kind = .paragraph }
-        guard !cleaned.isEmpty else { return }
+    mutating func breakLine() {
+        lines.append("")
+        lineCharacters.append(0)
+        lineTitleCharacters.append(0)
+    }
+
+    /// How many of the leading non-empty lines are nothing but an inline
+    /// title: `<span epub:type="title">Chapter One</span><br/>It was…`.
+    func titleLines(_ cleaned: [(text: String, characters: Int, title: Int)]) -> Int {
+        cleaned.prefix { $0.characters > 0 && $0.title == $0.characters }.count
+    }
+
+    /// Nothing but a link: navigation.
+    var isAllLink: Bool { characters > 0 && linkCharacters == characters }
+    /// Nothing but an inline title: a heading.
+    var isAllTitle: Bool { characters > 0 && titleCharacters == characters }
+}
+
+/// One walk of one chapter file. `chapterText` is its only user.
+private final class ChapterReader {
+    private let readLayoutTables: Bool
+    private var x = ChapterText()
+    private var block = BlockBuffer()
+    private var inVerse = false
+    private var eatSpace = false
+
+    init(readLayoutTables: Bool) { self.readLayoutTables = readLayoutTables }
+
+    func read(_ document: XMLDocument) -> ChapterText {
+        if let root = document.rootElement() { walk(root, inLink: false, depth: 0, heading: false) }
+        flush()
+        return x
+    }
+
+    /// Adds text to the block being read, counting where it came from.
+    private func append(_ text: String, inLink: Bool, title: Bool) {
+        let last = block.lines.count - 1
+        block.lines[last] += text
+        let count = text.filter { !$0.isWhitespace }.count
+        x.characters += count
+        block.characters += count
+        block.lineCharacters[last] += count
+        if inLink {
+            x.linkCharacters += count
+            block.linkCharacters += count
+        }
+        if title {
+            block.titleCharacters += count
+            block.lineTitleCharacters[last] += count
+        }
+    }
+
+    /// Ends the block being read, under the context it was read in.
+    private func flush() {
+        let finished = block
+        block = BlockBuffer()
+        let lines = zip(finished.lines, zip(finished.lineCharacters, finished.lineTitleCharacters))
+            .map { (text: collapseWhitespace($0), characters: $1.0, title: $1.1) }
+            .filter { !$0.text.isEmpty }
+        guard !lines.isEmpty else { return }
         // A paragraph that is nothing but a link is navigation: "Contents",
         // "Start Reading", a note's way back.
-        if allLink && kind != .heading {
+        if finished.isAllLink && finished.kind != .heading {
             x.navigationParagraphs += 1
             return
         }
-        if kind == .heading {
-            let title = cleaned.joined(separator: " ")
-            if x.firstHeading.isEmpty { x.firstHeading = title }
-            x.blocks.append(.heading(title))
+        // A paragraph that is nothing but an inline title is the chapter's
+        // title: `<p><span epub:type="title">Chapter One</span></p>`.
+        if finished.kind == .heading || finished.isAllTitle {
+            addHeading(lines.map(\.text))
+            return
+        }
+        // A title on the paragraph's first lines, broken from the prose
+        // under it: the title is a heading, and the prose is still typed.
+        let titled = finished.titleLines(lines)
+        if titled > 0 {
+            addHeading(lines.prefix(titled).map(\.text))
+        }
+        addBody(lines.dropFirst(titled).map(\.text))
+    }
+
+    private func addHeading(_ lines: [String]) {
+        let title = lines.joined(separator: " ")
+        if x.firstHeading.isEmpty { x.firstHeading = title }
+        x.blocks.append(.heading(title))
+    }
+
+    /// A block's lines that are not a title, under the context they were
+    /// read in.
+    private func addBody(_ cleaned: [String]) {
+        if cleaned.isEmpty {
+            return
         } else if cleaned.count == 1, isSceneBreakText(cleaned[0]) {
             x.blocks.append(.sceneBreak)
         } else if inVerse {
@@ -334,7 +541,24 @@ func chapterText(_ document: XMLDocument, readLayoutTables: Bool = false) -> Cha
         }
     }
 
-    func walk(_ node: XMLNode, inLink: Bool, depth: Int, heading: Bool) {
+    /// Whether an element and everything in it is left out, counting it
+    /// under what it is.
+    private func isDropped(_ element: XMLElement, name: String, types: Set<String>, classes: String) -> Bool {
+        guard let drop = dropKind(element, name: name, types: types, classes: classes, readLayoutTables: readLayoutTables)
+        else { return false }
+        switch drop {
+        case .skipped: break
+        case .image: x.images += 1
+        case .table: x.tablesDropped += 1
+        case .noteMarker: x.noteMarkers += 1
+        case .noteBody: x.noteBodies += 1
+        case .pageBreak: x.pageBreaks += 1
+        case .hidden: x.hidden += 1
+        }
+        return true
+    }
+
+    private func walk(_ node: XMLNode, inLink: Bool, depth: Int, heading: Bool) {
         if node.kind == .text {
             var text = textOf(node)
             if eatSpace {
@@ -343,14 +567,7 @@ func chapterText(_ document: XMLDocument, readLayoutTables: Bool = false) -> Cha
                 if text.isEmpty { return }
                 eatSpace = false
             }
-            lines[lines.count - 1] += text
-            let count = text.filter { !$0.isWhitespace }.count
-            x.characters += count
-            blockCharacters += count
-            if inLink {
-                x.linkCharacters += count
-                blockLinkCharacters += count
-            }
+            append(text, inLink: inLink, title: heading)
             return
         }
         guard let element = node as? XMLElement else {
@@ -368,55 +585,21 @@ func chapterText(_ document: XMLDocument, readLayoutTables: Bool = false) -> Cha
         }
         let childDepth = name == "body" ? 1 : (depth >= 1 ? depth + 1 : depth)
 
-        if skippedElements.contains(name) || name == "nav" { return }
-        if name == "img" || name == "image" {
-            x.images += 1
-            return
-        }
-        if name == "table" && !readLayoutTables {
-            x.tablesDropped += 1
-            return
-        }
-        if !types.isDisjoint(with: noteMarkerTypes) {
-            x.noteMarkers += 1
-            return
-        }
-        // By type or role, and by class: converters often mark notes by class
-        // alone (`class="footnotes"`, `x13-BM-Endnotes`).
-        if !types.isDisjoint(with: noteBodyTypes) || matches(noteClass, classes) {
-            x.noteBodies += 1
-            return
-        }
-        if !types.isDisjoint(with: pageBreakTypes) {
-            x.pageBreaks += 1
-            return
-        }
-        if attribute(element, "hidden") != nil || attribute(element, "aria-hidden") == "true" {
-            x.hidden += 1
-            return
-        }
-        let id = (attribute(element, "id") ?? "").lowercased()
-        if id == "pg-header" || id == "pg-footer" || id == "pg-machine-header" { return }
-        if name == "sup", isNoteMarker(textOf(element)) {
-            x.noteMarkers += 1
-            return
-        }
-        if name == "a", (attribute(element, "href") ?? "").contains("#"), isNoteMarker(textOf(element)) {
-            x.noteMarkers += 1
-            return
-        }
+        if isDropped(element, name: name, types: types, classes: classes) { return }
         if name == "br" {
-            lines.append("")
+            block.breakLine()
             return
         }
+        // A link's text is link text whether the link is the drop cap's own
+        // element (`<a class="dropcap" href="x">Go</a>`) or holds it.
+        let linkHere = inLink || (name == "a" && attribute(element, "href") != nil)
         if matches(dropCapClass, classes), case let letters = textOf(element), !letters.isEmpty, letters.count <= 2,
             letters.allSatisfy(\.isLetter)
         {
             // Sources write `<span class="dropcap">T</span> his`, with the
-            // space after the span. It is the word's first letter.
-            lines[lines.count - 1] += letters
-            x.characters += letters.count
-            blockCharacters += letters.count
+            // space after the span. It is the word's first letter, and it
+            // counts like any other: inside a link, it is link text.
+            append(letters, inLink: linkHere, title: heading)
             x.dropCaps += 1
             eatSpace = true
             return
@@ -426,39 +609,110 @@ func chapterText(_ document: XMLDocument, readLayoutTables: Bool = false) -> Cha
             x.blocks.append(.sceneBreak)
             return
         }
-        let verse = !types.isDisjoint(with: verseTypes) || matches(verseClass, classes)
+        let isBlock = headingElements.contains(name) || blockElements.contains(name)
+        // What came before a block is ended under its own context, before a
+        // verse container can change it: prose above a poem stays prose.
+        //
+        // So does any element that turns verse on, block or not: an element
+        // this reader does not know, `<details class="poem">`, read the
+        // prose before it as verse.
         let wasVerse = inVerse
-        if verse { inVerse = true }
-        defer { inVerse = wasVerse }
+        let startsVerse = !inVerse && (!types.isDisjoint(with: verseTypes) || isVerseClass(classes))
+        if isBlock || startsVerse { flush() }
+        if startsVerse { inVerse = true }
+        defer {
+            // And verse read inside it ends as verse, before the context
+            // goes back to prose.
+            if startsVerse { flush() }
+            inVerse = wasVerse
+        }
         // A chapter's <header> or <hgroup> is title material: "Chapter 1"
-        // above the h1 is a label, not a sentence.
+        // above the h1 is a label, not a sentence. An inline title passes
+        // that on to its text, and a paragraph holding only it is a heading.
         let isHeading = heading || headingElements.contains(name) || name == "header" || name == "hgroup"
             || !types.isDisjoint(with: titleTypes)
-        if headingElements.contains(name) || blockElements.contains(name) {
-            flush()
-            if isHeading { kind = .heading }
+        if isBlock {
+            if isHeading { block.kind = .heading }
             for child in element.children ?? [] {
                 walk(child, inLink: inLink, depth: childDepth, heading: isHeading)
             }
-            if isHeading { kind = .heading }
+            if isHeading { block.kind = .heading }
             flush()
             return
         }
         for child in element.children ?? [] {
-            walk(child, inLink: inLink || (name == "a" && attribute(element, "href") != nil), depth: childDepth,
-                 heading: heading)
+            walk(child, inLink: linkHere, depth: childDepth, heading: isHeading)
         }
     }
+}
 
-    if let root = document.rootElement() { walk(root, inLink: false, depth: 0, heading: false) }
-    flush()
-    if !readLayoutTables && x.tablesDropped > 0 {
-        let total = document.rootElement().map(textOf)?.filter { !$0.isWhitespace }.count ?? 0
-        if total > 0 && x.characters * 10 < total * 3 {
-            var layout = chapterText(document, readLayoutTables: true)
-            layout.layoutTables = true
-            return layout
-        }
+/// A table that holds data rather than a page: one with a header cell, a
+/// header row or a caption, or a grid of several short cells to a row.
+///
+/// A PDF conversion's page table has none of these — a cell or two to a row,
+/// each holding a page or a column of text — so this never takes a page.
+/// Tables nested inside are judged when the reader reaches them.
+/// Why an element and everything in it is left out of a chapter's text.
+enum DropKind {
+    case skipped, image, table, noteMarker, noteBody, pageBreak, hidden
+}
+
+/// The reader's rules for what is left out, with no counting: the reader
+/// counts what it drops, and `isDataTable` measures only what would be kept.
+func dropKind(
+    _ element: XMLElement, name: String, types: Set<String>, classes: String, readLayoutTables: Bool
+) -> DropKind? {
+    if skippedElements.contains(name) || name == "nav" { return .skipped }
+    if name == "img" || name == "image" { return .image }
+    // A table that says it holds data is left out even where tables are
+    // layout: the fallback reads the page tables of a PDF conversion, not a
+    // timetable that sits among them.
+    if name == "table" && (!readLayoutTables || isDataTable(element)) { return .table }
+    if !types.isDisjoint(with: noteMarkerTypes) { return .noteMarker }
+    // By type or role, and by class: converters often mark notes by class
+    // alone (`class="footnotes"`, `x13-BM-Endnotes`).
+    if !types.isDisjoint(with: noteBodyTypes) || matches(noteClass, classes) { return .noteBody }
+    if !types.isDisjoint(with: pageBreakTypes) { return .pageBreak }
+    if attribute(element, "hidden") != nil || attribute(element, "aria-hidden") == "true" { return .hidden }
+    let id = (attribute(element, "id") ?? "").lowercased()
+    if id == "pg-header" || id == "pg-footer" || id == "pg-machine-header" { return .skipped }
+    if name == "sup", isNoteMarker(textOf(element)) { return .noteMarker }
+    if name == "a", (attribute(element, "href") ?? "").contains("#"), isNoteMarker(textOf(element)) {
+        return .noteMarker
     }
-    return x
+    return nil
+}
+
+/// The text of a node the reader would keep: hidden text, scripts and notes
+/// inside it are not counted.
+private func keptText(_ node: XMLNode) -> String {
+    if node.kind == .text { return textOf(node) }
+    if let element = node as? XMLElement,
+        dropKind(
+            element, name: localName(element), types: structuralTypes(element),
+            classes: attribute(element, "class") ?? "", readLayoutTables: true) != nil
+    {
+        return ""
+    }
+    return (node.children ?? []).map(keptText).joined()
+}
+
+func isDataTable(_ table: XMLElement) -> Bool {
+    var header = false
+    var rows = 0
+    var cells: [Int] = []
+    func visit(_ element: XMLElement) {
+        let name = localName(element)
+        if name == "table" && element !== table { return }
+        if name == "th" || name == "thead" || name == "caption" { header = true }
+        if name == "tr" { rows += 1 }
+        // Measured on what would be kept: a hidden note in every cell made
+        // a timetable's short cells look like a page's long ones.
+        if name == "td" || name == "th" { cells.append(keptText(element).filter { !$0.isWhitespace }.count) }
+        for case let child as XMLElement in element.children ?? [] { visit(child) }
+    }
+    visit(table)
+    if header { return true }
+    guard rows >= 2, cells.count >= rows * 2 else { return false }
+    return cells.reduce(0, +) / cells.count < 40
 }
