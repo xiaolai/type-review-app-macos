@@ -887,12 +887,13 @@ planner sees practice runs only: feeding it book data would change which
 lessons a child gets, and that wants real data first. Reading speed is not
 measured; typing speed is not reading speed.
 
-**Enter and Tab throw nothing away.** On Practice they start a new run; here
-they are wired to nothing, and a finished sentence moves on by itself. A space
+**Enter and Tab throw nothing away.** Not here and not on Practice, where
+Return starts the next run only from the results card and new text is ⌘N;
+here they are wired to nothing, and a finished sentence moves on by itself. A space
 typed out of habit before a sentence is ignored, since the space between
 sentences is never asked for. A half-typed sentence is not saved.
 
-**The voice is help the child asks for.** Hear Sentence (⌘R) and Hear Word
+**The voice is help the child asks for.** Hear Word (⌘R) and Hear Sentence
 (⇧⌘R) speak through the same `SpeechPlayer`, on demand. Read Each Sentence
 First, on the Sound pane, is off by default, because a sentence heard before
 every attempt turns reading into listening. Sentences heard are counted in the
@@ -903,9 +904,9 @@ keystroke is spoken on the next turn of the run loop, as Practice's is;
 Practice has the same two commands, behind the gate that decides whether
 finished words are spoken (`passageMayBeSpoken`): a quote, an Early passage or
 the user's own text can be heard, a generated drill or code cannot, and the
-menu items grey out. Its Hear Sentence reads the sentence at the cursor
-(`sentence(in:atUTF16Offset:)`), the next one when the cursor sits on the
-space between two. Play hides both. `--speechbench` checks each is heard to
+menu items grey out. There the first is Hear Passage and reads the whole
+passage, which is the unit being typed, as the sentence is here. Play hides
+both. `--speechbench` checks each is heard to
 begin on a quote and that a drill offers neither.
 
 **The starter shelf** is two public-domain books, pre-split by `make shelf`

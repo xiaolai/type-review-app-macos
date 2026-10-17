@@ -11,18 +11,17 @@ final class ResultsView: NSView {
     private let headline = NSTextField(labelWithString: "")
     private let detail = NSTextField(labelWithString: "")
     private let weakest = NSTextField(labelWithString: "")
-    private let hint = NSTextField(labelWithString: "⏎ next run · ⇥ new text")
+    private let hint = NSTextField(labelWithString: "⏎ next run · ⌘N new text")
     private var series: [Double] = []
-    /// What ⏎ and ⇥ do while the card is up — the two the hint names.
+    /// What ⏎ does while the card is up. ⌘N is the menu's.
     var onConfirm: (() -> Void)?
-    var onNewText: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
     /// The card takes the keys while it shows, because the typing surface
     /// cannot: it is hidden, and AppKit hands a hidden first responder's place
     /// to the window, which does nothing with Return. So the hint offered ⏎
-    /// and ⇥ and neither did anything.
+    /// and it did nothing.
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
@@ -32,7 +31,6 @@ final class ResultsView: NSView {
     override func doCommand(by selector: Selector) {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)): onConfirm?()
-        case #selector(NSResponder.insertTab(_:)): onNewText?()
         default: break
         }
     }

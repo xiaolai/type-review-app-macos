@@ -350,42 +350,6 @@ public func splitIntoSentences(_ blocks: [BookBlock]) -> SentenceSplit {
     return split
 }
 
-/// The sentence at a UTF-16 offset in a passage, for Hear Sentence on
-/// Practice, where a passage can hold several: the first sentence that has
-/// not ended before the offset. On the space after a full stop that is the
-/// next sentence, the one about to be typed; past the end it is the last, so
-/// a finished passage still has one to hear. Nil for a passage with nothing
-/// but whitespace in it.
-///
-/// `NLTokenizer`'s own boundaries, without the merges a book gets: those exist
-/// for fiction's dialogue tags and line-end titles, and a practice passage is
-/// a quote or a paragraph short enough that one wrong split costs one shorter
-/// read.
-public func sentence(in text: String, atUTF16Offset offset: Int) -> String? {
-    let tokenizer = NLTokenizer(unit: .sentence)
-    tokenizer.string = text
-    var last: Substring?
-    var found: Substring?
-    tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
-        // Trimmed by hand rather than with `trimmingCharacters`, because what
-        // is compared is where the sentence's last visible character sits.
-        var end = range.upperBound
-        while end > range.lowerBound, text[text.index(before: end)].isWhitespace {
-            end = text.index(before: end)
-        }
-        var start = range.lowerBound
-        while start < end, text[start].isWhitespace { start = text.index(after: start) }
-        guard start < end else { return true }
-        last = text[start..<end]
-        if end.utf16Offset(in: text) > offset {
-            found = text[start..<end]
-            return false
-        }
-        return true
-    }
-    return (found ?? last).map(String.init)
-}
-
 /// The word at a UTF-16 offset in a sentence, for Speak Word: the run of
 /// letters, digits and apostrophes the offset is in. Between words it is the
 /// word that follows, and after the last word the last one. Nil for a

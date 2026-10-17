@@ -141,6 +141,8 @@ extension AppDelegate {
         case .book: newTextMenuItem?.title = "Books…"
         }
         for item in hearMenuItems { item.isHidden = screen == .play }
+        // Practice reads its whole passage, Book its sentence.
+        hearMenuItems.first?.title = screen == .practice ? "Hear Passage" : "Hear Sentence"
     }
 
     /// Three surfaces offer the keyboard toggle, so all three show its state.
@@ -244,13 +246,14 @@ extension AppDelegate {
             withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "n")
         newText.target = self
         // On Book and Practice, not Play. ⌘R as in "read"; nothing else in the
-        // app uses it, and ⇧ narrows it from the sentence to the word.
+        // app uses it. The word gets the plain chord, being the smaller thing
+        // asked for more often, and ⇧ widens it to the sentence.
         let speakSentence = practiceMenu.addItem(
             withTitle: "Hear Sentence", action: #selector(speakSentence(_:)), keyEquivalent: "r")
+        speakSentence.keyEquivalentModifierMask = [.command, .shift]
         speakSentence.target = self
         let speakWord = practiceMenu.addItem(
             withTitle: "Hear Word", action: #selector(speakWord(_:)), keyEquivalent: "r")
-        speakWord.keyEquivalentModifierMask = [.command, .shift]
         speakWord.target = self
         hearMenuItems = [speakSentence, speakWord]
         practiceItem.submenu = practiceMenu

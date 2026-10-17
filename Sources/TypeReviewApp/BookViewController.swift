@@ -33,7 +33,7 @@ final class BookViewController: NSViewController {
     private let hintLabel = NSTextField(labelWithString: "")
 
     private enum Hint {
-        static let typing = "⌘R hear the sentence · ⇧⌘R hear the word"
+        static let typing = "⌘R hear the word · ⇧⌘R hear the sentence"
     }
 
     /// The shelf. Nil when its folder could not be opened, which the screen

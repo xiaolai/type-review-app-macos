@@ -159,7 +159,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSToolbarItemVal
         case Self.newText:
             return button(
                 identifier, label: "New Text", symbol: "shuffle",
-                tip: "Fresh passage (⇥)", action: #selector(newTextPressed))
+                tip: "Fresh passage (⌘N)", action: #selector(newTextPressed))
         case Self.screenSwitch:
             return makeScreenSwitchItem()
         case Self.game:
@@ -175,7 +175,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSToolbarItemVal
         case Self.speakSentence:
             return button(
                 identifier, label: "Hear Sentence", symbol: "speaker.wave.2",
-                tip: "Read the sentence aloud (⌘R)", action: #selector(speakSentencePressed))
+                tip: "Read the sentence aloud (⇧⌘R)", action: #selector(speakSentencePressed))
         case Self.keyboard:
             return makeKeyboardItem()
         case Self.library:

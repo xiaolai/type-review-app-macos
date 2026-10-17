@@ -241,6 +241,7 @@ final class SpeechPlayer: NSObject {
     private var heldWord: String?
 
     private func hand(_ utterance: SerialUtterance, as kind: Kind) {
+        if kind == .sentence { lastSentence = utterance.speechString }
         inFlight.append((utterance.serial, kind))
         kinds[utterance.serial] = kind
         synthesizer.speak(utterance)
@@ -288,6 +289,9 @@ final class SpeechPlayer: NSObject {
     /// Sentences handed to the synthesizer, for `--speechbench`, as
     /// `wordsSpoken` is for words.
     private(set) var sentencesSpoken = 0
+    /// The text of the last sentence handed over, so `--speechbench` can see
+    /// what was read and not only that something was.
+    private(set) var lastSentence: String?
 
     /// Silences everything. Safe to call when nothing is speaking.
     func stop() {

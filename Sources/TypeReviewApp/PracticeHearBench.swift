@@ -2,12 +2,12 @@ import AppKit
 import TypeReviewKit
 
 extension Diagnostics {
-    /// How long Hear Sentence or Hear Word may take to begin before the bench
+    /// How long Hear Passage or Hear Word may take to begin before the bench
     /// calls it silent. The synthesizer is already built by the rounds.
     fileprivate static let hearStartSeconds: Double = 8
 
-    /// Practice ▸ Hear Sentence and Hear Word, for `--speechbench`: on a quote
-    /// each is heard to begin, the word cutting off the sentence; on a
+    /// Practice ▸ Hear Passage and Hear Word, for `--speechbench`: on a quote
+    /// each is heard to begin, the word cutting off the passage; on a
     /// generated drill neither is offered and neither says anything. First, a
     /// burst of finished words leaves no backlog.
     ///
@@ -50,16 +50,24 @@ extension Diagnostics {
         practice.startFreshRun()
         DispatchQueue.main.async {
             guard practice.passageIsSpeakable, practice.canHear else {
-                return fail("a Quotes passage was not offered to Hear Sentence")
+                return fail("a Quotes passage was not offered to Hear Passage")
+            }
+            guard menuItems(#selector(AppDelegate.speakSentence(_:))).first?.title == "Hear Passage" else {
+                return fail("on Practice the first of the two is not titled Hear Passage")
             }
             guard hearMenusOffered() == true else {
-                return fail("Practice ▸ Hear Sentence or Hear Word is missing, hidden or greyed out on a quote")
+                return fail("Practice ▸ Hear Passage or Hear Word is missing, hidden or greyed out on a quote")
             }
             checkNoBacklog(practice, fail: fail) {
             let sentencesBefore = practice.spokenSentenceCount
-            awaitStart(of: "Hear Sentence", { practice.hearSentence() }) {
+            awaitStart(of: "Hear Passage", { practice.hearSentence() }) {
                 guard practice.spokenSentenceCount == sentencesBefore + 1 else {
-                    return fail("Hear Sentence handed over \(practice.spokenSentenceCount - sentencesBefore) sentences")
+                    return fail("Hear Passage handed over \(practice.spokenSentenceCount - sentencesBefore) passages")
+                }
+                // The whole passage, not the sentence at the cursor: that read
+                // only the last sentence once a run was over.
+                guard practice.lastSentenceHeard == practice.currentPassage else {
+                    return fail("Hear Passage read part of the passage, not all of it")
                 }
                 let wordsBefore = practice.spokenWordCount
                 // Asked while the sentence is still being read, and given a
@@ -107,7 +115,7 @@ extension Diagnostics {
         poll()
     }
 
-    /// Whether Hear Sentence and Hear Word are both shown and enabled, both
+    /// Whether Hear Passage and Hear Word are both shown and enabled, both
     /// greyed out, or neither — nil for a mixed or missing pair, which cannot
     /// pass for either.
     private static func hearMenusOffered() -> Bool? {
@@ -134,14 +142,14 @@ extension Diagnostics {
         DispatchQueue.main.async {
             let (sentences, words) = (practice.spokenSentenceCount, practice.spokenWordCount)
             guard !practice.canHear, hearMenusOffered() == false else {
-                return finish(.failure(CheckFailure(message: "a generated drill was offered to Hear Sentence")))
+                return finish(.failure(CheckFailure(message: "a generated drill was offered to Hear Passage")))
             }
             practice.hearSentence()
             practice.hearWord()
             guard practice.spokenSentenceCount == sentences, practice.spokenWordCount == words else {
                 return finish(.failure(CheckFailure(message: "asked anyway, a generated drill was read aloud")))
             }
-            finish(.success("a quote's sentence and word each heard to begin; a drill offered neither"))
+            finish(.success("a quote's whole passage and a word each heard to begin; a drill offered neither"))
         }
     }
 }
