@@ -892,7 +892,7 @@ they are wired to nothing, and a finished sentence moves on by itself. A space
 typed out of habit before a sentence is ignored, since the space between
 sentences is never asked for. A half-typed sentence is not saved.
 
-**The voice is help the child asks for.** Hear Sentence (⌘R) and Hear Word
+**The voice is help the child asks for.** Hear Word (⌘R) and Hear Sentence
 (⇧⌘R) speak through the same `SpeechPlayer`, on demand. Read Each Sentence
 First, on the Sound pane, is off by default, because a sentence heard before
 every attempt turns reading into listening. Sentences heard are counted in the

@@ -175,7 +175,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSToolbarItemVal
         case Self.speakSentence:
             return button(
                 identifier, label: "Hear Sentence", symbol: "speaker.wave.2",
-                tip: "Read the sentence aloud (⌘R)", action: #selector(speakSentencePressed))
+                tip: "Read the sentence aloud (⇧⌘R)", action: #selector(speakSentencePressed))
         case Self.keyboard:
             return makeKeyboardItem()
         case Self.library:
