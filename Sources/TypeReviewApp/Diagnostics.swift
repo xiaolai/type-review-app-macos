@@ -1956,6 +1956,28 @@ enum Diagnostics {
                     print("  recorded head:    \(String(recorded.text.prefix(50)).debugDescription)")
                     exit(1)
                 }
+                // The card's hint offers ⏎ for the next run. Return is sent
+                // the way AppKit delivers it, through the window to its first
+                // responder; called directly, a card that never had focus
+                // would pass. It had none: hiding the typing surface handed
+                // focus to the window, and Return did nothing.
+                guard let window = practice.view.window, practice.isShowingResults,
+                    window.firstResponder === practice.focusView
+                else {
+                    print("SELFTEST FAIL: the results card is not what takes the keys after a run")
+                    exit(1)
+                }
+                if let enter = NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, characters: "\r",
+                    charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)
+                {
+                    window.sendEvent(enter)
+                }
+                guard !practice.isShowingResults, window.firstResponder === practice.focusView else {
+                    print("SELFTEST FAIL: Return on the results card did not start the next run")
+                    exit(1)
+                }
                 // Play, then Book, each after Practice has recorded its run,
                 // and each must leave the profile on disk byte for byte as it
                 // was — the file, not a decoding of it, so a rewrite that

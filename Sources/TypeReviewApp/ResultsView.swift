@@ -13,8 +13,33 @@ final class ResultsView: NSView {
     private let weakest = NSTextField(labelWithString: "")
     private let hint = NSTextField(labelWithString: "⏎ next run · ⇥ new text")
     private var series: [Double] = []
+    /// What ⏎ and ⇥ do while the card is up — the two the hint names.
+    var onConfirm: (() -> Void)?
+    var onNewText: (() -> Void)?
 
     override var isFlipped: Bool { true }
+
+    /// The card takes the keys while it shows, because the typing surface
+    /// cannot: it is hidden, and AppKit hands a hidden first responder's place
+    /// to the window, which does nothing with Return. So the hint offered ⏎
+    /// and ⇥ and neither did anything.
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        interpretKeyEvents([event])
+    }
+
+    override func doCommand(by selector: Selector) {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)): onConfirm?()
+        case #selector(NSResponder.insertTab(_:)): onNewText?()
+        default: break
+        }
+    }
+
+    /// Letters typed at the card are not the next run's first keystrokes, and
+    /// not a reason to beep either.
+    override func insertText(_ insertString: Any) {}
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
