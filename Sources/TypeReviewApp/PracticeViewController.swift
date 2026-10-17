@@ -388,6 +388,8 @@ final class PracticeViewController: NSViewController {
     /// Sentences handed to the synthesizer, by Hear Sentence. For the same
     /// bench, which checks that the menu reaches it.
     var spokenSentenceCount: Int { speech.sentencesSpoken }
+    /// What Hear Passage last handed over, for the same bench.
+    var lastSentenceHeard: String? { speech.lastSentence }
     /// Whether anything is speaking or waiting to, for the same bench.
     var isSpeechBusy: Bool { speech.isBusy }
 
@@ -427,17 +429,18 @@ final class PracticeViewController: NSViewController {
         speech.speak(word: word)
     }
 
-    /// Practice ▸ Hear Sentence: the sentence at the cursor, read aloud.
+    /// Practice ▸ Hear Passage: the whole passage, read aloud. The passage
+    /// is what is being typed here — a quote, an Early passage, a page of the
+    /// user's own — as the sentence is on Book. It read only the sentence at
+    /// the cursor at first, which after a run was just the last one.
     ///
     /// Behind the gate that decides whether finished words are spoken, and
     /// for the same reason: a generated drill is not words and code read
     /// aloud is noise, so neither is offered. Not behind the Speak words
     /// setting, which is about speech nobody asked for; this is asked for.
     func hearSentence() {
-        guard canHear, let typing = lastTyping,
-            let text = sentence(in: typing.expected, atUTF16Offset: typing.pos)
-        else { return }
-        speech.speak(sentence: text)
+        guard canHear, let typing = lastTyping else { return }
+        speech.speak(sentence: typing.expected)
     }
 
     /// Practice ▸ Hear Word: the word at the cursor.

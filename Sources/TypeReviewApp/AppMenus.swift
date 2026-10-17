@@ -141,6 +141,8 @@ extension AppDelegate {
         case .book: newTextMenuItem?.title = "Books…"
         }
         for item in hearMenuItems { item.isHidden = screen == .play }
+        // Practice reads its whole passage, Book its sentence.
+        hearMenuItems.first?.title = screen == .practice ? "Hear Passage" : "Hear Sentence"
     }
 
     /// Three surfaces offer the keyboard toggle, so all three show its state.

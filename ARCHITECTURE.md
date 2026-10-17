@@ -904,9 +904,9 @@ keystroke is spoken on the next turn of the run loop, as Practice's is;
 Practice has the same two commands, behind the gate that decides whether
 finished words are spoken (`passageMayBeSpoken`): a quote, an Early passage or
 the user's own text can be heard, a generated drill or code cannot, and the
-menu items grey out. Its Hear Sentence reads the sentence at the cursor
-(`sentence(in:atUTF16Offset:)`), the next one when the cursor sits on the
-space between two. Play hides both. `--speechbench` checks each is heard to
+menu items grey out. There the first is Hear Passage and reads the whole
+passage, which is the unit being typed, as the sentence is here. Play hides
+both. `--speechbench` checks each is heard to
 begin on a quote and that a drill offers neither.
 
 **The starter shelf** is two public-domain books, pre-split by `make shelf`
