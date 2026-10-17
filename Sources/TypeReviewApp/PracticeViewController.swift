@@ -379,6 +379,11 @@ final class PracticeViewController: NSViewController {
     /// than happened: a word handed over while a passage is being read is
     /// dropped, and a count kept at the call site would still have counted it.
     var spokenWordCount: Int { speech.wordsSpoken }
+    /// Sentences handed to the synthesizer, by Hear Sentence. For the same
+    /// bench, which checks that the menu reaches it.
+    var spokenSentenceCount: Int { speech.sentencesSpoken }
+    /// Whether anything is speaking or waiting to, for the same bench.
+    var isSpeechBusy: Bool { speech.isBusy }
 
     /// Words this screen *offered* the player, counted before the hop.
     ///
@@ -415,6 +420,30 @@ final class PracticeViewController: NSViewController {
     func speakWord(_ word: String) {
         speech.speak(word: word)
     }
+
+    /// Practice ▸ Hear Sentence: the sentence at the cursor, read aloud.
+    ///
+    /// Behind the gate that decides whether finished words are spoken, and
+    /// for the same reason: a generated drill is not words and code read
+    /// aloud is noise, so neither is offered. Not behind the Speak words
+    /// setting, which is about speech nobody asked for; this is asked for.
+    func hearSentence() {
+        guard canHear, let typing = lastTyping,
+            let text = sentence(in: typing.expected, atUTF16Offset: typing.pos)
+        else { return }
+        speech.speak(sentence: text)
+    }
+
+    /// Practice ▸ Hear Word: the word at the cursor.
+    func hearWord() {
+        guard canHear, let typing = lastTyping,
+            let text = word(in: typing.expected, atUTF16Offset: typing.pos)
+        else { return }
+        speech.speak(word: text, now: true)
+    }
+
+    /// Whether Hear Sentence and Hear Word have prose to read. The menu asks.
+    var canHear: Bool { passageMaySpeak && lastTyping != nil }
 
     /// Says which voice is in effect, in that voice.
     func previewSpeech() {

@@ -33,8 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The menu holding ⌘N, whose title and item follow the screen.
     var screenCommandsMenu: NSMenu?
     var newTextMenuItem: NSMenuItem?
-    /// Hear Sentence and Hear Word, shown only while Book is.
-    var bookMenuItems: [NSMenuItem] = []
+    /// Hear Sentence and Hear Word, hidden while Play shows: nothing on it
+    /// stays still long enough to be read.
+    var hearMenuItems: [NSMenuItem] = []
     private var preferencesObserver: NSObjectProtocol?
     private var windowCloseObserver: NSObjectProtocol?
     private var fullScreenExitObserver: NSObjectProtocol?
@@ -604,11 +605,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Book ▸ Hear Sentence.
-    @objc func speakSentence(_ sender: Any?) { book?.speakSentence() }
+    /// Hear Sentence, on Book and on Practice.
+    @objc func speakSentence(_ sender: Any?) {
+        switch screens?.current {
+        case .book: book?.speakSentence()
+        case .practice: practice?.hearSentence()
+        case .play, nil: break
+        }
+    }
 
-    /// Book ▸ Hear Word.
-    @objc func speakWord(_ sender: Any?) { book?.speakWord() }
+    /// Hear Word, on Book and on Practice.
+    @objc func speakWord(_ sender: Any?) {
+        switch screens?.current {
+        case .book: book?.speakWord()
+        case .practice: practice?.hearWord()
+        case .play, nil: break
+        }
+    }
 
     /// The Books sheet: the shelf, with Continue, Import… and Remove. On the
     /// main window, over the Book screen, which it shows first.

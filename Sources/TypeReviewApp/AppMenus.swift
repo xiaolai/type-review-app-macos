@@ -140,7 +140,7 @@ extension AppDelegate {
         case .play: newTextMenuItem?.title = "New Game"
         case .book: newTextMenuItem?.title = "Books…"
         }
-        for item in bookMenuItems { item.isHidden = screen != .book }
+        for item in hearMenuItems { item.isHidden = screen == .play }
     }
 
     /// Three surfaces offer the keyboard toggle, so all three show its state.
@@ -243,8 +243,8 @@ extension AppDelegate {
         let newText = practiceMenu.addItem(
             withTitle: "New Text", action: #selector(newText(_:)), keyEquivalent: "n")
         newText.target = self
-        // Book's own two, shown only on Book. ⌘R as in "read"; nothing else in
-        // the app uses it, and ⇧ narrows it from the sentence to the word.
+        // On Book and Practice, not Play. ⌘R as in "read"; nothing else in the
+        // app uses it, and ⇧ narrows it from the sentence to the word.
         let speakSentence = practiceMenu.addItem(
             withTitle: "Hear Sentence", action: #selector(speakSentence(_:)), keyEquivalent: "r")
         speakSentence.target = self
@@ -252,7 +252,7 @@ extension AppDelegate {
             withTitle: "Hear Word", action: #selector(speakWord(_:)), keyEquivalent: "r")
         speakWord.keyEquivalentModifierMask = [.command, .shift]
         speakWord.target = self
-        bookMenuItems = [speakSentence, speakWord]
+        hearMenuItems = [speakSentence, speakWord]
         practiceItem.submenu = practiceMenu
         root.addItem(practiceItem)
         // Renamed with the screen: Practice ▸ New Text, or Play ▸ New Game.
@@ -398,7 +398,12 @@ extension AppDelegate: NSMenuItemValidation {
         // screen nobody can see.
         if menuItem.action == #selector(chooseSource(_:)) { return screens?.current == .practice }
         if menuItem.action == #selector(speakSentence(_:)) || menuItem.action == #selector(speakWord(_:)) {
-            return screens?.current == .book && book?.canSpeak == true
+            switch screens?.current {
+            case .book: return book?.canSpeak == true
+            // Prose only, as for finished words: a drill or code has nothing to say.
+            case .practice: return practice?.canHear == true
+            case .play, nil: return false
+            }
         }
         return true
     }

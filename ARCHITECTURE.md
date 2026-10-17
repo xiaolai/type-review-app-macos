@@ -900,6 +900,14 @@ reading log so a parent can see which is happening. Speech that follows a
 keystroke is spoken on the next turn of the run loop, as Practice's is;
 `--speechbench` checks that typing a sentence speaks nothing on its stack.
 
+Practice has the same two commands, behind the gate that decides whether
+finished words are spoken (`passageMayBeSpoken`): a quote, an Early passage or
+the user's own text can be heard, a generated drill or code cannot, and the
+menu items grey out. Its Hear Sentence reads the sentence at the cursor
+(`sentence(in:atUTF16Offset:)`), the next one when the cursor sits on the
+space between two. Play hides both. `--speechbench` checks each is heard to
+begin on a quote and that a drill offers neither.
+
 **The starter shelf** is two public-domain books, pre-split by `make shelf`
 into `Resources/shelf/` with `index.json` naming each one's source and date.
 `ShelfTextTests` is its gate. *Peter Pan* was left out deliberately: public

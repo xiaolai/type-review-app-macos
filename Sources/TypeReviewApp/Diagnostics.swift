@@ -254,13 +254,17 @@ enum Diagnostics {
                         // The Book screen's sentences, after the words, so
                         // nothing it says lands on the clipping measurement.
                         checkSentenceSpeech { sentence in
-                            restore()
-                            report(
-                                state: state, clip: clip,
-                                utterances: roundUtterances,
-                                runsRecorded: (practice.history.map(\.index).max() ?? -1)
-                                    - indexBefore,
-                                sentence: sentence)
+                            // Practice's Hear Sentence and Hear Word last,
+                            // while the bench's channel is still in place.
+                            checkPracticeHearing(practice) { hearing in
+                                restore()
+                                report(
+                                    state: state, clip: clip,
+                                    utterances: roundUtterances,
+                                    runsRecorded: (practice.history.map(\.index).max() ?? -1)
+                                        - indexBefore,
+                                    sentence: sentence, hearing: hearing)
+                            }
                         }
                     }
                 }
@@ -568,7 +572,8 @@ enum Diagnostics {
 
     private static func report(
         state: BenchState, clip: (audibleMs: Int, interruptedAfter: Double?)?,
-        utterances: Int, runsRecorded: Int, sentence: Result<String, CheckFailure>
+        utterances: Int, runsRecorded: Int, sentence: Result<String, CheckFailure>,
+        hearing: Result<String, CheckFailure>
     ) {
         let words = state.spokenWords
         let (silent, speaking) = (state.silent, state.speaking)
@@ -653,6 +658,13 @@ enum Diagnostics {
             print("SPEECHBENCH FAIL: Book: \(failure.message)")
             exit(1)
         }
+        let hearingLine: String
+        switch hearing {
+        case .success(let line): hearingLine = line
+        case .failure(let failure):
+            print("SPEECHBENCH FAIL: Practice: \(failure.message)")
+            exit(1)
+        }
 
         guard let clip else {
             print("SPEECHBENCH FAIL: the interrupted word never started speaking")
@@ -704,6 +716,7 @@ enum Diagnostics {
             "SPEECHBENCH clip: a word interrupted after \(interruptMs)ms still ran "
                 + "\(clip.audibleMs)ms — not cut off")
         print("SPEECHBENCH sentence: \(sentenceLine)")
+        print("SPEECHBENCH hear: \(hearingLine)")
         print(
             String(
                 format: "SPEECHBENCH OK: speech adds %.1fµs median, %.1fµs at p95, "
