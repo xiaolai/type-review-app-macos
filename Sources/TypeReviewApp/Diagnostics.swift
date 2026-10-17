@@ -971,6 +971,17 @@ enum Diagnostics {
     }
 
     /// A check that failed, and what it has to say.
+    /// A key pressed with nothing held, through the window to its first
+    /// responder, the way AppKit delivers it.
+    static func sendKey(_ keyCode: UInt16, _ characters: String, to window: NSWindow) {
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: window.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)
+        else { return }
+        window.sendEvent(event)
+    }
+
     struct CheckFailure: Error {
         let message: String
     }
@@ -1912,7 +1923,23 @@ enum Diagnostics {
             // app being right.
             let passageBefore = practice.currentPassageId
             let typeable = Array(expected.utf16).filter { $0 != 0x0A }
-            for unit in typeable {
+            // Part-way through, Return and Tab, as AppKit delivers them: a
+            // Code passage is where hands press Tab to indent and Return at a
+            // line's end, and either used to throw the run away.
+            let partWay = min(3, typeable.count - 1)
+            for unit in typeable.prefix(partWay) {
+                view.insertText(String(utf16CodeUnits: [unit], count: 1), replacementRange: NSRange())
+            }
+            let cursorBefore = practice.cursor
+            if let window = view.window {
+                sendKey(36, "\r", to: window)
+                sendKey(48, "\t", to: window)
+            }
+            guard practice.cursor == cursorBefore, practice.currentPassageId == passageBefore else {
+                print("SELFTEST FAIL: Return or Tab part-way through a run threw it away")
+                exit(1)
+            }
+            for unit in typeable.dropFirst(partWay) {
                 view.insertText(String(utf16CodeUnits: [unit], count: 1), replacementRange: NSRange())
             }
 
@@ -1967,13 +1994,13 @@ enum Diagnostics {
                     print("SELFTEST FAIL: the results card is not what takes the keys after a run")
                     exit(1)
                 }
-                if let enter = NSEvent.keyEvent(
-                    with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                    windowNumber: window.windowNumber, context: nil, characters: "\r",
-                    charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)
-                {
-                    window.sendEvent(enter)
+                // Tab names nothing on the card, and does nothing.
+                sendKey(48, "\t", to: window)
+                guard practice.isShowingResults else {
+                    print("SELFTEST FAIL: Tab on the results card started a run")
+                    exit(1)
                 }
+                sendKey(36, "\r", to: window)
                 guard !practice.isShowingResults, window.firstResponder === practice.focusView else {
                     print("SELFTEST FAIL: Return on the results card did not start the next run")
                     exit(1)

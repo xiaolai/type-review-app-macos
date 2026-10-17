@@ -887,8 +887,9 @@ planner sees practice runs only: feeding it book data would change which
 lessons a child gets, and that wants real data first. Reading speed is not
 measured; typing speed is not reading speed.
 
-**Enter and Tab throw nothing away.** On Practice they start a new run; here
-they are wired to nothing, and a finished sentence moves on by itself. A space
+**Enter and Tab throw nothing away.** Not here and not on Practice, where
+Return starts the next run only from the results card and new text is ⌘N;
+here they are wired to nothing, and a finished sentence moves on by itself. A space
 typed out of habit before a sentence is ignored, since the space between
 sentences is never asked for. A half-typed sentence is not saved.
 

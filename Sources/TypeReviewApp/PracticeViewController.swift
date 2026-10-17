@@ -13,11 +13,18 @@ final class PracticeViewController: NSViewController {
     /// anyone who wants it, and the accessibility description carries it for
     /// VoiceOver, so nothing is lost by not spelling it out.
     private let modeIcon = NSImageView()
-    /// The two shortcuts, written once. Three copies of this string drifted
-    /// into two different orderings.
+    /// The shortcuts, written once. Three copies of this string drifted into
+    /// two different orderings.
+    ///
+    /// Return only on the results card, ⌘N any time, and Tab nowhere. Both
+    /// keys used to start a fresh run mid-passage, and a Code passage is where
+    /// a programmer's hands press Tab to indent and Return at a line's end:
+    /// either threw the run away. Neither is ever typed — line breaks are
+    /// stepped over and every passage indents with spaces — so the only thing
+    /// they could do was that.
     private enum Hint {
-        static let practising = "⇥ new text · ⏎ next run"
-        static let finished = "⏎ next run · ⇥ new text"
+        static let practising = "⌘N new text"
+        static let finished = "⏎ next run · ⌘N new text"
     }
     /// The status bar's trailing half. The same label carries the attribution
     /// and any save error, so the credit for a passage sits on the same line
@@ -209,14 +216,11 @@ final class PracticeViewController: NSViewController {
         typingView.onCharacter = { [weak self] character in self?.type(character) }
         typingView.onCommitBegan = { [weak self] in self?.mistypeGate.beginCommit() }
         typingView.onBackspace = { [weak self] in try? self?.session?.backspace(); self?.refresh() }
-        typingView.onRestart = { [weak self] in self?.startFreshRun() }
         typingView.onKeyPressed = { [weak self] code in self?.keyboard?.setPressed(code) }
         typingView.onKeyStruck = { [weak self] code in self?.onKeyStruck?(code) }
         typingView.onKeyReleased = { [weak self] code in self?.onKeyReleased?(code) }
         applyTypingPreferences()
-        typingView.onConfirm = { [weak self] in self?.startFreshRun() }
         resultsView.onConfirm = { [weak self] in self?.startFreshRun() }
-        resultsView.onNewText = { [weak self] in self?.startFreshRun() }
         start()
     }
 
@@ -510,6 +514,8 @@ final class PracticeViewController: NSViewController {
 
     /// Whether the results card is up, for `--selftest`.
     var isShowingResults: Bool { hasFinished }
+    /// Where the typist has got to, for the same check.
+    var cursor: Int { lastTyping?.pos ?? -1 }
 
     /// The view that takes the keys when this screen is shown.
     var focusView: NSView { hasFinished ? resultsView : typingView }

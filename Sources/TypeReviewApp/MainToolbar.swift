@@ -159,7 +159,7 @@ final class MainToolbarController: NSObject, NSToolbarDelegate, NSToolbarItemVal
         case Self.newText:
             return button(
                 identifier, label: "New Text", symbol: "shuffle",
-                tip: "Fresh passage (⇥)", action: #selector(newTextPressed))
+                tip: "Fresh passage (⌘N)", action: #selector(newTextPressed))
         case Self.screenSwitch:
             return makeScreenSwitchItem()
         case Self.game:
