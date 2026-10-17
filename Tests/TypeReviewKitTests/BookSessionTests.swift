@@ -56,3 +56,33 @@ final class WordAtCursorTests: XCTestCase {
         XCTAssertEqual(word(in: "'dogs'' tails", atUTF16Offset: 6), "dogs", "a run of apostrophes")
     }
 }
+
+/// Hear Sentence's choice of sentence on Practice, where a passage can hold
+/// several.
+final class SentenceAtCursorTests: XCTestCase {
+    let passage = "The sun rose. It was cold. Nobody spoke."
+
+    func testTheSentenceBeingTyped() {
+        XCTAssertEqual(sentence(in: passage, atUTF16Offset: 0), "The sun rose.")
+        XCTAssertEqual(sentence(in: passage, atUTF16Offset: 12), "The sun rose.", "on its full stop")
+        XCTAssertEqual(sentence(in: passage, atUTF16Offset: 18), "It was cold.")
+        XCTAssertEqual(sentence(in: passage, atUTF16Offset: 30), "Nobody spoke.")
+    }
+
+    func testTheGapBelongsToTheSentenceAhead() {
+        XCTAssertEqual(
+            sentence(in: passage, atUTF16Offset: 13), "It was cold.",
+            "the space after a full stop is where the next sentence is about to be typed")
+    }
+
+    func testPastTheEndIsTheLast() {
+        XCTAssertEqual(sentence(in: passage, atUTF16Offset: passage.utf16.count), "Nobody spoke.")
+        XCTAssertEqual(sentence(in: passage, atUTF16Offset: 500), "Nobody spoke.")
+        XCTAssertEqual(sentence(in: "Be curious, not judgmental.", atUTF16Offset: 3), "Be curious, not judgmental.")
+    }
+
+    func testNothingToHear() {
+        XCTAssertNil(sentence(in: "", atUTF16Offset: 0))
+        XCTAssertNil(sentence(in: "   \n ", atUTF16Offset: 2))
+    }
+}
