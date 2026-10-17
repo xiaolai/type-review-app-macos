@@ -397,7 +397,7 @@ final class BookViewController: NSViewController {
     func speakWord() {
         guard let typing = lastTyping, let word = word(in: typing.expected, atUTF16Offset: typing.pos)
         else { return }
-        speech.speak(word: word)
+        speech.speak(word: word, now: true)
     }
 
     private func noteHeard() {

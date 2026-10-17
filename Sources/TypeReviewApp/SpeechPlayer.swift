@@ -11,19 +11,22 @@ import NaturalLanguage
 /// never from inside a keystroke — so `speak(word:)` is a string, an utterance
 /// and an enqueue.
 ///
-/// **A new word waits for the current one to finish, then replaces whatever
-/// was queued behind it.** The plan accepted clipping here — "the word I just
+/// **A new word waits for the current one to finish, and replaces any word
+/// already waiting.** The plan accepted clipping here — "the word I just
 /// finished", not completeness — and that was wrong, for a reason only using it
 /// shows: the part an immediate interrupt cuts is the *end* of the word, and in
 /// English the end of the word is the plural. `cats` came out as `cat`. A
 /// feature for a child learning to read cannot teach them the wrong word.
 ///
-/// `.word` rather than `.immediate` costs nothing and fixes it. Stopping at a
-/// word boundary lets the utterance in progress complete, and because every
-/// utterance here is one word, "the current word" and "the whole utterance" are
-/// the same thing. The queue is still flushed, so a third word replaces a
-/// second one that had not started — the backlog stays at one, and what you
-/// eventually hear is still the most recent word you finished.
+/// The wait is kept here, not in the synthesizer's queue. This used to stop
+/// at a word boundary and enqueue, on the understanding that the stop let the
+/// word finish and flushed the queue. Measured in October 2026 on a second
+/// Mac, at full volume, `stopSpeaking(at: .word)` does neither: it returns
+/// true and stops nothing, so a sentence plays to its end, and five words
+/// finished 120 ms apart were all read, one after another, over 5.7 s — a
+/// fast typist heard every word, further and further behind. `.immediate`
+/// does stop, within a millisecond, and cancels what was queued; it is used
+/// only for speech asked for by hand, which is wanted now.
 @MainActor
 final class SpeechPlayer: NSObject {
     /// The passage on screen and the voice for its language.
@@ -153,18 +156,23 @@ final class SpeechPlayer: NSObject {
     // MARK: - Speaking
 
     /// One finished word. The only method reached from the typing path.
-    func speak(word: String) {
+    ///
+    /// Spoken at once when nothing is, and otherwise held — at most one, the
+    /// newest — until what is speaking ends. Never a stop: see the note at the
+    /// top of the file. `now` is Hear Word, asked for by hand, which cuts off
+    /// whatever is speaking and drops whatever was held.
+    func speak(word: String, now: Bool = false) {
         // A no-op after the first word of a passage. Here as well as in
         // `prepare()` because the right voice matters more than the runloop
         // turn it saves: if preparation were ever missed, this is the
         // difference between a French quote read in French and one read in
         // whatever the machine defaults to, which nobody would report as a bug.
         resolveVoice()
-        // `.word`, not `.immediate`. See the note at the top of the file: an
-        // immediate stop cuts the end off the word being spoken, and the end of
-        // an English word is where its plural lives.
-        synthesizer.stopSpeaking(at: .word)
-        trimToSpeaking()
+        if now { interrupt() } else { forgetSettledIfIdle() }
+        guard inFlight.isEmpty else {
+            heldWord = word
+            return
+        }
         hand(utterance(word), as: .word)
         wordsSpoken += 1
     }
@@ -175,43 +183,36 @@ final class SpeechPlayer: NSObject {
     /// sentence arriving with Read Each Sentence First on.
     ///
     /// `interrupting: false` is a sentence read as it arrives. It waits for
-    /// the last word of the one before rather than cutting it off — any stop,
-    /// even at a word boundary, empties the synthesizer's queue, and the
-    /// finished word waiting there was never heard — but it is held here, not
-    /// queued there, and a newer one replaces it. Queued, a child typing
-    /// faster than the voice reads built a backlog of sentences still being
-    /// read long after they were typed. A sentence still being read when the
-    /// next arrives is stale, and stops at its next word boundary.
+    /// what is speaking — the last word of the one before, or the one before
+    /// still being read — rather than cutting it off, held here and not queued
+    /// there, and a newer one replaces it. Queued, a child typing faster than
+    /// the voice reads built a backlog of sentences still being read long
+    /// after they were typed.
     ///
-    /// Asked for by hand, the sentence is wanted now: whatever is speaking
-    /// stops at its next word boundary, and a held sentence is dropped.
+    /// Asked for by hand, the sentence is wanted now: whatever is speaking is
+    /// cut off, and whatever was held is dropped.
     func speak(sentence: String, interrupting: Bool = true) {
         resolveVoice()
-        if interrupting {
-            heldSentence = nil
-            synthesizer.stopSpeaking(at: .word)
-            trimToSpeaking()
-            hand(utterance(sentence), as: .sentence)
-            sentencesSpoken += 1
+        if interrupting { interrupt() } else { forgetSettledIfIdle() }
+        guard inFlight.isEmpty else {
+            heldSentence = sentence
             return
         }
-        if builtSynthesizer?.isSpeaking != true { (inFlight, kinds) = ([], [:]) }
-        guard !inFlight.isEmpty else {
-            // Older than this one, whatever was held: dropped, or it would be
-            // read after the sentence that replaced it.
-            heldSentence = nil
-            hand(utterance(sentence), as: .sentence)
-            sentencesSpoken += 1
-            return
-        }
-        // Stopped only when it is all there is. Anything queued behind it
-        // was queued by a call that stopped it already — a finished word —
-        // and stopping again would flush that word unheard.
-        if inFlight.count == 1, inFlight.first?.kind == .sentence {
-            synthesizer.stopSpeaking(at: .word)
-            trimToSpeaking()
-        }
-        heldSentence = sentence
+        // Older than this one, whatever was held: dropped, or it would be
+        // read after the sentence that replaced it.
+        heldSentence = nil
+        hand(utterance(sentence), as: .sentence)
+        sentencesSpoken += 1
+    }
+
+    /// Cuts off whatever is speaking and drops whatever was held, for speech
+    /// asked for by hand. `.immediate`, the one stop that stops: it cancels
+    /// what was queued too, and reports each.
+    private func interrupt() {
+        heldWord = nil
+        heldSentence = nil
+        builtSynthesizer?.stopSpeaking(at: .immediate)
+        inFlight = []
     }
 
     /// What has been handed to the synthesizer and not yet reported ended, in
@@ -235,6 +236,9 @@ final class SpeechPlayer: NSObject {
     private var highestStarted = 0
     /// The newest sentence waiting for what is in flight to end. At most one.
     private var heldSentence: String?
+    /// The newest finished word waiting likewise. At most one, and spoken
+    /// before a held sentence: it is the last word of the sentence before.
+    private var heldWord: String?
 
     private func hand(_ utterance: SerialUtterance, as kind: Kind) {
         inFlight.append((utterance.serial, kind))
@@ -242,30 +246,44 @@ final class SpeechPlayer: NSObject {
         synthesizer.speak(utterance)
     }
 
-    /// After a stop only the utterance being spoken can still end; the rest
-    /// of the queue is gone, and may never be reported — so one that had not
-    /// begun is not waited for either.
-    private func trimToSpeaking() {
-        inFlight = inFlight.first.map { $0.serial == startedSerial } == true ? Array(inFlight.prefix(1)) : []
+    /// An utterance ended. When nothing is left in flight, the held word is
+    /// spoken, or else the held sentence.
+    private func utteranceDone(_ serial: Int) {
+        // It and everything handed before it: the synthesizer speaks in the
+        // order it was handed, so nothing older can still be to come.
+        inFlight.removeAll { $0.serial <= serial }
+        kinds = kinds.filter { $0.key > serial }
+        if let started = startedSerial, started <= serial { startedSerial = nil }
+        forgetSettledIfIdle()
+        guard inFlight.isEmpty else { return }
+        if let word = heldWord {
+            heldWord = nil
+            hand(utterance(word), as: .word)
+            wordsSpoken += 1
+        } else if let sentence = heldSentence {
+            heldSentence = nil
+            hand(utterance(sentence), as: .sentence)
+            sentencesSpoken += 1
+        }
     }
 
-    /// An utterance ended. When nothing is left in flight, the held sentence
-    /// is spoken.
-    private func utteranceDone(_ serial: Int) {
-        inFlight.removeAll { $0.serial == serial }
-        kinds[serial] = nil
-        if startedSerial == serial { startedSerial = nil }
-        // The count is bookkeeping; the synthesizer is the truth. Idle, there
-        // is nothing to wait for, whatever the count says.
-        if builtSynthesizer?.isSpeaking != true { (inFlight, kinds) = ([], [:]) }
-        guard inFlight.isEmpty, let sentence = heldSentence else { return }
-        heldSentence = nil
-        hand(utterance(sentence), as: .sentence)
-        sentencesSpoken += 1
+    /// Idle by the synthesizer's account, what it has reported starting is
+    /// done, whatever the count says. Not what it has not started: measured,
+    /// `isSpeaking` reads false for up to 20 ms after an utterance is handed
+    /// over from silence, and for up to 384 ms behind an immediate stop, so a
+    /// fresh utterance looks exactly like a lost one. Clearing everything on
+    /// that answer wiped the record of a sentence asked for a moment after a
+    /// stop, and its start was then ignored as unknown — `--speechbench`
+    /// found it on Practice's Hear Sentence. Every start is reported, so an
+    /// unstarted utterance is waited for.
+    private func forgetSettledIfIdle() {
+        guard builtSynthesizer?.isSpeaking != true else { return }
+        inFlight.removeAll { $0.serial <= highestStarted }
+        kinds = kinds.filter { $0.key > highestStarted }
     }
 
     /// Whether anything is speaking or waiting to, for `--speechbench`.
-    var isBusy: Bool { !inFlight.isEmpty || heldSentence != nil }
+    var isBusy: Bool { !inFlight.isEmpty || heldSentence != nil || heldWord != nil }
 
     /// Sentences handed to the synthesizer, for `--speechbench`, as
     /// `wordsSpoken` is for words.
@@ -277,9 +295,7 @@ final class SpeechPlayer: NSObject {
         // construct a synthesizer on the way past just to ask it to be quiet,
         // which is exactly the work `prepare()` exists to keep off other
         // people's stacks — and `stop()` runs at the start of every run.
-        builtSynthesizer?.stopSpeaking(at: .immediate)
-        heldSentence = nil
-        trimToSpeaking()
+        interrupt()
     }
 
     /// Speech rides the app's existing sound volume, so one slider governs
@@ -334,9 +350,7 @@ final class SpeechPlayer: NSObject {
         // against what it last resolved, so the choice just made is picked up
         // here for free.
         resolveVoice()
-        synthesizer.stopSpeaking(at: .immediate)
-        heldSentence = nil
-        trimToSpeaking()
+        interrupt()
         hand(utterance(voice?.name ?? "Automatic"), as: .word)
     }
 
