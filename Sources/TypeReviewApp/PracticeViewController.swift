@@ -215,12 +215,14 @@ final class PracticeViewController: NSViewController {
         typingView.onKeyReleased = { [weak self] code in self?.onKeyReleased?(code) }
         applyTypingPreferences()
         typingView.onConfirm = { [weak self] in self?.startFreshRun() }
+        resultsView.onConfirm = { [weak self] in self?.startFreshRun() }
+        resultsView.onNewText = { [weak self] in self?.startFreshRun() }
         start()
     }
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        view.window?.makeFirstResponder(typingView)
+        view.window?.makeFirstResponder(focusView)
     }
 
     /// Shown whenever there is no more urgent message. A successful profile
@@ -506,8 +508,11 @@ final class PracticeViewController: NSViewController {
         return stats
     }
 
+    /// Whether the results card is up, for `--selftest`.
+    var isShowingResults: Bool { hasFinished }
+
     /// The view that takes the keys when this screen is shown.
-    var focusView: NSView { typingView }
+    var focusView: NSView { hasFinished ? resultsView : typingView }
 
     /// The lesson this profile's history calls for next, for Play: Letters
     /// drops the letters practice has unlocked. Read, never written back —
@@ -545,6 +550,7 @@ final class PracticeViewController: NSViewController {
         resultsView.show(result: result, history: session.profile.results)
         typingView.isHidden = true
         resultsView.isHidden = false
+        view.window?.makeFirstResponder(resultsView)
         hintLabel.stringValue = Hint.finished
         if let message = persist(session.profile) ?? libraryWarning {
             hintLabel.stringValue = message
