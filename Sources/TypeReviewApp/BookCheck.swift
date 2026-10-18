@@ -344,6 +344,11 @@ extension Diagnostics {
         guard book.view.window === window else {
             throw CheckFailure(message: "switching to Book did not put it in the window")
         }
+        guard book.passageHeight >= BookViewController.minimumPassageHeight - 0.5 else {
+            throw CheckFailure(
+                message: "the Book passage is \(book.passageHeight) points tall, "
+                    + "under its floor of \(BookViewController.minimumPassageHeight)")
+        }
         let items = window.toolbar?.items.map(\.itemIdentifier.rawValue) ?? []
         guard items == bookToolbar else {
             throw CheckFailure(message: "on Book the toolbar shows \(items)")

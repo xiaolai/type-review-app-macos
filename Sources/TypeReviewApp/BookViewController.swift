@@ -124,6 +124,25 @@ final class BookViewController: NSViewController {
         return NSFont(descriptor: base.fontDescriptor, size: max(12, base.pointSize * 0.72)) ?? base
     }
 
+    /// The least height the sentence being typed may have: two lines of the
+    /// typing font. The passage has no size of its own, and what it gets is
+    /// what is left between the two context labels, so without a floor
+    /// nothing says it may not be none — and a screenshot showed it none,
+    /// the sentence gone and the line after it sitting under the line before.
+    /// Not quite required, so that in a window too short for everything it is
+    /// the context lines that give way, never the sentence.
+    static var minimumPassageHeight: CGFloat {
+        let font = Theme.typingFont
+        return ((font.ascender - font.descender + font.leading) * 2).rounded(.up) + 8
+    }
+
+    private lazy var passageFloor: NSLayoutConstraint = {
+        let floor = typingView.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: Self.minimumPassageHeight)
+        floor.priority = NSLayoutConstraint.Priority(999)
+        return floor
+    }()
+
     private func install(status: NSStackView, in root: NSView) {
         placeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         let empty = NSStackView(views: [emptyLabel, emptyButton])
@@ -147,7 +166,8 @@ final class BookViewController: NSViewController {
             nextLabel.topAnchor.constraint(equalTo: typingView.bottomAnchor, constant: 10),
             nextLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             nextLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -inset),
-            nextLabel.bottomAnchor.constraint(lessThanOrEqualTo: status.topAnchor, constant: -16),
+            nextLabel.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -16),
+            passageFloor,
 
             empty.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             empty.centerYAnchor.constraint(equalTo: root.centerYAnchor, constant: -16),
@@ -497,6 +517,7 @@ final class BookViewController: NSViewController {
     var pageText: (previous: String, next: String, place: String) {
         (previousLabel.stringValue, nextLabel.stringValue, placeLabel.stringValue)
     }
+    var passageHeight: CGFloat { typingView.frame.height }
     var hint: String { hintLabel.stringValue }
     var isShowingEmpty: Bool { emptyView?.isHidden == false }
     /// Enter and Tab, as the typing surface hands them on.
