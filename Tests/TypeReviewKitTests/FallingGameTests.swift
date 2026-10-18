@@ -159,6 +159,25 @@ final class FallingGameTests: XCTestCase {
         advance(game) { game, _ in game.items.contains { !$0.landed } }
     }
 
+    /// One item on the floor holds the rest of the field still, so they do not
+    /// land beside it one by one; typing it lets them go on.
+    func testGentleRulesFreezeWhatIsStillFallingOnceSomethingHasLanded() throws {
+        let game = game(.words, gentle: true)
+        advance(game) { game, _ in game.items.contains { $0.landed } && game.items.contains { !$0.landed } }
+        let before = game.items
+        let paceBefore = game.pace
+        for _ in 0..<600 { _ = game.update(dt: 0.05) }
+        XCTAssertEqual(game.items, before)
+        XCTAssertEqual(game.pace, paceBefore)
+        // The floor item goes; the rest move again.
+        let landed = try XCTUnwrap(game.items.first { $0.landed })
+        for character in landed.chars { _ = game.type(character) }
+        XCTAssertFalse(game.items.contains { $0.landed })
+        let airborne = try XCTUnwrap(game.items.first)
+        _ = game.update(dt: 0.5)
+        XCTAssertGreaterThan(try XCTUnwrap(game.items.first { $0.id == airborne.id }).y, airborne.y)
+    }
+
     func testArcadeRulesTakeALifePerLandingAndEnd() {
         let game = game(.words, gentle: false)
         let events = advance(game, seconds: 300) { game, _ in game.isOver }

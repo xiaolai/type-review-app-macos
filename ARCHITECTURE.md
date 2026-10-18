@@ -785,7 +785,8 @@ The shortcuts are ⌥⌘1, ⌥⌘2 and ⌥⌘3 (Book) because every free ⌘-dig
 arrives through `update(dt:)`, keys through `type(_:)`, and every random choice
 draws from a seeded `Mulberry32`, so `FallingGameTests` replay games exactly.
 Gentle rules are the default — something that reaches the floor waits there,
-nothing new falls until it is typed, and the pace eases off. Keys are matched
+the rest of the field holds still until it is typed (so the others do not land
+beside it one by one, each easing the pace again), and the pace eases off. Keys are matched
 without case, unlike practice, because a child with Caps Lock on would otherwise
 miss every key and not know why.
 

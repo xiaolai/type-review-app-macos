@@ -78,7 +78,8 @@ public enum PlayEvent: Equatable, Sendable {
 public final class FallingGame {
     public let mode: PlayMode
     /// Gentle rules lose nothing: an item that reaches the floor waits there,
-    /// and nothing new falls until it is typed. Arcade rules take a life.
+    /// and everything else holds still — nothing new arrives and nothing
+    /// already falling moves — until it is typed. Arcade rules take a life.
     public let gentle: Bool
     /// One character's box at this mode's type size. The typing font is
     /// monospaced, so a text's width is its length times this.
@@ -167,6 +168,11 @@ public final class FallingGame {
 
     private var fallSpeed: Double { field.height / mode.fallSeconds * pace }
 
+    /// Under gentle rules, something waiting on the floor holds the rest of
+    /// the field still. Otherwise the others would land beside it one by one,
+    /// each slowing the pace again, and the wait would only grow.
+    private var held: Bool { gentle && items.contains { $0.landed } }
+
     /// How many may be falling at once.
     private var mostFalling: Int {
         switch mode {
@@ -192,7 +198,7 @@ public final class FallingGame {
         // Nothing on the field: the next arrival is a moment away at most.
         if items.isEmpty { spawnIn = min(spawnIn, 0.35) }
         guard spawnIn <= 0, holdFor <= 0, items.count < mostFalling,
-            !(gentle && items.contains { $0.landed })
+            !held
         else { return }
         spawn()
         spawnIn = arrivalInterval
@@ -213,7 +219,7 @@ public final class FallingGame {
         if spawnIn > 0 { soonest = spawnIn }
         if holdFor > 0 { soonest = min(soonest, holdFor) }
         let speed = fallSpeed
-        guard speed > 0 else { return soonest }
+        guard speed > 0, !held else { return soonest }
         for item in items where !item.landed {
             let toFloor = (floorLine(for: item) - item.y) / speed
             guard toFloor > 0 else { return 0 }
@@ -232,7 +238,10 @@ public final class FallingGame {
 
         var events: [PlayEvent] = []
         var lost: [Int] = []
-        for index in items.indices where !items[index].landed {
+        // Held at the start of the step: a landing ends the step it happens
+        // in, so the others have moved exactly as far as that moment.
+        let holding = held
+        for index in items.indices where !items[index].landed && !holding {
             items[index].y += speed * dt
             let floor = floorLine(for: items[index])
             // Within a billionth of a point: a step ends exactly when an item
