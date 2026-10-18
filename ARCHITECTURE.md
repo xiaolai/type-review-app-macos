@@ -831,6 +831,14 @@ A parent imports a novel and a child types it, one sentence at a time, over
 weeks. It is the third screen of the main window (⌥⌘3), for the reasons Play is
 a screen: one keyboard, one drawer, never wanted beside the others.
 
+**The page is the sentences and nothing else.** The two before the one being
+typed sit above it, the one after below, and where you are in the book is a
+readout in the status bar (chapter and percent, with the title, author and
+chapter name in its tooltip). A heading above the text made the first line of
+the story the second thing on the screen, which is why the status bar exists.
+The sentences before and after are both the pending grey, a size down; the
+position says which way the story goes.
+
 **Splitting happens once, at import, and is stored.** `NLTokenizer`'s output
 can change between macOS versions, and a stored place must not shift when it
 does. The pipeline is the Kit's (`Sources/TypeReviewKit/Book/`): a reader —

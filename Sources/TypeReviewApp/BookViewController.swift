@@ -7,6 +7,12 @@ import TypeReviewKit
 /// the two before it above, dimmed, and the one after it below — enough of the
 /// story on screen to read it as a story rather than as a list of lines.
 ///
+/// The page is the sentences and nothing else. Where you are in the book is a
+/// readout in the status bar, with the title and chapter name in its tooltip: a
+/// heading above the text made the first line of the story the second thing on
+/// the screen. The sentences around the one being typed are all the pending
+/// grey, a size down.
+///
 /// **Nothing here reaches the profile.** Each sentence is a `Session` run, and
 /// a session records every finished run into its own profile — so this one
 /// runs over a scratch profile that is never saved. What a sentence leaves
@@ -20,7 +26,6 @@ import TypeReviewKit
 /// nothing. A finished sentence moves on by itself.
 @MainActor
 final class BookViewController: NSViewController {
-    private let titleLabel = NSTextField(labelWithString: "")
     private let placeLabel = NSTextField(labelWithString: "")
     private let previousLabel = NSTextField(wrappingLabelWithString: "")
     private let typingView = TypingView()
@@ -90,11 +95,6 @@ final class BookViewController: NSViewController {
     override func loadView() {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 900, height: 520))
         root.wantsLayer = true
-        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        placeLabel.font = Theme.statFont
-        placeLabel.textColor = Theme.secondaryText
-        placeLabel.lineBreakMode = .byTruncatingTail
         for label in [previousLabel, nextLabel] {
             label.font = Self.contextFont
             label.textColor = Theme.pending
@@ -112,7 +112,7 @@ final class BookViewController: NSViewController {
         modeIcon.image = Theme.symbol("book", size: Theme.SymbolSize.statusBar, description: "Book")
         modeIcon.toolTip = "Book"
         let status = StatusBar.make(
-            readouts: [wpmLabel, accuracyLabel], mode: modeIcon, hint: hintLabel)
+            readouts: [wpmLabel, accuracyLabel, placeLabel], mode: modeIcon, hint: hintLabel)
         install(status: status, in: root)
         view = root
     }
@@ -125,27 +125,18 @@ final class BookViewController: NSViewController {
     }
 
     private func install(status: NSStackView, in root: NSView) {
-        let header = NSStackView(views: [titleLabel, placeLabel])
-        header.orientation = .horizontal
-        header.spacing = 10
-        header.alignment = .firstBaseline
         placeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let empty = NSStackView(views: [emptyLabel, emptyButton])
         empty.orientation = .vertical
         empty.spacing = 14
         empty.identifier = .init("bookEmpty")
-        for subview in [header, previousLabel, typingView, nextLabel, empty, status] as [NSView] {
+        for subview in [previousLabel, typingView, nextLabel, empty, status] as [NSView] {
             subview.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(subview)
         }
         let inset = PracticeWindowMetrics.horizontalInset
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
-            header.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -inset),
-
-            previousLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
+            previousLabel.topAnchor.constraint(equalTo: root.topAnchor, constant: 24),
             previousLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: inset),
             previousLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -inset),
 
@@ -254,8 +245,8 @@ final class BookViewController: NSViewController {
         session = nil
         emptyLabel.stringValue = message ?? "No book yet.\nImport a book, or start one from the shelf."
         setPageHidden(true)
-        titleLabel.stringValue = ""
         placeLabel.stringValue = ""
+        placeLabel.toolTip = nil
         hintLabel.stringValue = ""
     }
 
@@ -272,13 +263,13 @@ final class BookViewController: NSViewController {
         sentence = index
         heardThisSentence = false
         setPageHidden(false)
-        titleLabel.stringValue = book.author.isEmpty ? book.title : "\(book.title) · \(book.author)"
         let chapter = book.chapterIndex(ofSentence: index)
         let percent = Int((Double(index) / Double(max(1, book.sentences.count)) * 100).rounded(.down))
         let chapterTitle = book.chapters[chapter].title
-        placeLabel.stringValue =
-            (chapterTitle.isEmpty ? "" : "\(chapterTitle) · ")
-            + "chapter \(chapter + 1) of \(book.chapters.count) · \(percent)%"
+        placeLabel.stringValue = "chapter \(chapter + 1) of \(book.chapters.count) · \(percent)%"
+        placeLabel.toolTip =
+            [book.author.isEmpty ? book.title : "\(book.title) · \(book.author)", chapterTitle]
+            .filter { !$0.isEmpty }.joined(separator: "\n")
         previousLabel.stringValue = book.sentences[max(0, index - 2)..<min(index, book.sentences.count)]
             .joined(separator: " ")
         guard index < book.sentences.count else {
